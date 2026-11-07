@@ -87,6 +87,7 @@ struct RichEditorView: UIViewRepresentable {
     var onReference: (String) -> Void
     var onRequestLink: (String) -> Void
     var onAction: (String) -> Void
+    var openPreferencesOnLoad = false
 
     func makeCoordinator() -> Coordinator { Coordinator(parent: self) }
     func makeUIView(context: Context) -> WKWebView {
@@ -179,7 +180,10 @@ struct RichEditorView: UIViewRepresentable {
                 let noteURL = parent.noteID.flatMap { NoteLinks.shareURL(id: $0) }?.absoluteString ?? ""
                 let noteURLJSON = (try? JSONEncoder().encode(noteURL)).flatMap { String(data: $0, encoding: .utf8) } ?? "\"\""
                 let theme = parent.colorScheme == .dark ? "dark" : "light"
-                parent.bridge.webView?.evaluateJavaScript("window.doompileEditor.setDocument(\(json)); window.doompileEditor.setAttachments?.(\(attachmentsJSON)); window.doompileEditor.setNoteURL?.(\(noteURLJSON)); window.doompileEditor.setNotes?.(\(referencesJSON)); window.doompileEditor.setTheme?.('\(theme)'); window.doompileEditor.setTouchMode?.(true)") { [weak self] _, error in
+                let preferences = parent.openPreferencesOnLoad
+                    ? "; window.doompileEditor.setEditable(false); window.doompileEditor.openPreferences()"
+                    : ""
+                parent.bridge.webView?.evaluateJavaScript("window.doompileEditor.setDocument(\(json)); window.doompileEditor.setAttachments?.(\(attachmentsJSON)); window.doompileEditor.setNoteURL?.(\(noteURLJSON)); window.doompileEditor.setNotes?.(\(referencesJSON)); window.doompileEditor.setTheme?.('\(theme)'); window.doompileEditor.setTouchMode?.(true)\(preferences)") { [weak self] _, error in
                     guard error == nil else { if let error { Telemetry.shared.failure(.editorFailed, error) }; return }
                     self?.appliedTheme = theme
                     self?.parent.bridge.markReady()

@@ -83,12 +83,18 @@ def main():
             state = found['attributes']['processingState'] if found else 'WAITING_FOR_APPLE'
             print('App Store Connect '+number+': '+state, flush=True)
             if state == 'VALID':
-                break
+                detail = api.request('/v1/builds/'+found['id']+'/buildBetaDetail')
+                beta_state = detail['data']['attributes']['internalBuildState']
+                print('TestFlight '+number+': '+beta_state, flush=True)
+                if beta_state == 'IN_BETA_TESTING' or os.environ.get('GITHUB_EVENT_NAME') != 'push':
+                    break
+                if beta_state in ('MISSING_EXPORT_COMPLIANCE', 'PROCESSING_EXCEPTION', 'EXPIRED'):
+                    raise SystemExit('TestFlight cannot distribute build '+number+': '+beta_state)
             if state in ('FAILED','INVALID'):
                 raise SystemExit('Apple rejected build '+number)
             time.sleep(20)
         else:
-            raise SystemExit('Apple processing is still pending; check App Store Connect before announcing the release')
+            raise SystemExit('Timed out waiting for the build to be processed and available in TestFlight')
 
 if __name__ == '__main__':
     main()

@@ -101,17 +101,21 @@ test('shared formatting and block actions work inside the extension shadow root'
  await expect.poll(()=>page.evaluate(()=>testRoot.querySelector('.dp-composer').getAttribute('aria-busy'))).toBe('false');
  await page.evaluate(()=>{const e=testRoot.querySelector('.tiptap').editor;let selected;e.state.doc.descendants((node,pos)=>{if(node.isTextblock&&node.textContent==='Inline comment')selected={from:pos+1,to:pos+1+node.content.size};});e.commands.setTextSelection(selected);e.view.focus();});
  await expect.poll(()=>page.evaluate(()=>!!testRoot.querySelector('.selection-toolbar:not([hidden])'))).toBe(true);
- async function mouseClick(label){
-  const rect=await page.evaluate(label=>{const el=[...testRoot.querySelectorAll('button')].find(el=>(el.getAttribute('aria-label')||el.textContent)===label&&el.getClientRects().length);if(!el)throw Error('Missing control: '+label);const r=el.getBoundingClientRect();return{x:r.x+r.width/2,y:r.y+r.height/2};},label);
-  await page.mouse.click(rect.x,rect.y);
+ async function clickEditorControl(label){
+  // The clipper uses a closed shadow root. Resolve the control inside it so
+  // Playwright can wait for a stable hit target through the opening animation.
+  const control=await page.waitForFunction(label=>[...testRoot.querySelectorAll('button')].find(
+   button=>(button.getAttribute('aria-label')||button.textContent)===label&&button.getClientRects().length
+  ),label);
+  await control.asElement().click();
  }
- await mouseClick('Жирный');
+ await clickEditorControl('Жирный');
  expect(JSON.stringify(await page.evaluate(()=>testRich.getJSON()))).toContain('"type":"bold"');
- await mouseClick('Цвет текста и выделения');await mouseClick('Цвет текста: Красный');
+ await clickEditorControl('Цвет текста и выделения');await clickEditorControl('Цвет текста: Красный');
  await expect.poll(async()=>JSON.stringify(await page.evaluate(()=>testRich.getJSON()))).toContain('#c44f4f');
  const paragraph=await page.evaluate(()=>{const ps=testRoot.querySelectorAll('.tiptap > p');const r=ps[ps.length-1].getBoundingClientRect();return{x:r.x+25,y:r.y+r.height/2};});
  await page.mouse.click(paragraph.x,paragraph.y,{button:'right'});
  await expect.poll(()=>page.evaluate(()=>!!testRoot.querySelector('.block-context-menu:not([hidden])'))).toBe(true);
- await mouseClick('Дублировать блок');
+ await clickEditorControl('Дублировать блок');
  expect((await page.evaluate(()=>testRich.getText())).match(/Inline comment/g)).toHaveLength(2);
 });

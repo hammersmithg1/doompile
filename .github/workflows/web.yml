@@ -74,6 +74,7 @@ jobs:
     uses: ./.github/workflows/ios.yml
     with:
       upload_testflight: true
+      reuse_validation: true
       signing_mode: ${{ vars.DOOMPILE_IOS_SIGNING_MODE || 'automatic' }}
     secrets:
       DOOMPILE_CI_SETEC_URL: ${{ secrets.DOOMPILE_CI_SETEC_URL }}

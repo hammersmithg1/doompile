@@ -1174,10 +1174,9 @@ struct EditorCommandSettingsView: View {
     @StateObject private var bridge = RichEditorBridge()
     var body: some View {
         NavigationStack {
-            RichEditorView(document: $document, plainText: $text, height: $height, attachments: $attachments, notes: [], bridge: bridge, onReference: { _ in }, onRequestLink: { _ in }, onAction: { action in if action == "preferencesClosed" { dismiss() } })
+            RichEditorView(document: $document, plainText: $text, height: $height, attachments: $attachments, notes: [], bridge: bridge, onReference: { _ in }, onRequestLink: { _ in }, onAction: { action in if action == "preferencesClosed" { dismiss() } }, openPreferencesOnLoad: true)
                 .navigationTitle("Команды редактора").navigationBarTitleDisplayMode(.inline)
                 .toolbar { ToolbarItem(placement: .confirmationAction) { Button("Готово") { dismiss() } } }
-                .onChange(of: bridge.ready) { _, ready in if ready { bridge.webView?.evaluateJavaScript("window.doompileEditor.setEditable(false); window.doompileEditor.openPreferences()") } }
         }
     }
 }

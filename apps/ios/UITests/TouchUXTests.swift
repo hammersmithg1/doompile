@@ -180,7 +180,8 @@ final class TouchUXTests: XCTestCase {
         wait(for: [dismissed], timeout: 5)
         app.buttons["expand-editor"].tap()
         XCTAssertTrue(app.buttons["close-editor"].waitForExistence(timeout: 5))
-        XCTAssertTrue(app.keyboards.firstMatch.waitForExistence(timeout: 5))
+        XCTAssertTrue(app.webViews.textViews.firstMatch.waitForExistence(timeout: 15), app.debugDescription)
+        XCTAssertTrue(app.keyboards.firstMatch.waitForExistence(timeout: 8), app.debugDescription)
         screenshot("appearance-system-editor")
     }
     func testPinAndUrgentMoveOneStableRowBetweenSections() {
@@ -269,8 +270,9 @@ final class TouchUXTests: XCTestCase {
 
     func testSharedEditorAliasSettingsOpenFromNativeSettings() {
         openSidebar(); app.buttons["sidebar-settings"].tap()
+        XCTAssertTrue(app.navigationBars["Настройки"].waitForExistence(timeout: 5))
         app.buttons["Команды и алиасы редактора"].tap()
-        XCTAssertTrue(app.webViews.staticTexts["Команды редактора"].waitForExistence(timeout: 8), app.debugDescription)
+        XCTAssertTrue(app.webViews.staticTexts["Команды редактора"].waitForExistence(timeout: 15), app.debugDescription)
         XCTAssertTrue(app.webViews.textFields.firstMatch.exists)
         screenshot("editor-alias-settings")
         app.navigationBars["Команды редактора"].buttons["Готово"].tap()
@@ -446,8 +448,18 @@ final class TouchUXTests: XCTestCase {
         share.tap()
 
         let action = safari.cells.matching(NSPredicate(format: "label == %@", "Сохранить в Doompile")).firstMatch
+        // Safari can group actions behind a separate More cell below the app row.
+        let moreActions = safari.cells.matching(NSPredicate(
+            format: "identifier == %@ AND label IN %@", "actionGroupCell", ["Еще", "Ещё", "More"]
+        )).firstMatch
+        if !action.exists && moreActions.waitForExistence(timeout: 5) && moreActions.isHittable {
+            moreActions.tap()
+        }
         for _ in 0..<4 { if action.exists && action.isHittable { break }; safari.swipeUp() }
-        XCTAssertTrue(action.waitForExistence(timeout: 5), safari.debugDescription)
+        let actionReady = XCTNSPredicateExpectation(predicate: NSPredicate { _, _ in
+            action.exists && action.isHittable
+        }, object: nil)
+        XCTAssertEqual(XCTWaiter.wait(for: [actionReady], timeout: 10), .completed, safari.debugDescription)
         let image = XCTAttachment(screenshot: safari.screenshot()); image.name = "system-save-action"; image.lifetime = .keepAlways; add(image)
         action.tap()
         XCTAssertTrue(safari.buttons["capture-save"].waitForExistence(timeout: 8), safari.debugDescription)

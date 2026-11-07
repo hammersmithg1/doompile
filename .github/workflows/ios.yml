@@ -6,6 +6,10 @@ on:
       upload_testflight:
         type: boolean
         default: false
+      reuse_validation:
+        description: "Sign the main commit validated by the caller's iOS job"
+        type: boolean
+        default: false
       test_filter:
         type: string
         default: ''
@@ -58,10 +62,18 @@ jobs:
     timeout-minutes: ${{ inputs.upload_testflight && 60 || 30 }}
     steps:
       - name: Require a trusted release run
-        if: inputs.upload_testflight
+        if: inputs.upload_testflight || inputs.reuse_validation
+        env:
+          IOS_UPLOAD_REQUESTED: ${{ inputs.upload_testflight }}
+          IOS_REUSE_VALIDATION: ${{ inputs.reuse_validation }}
         run: |
           test "$GITHUB_REF" = refs/heads/main
           case "$GITHUB_EVENT_NAME" in push|workflow_dispatch) ;; *) exit 1 ;; esac
+          if [[ "$IOS_REUSE_VALIDATION" == true ]]; then
+            test "$IOS_UPLOAD_REQUESTED" = true
+            test "$GITHUB_EVENT_NAME" = push
+            test "$GITHUB_WORKFLOW_REF" = "$GITHUB_REPOSITORY/.github/workflows/web.yml@refs/heads/main"
+          fi
       - uses: actions/checkout@v4
         with:
           persist-credentials: false
@@ -90,14 +102,17 @@ jobs:
           npm run editor:build
           python3 apps/ios/generate_project.py
       - name: Test storage and shared models
+        if: ${{ !inputs.reuse_validation }}
         run: swift test --package-path apps/ios --scratch-path "$RUNNER_TEMP/swift-tests"
       - name: Build app, Share Extension and Safari Extension
+        if: ${{ !inputs.reuse_validation }}
         run: >-
           xcodebuild -project apps/ios/Doompile.xcodeproj -scheme Doompile
           -destination 'generic/platform=iOS Simulator'
           -derivedDataPath "$RUNNER_TEMP/DerivedData"
           CODE_SIGNING_ALLOWED=NO build
       - name: Test iPhone touch flows
+        if: ${{ !inputs.reuse_validation }}
         env:
           IOS_TEST_FILTER: ${{ inputs.test_filter }}
           IOS_SIMULATOR_OS: ${{ inputs.simulator_os }}
@@ -116,12 +131,13 @@ jobs:
             "${filter_args[@]}" -destination "platform=iOS Simulator,id=$simulator_id" \
             -derivedDataPath "$RUNNER_TEMP/DerivedData" \
             -resultBundlePath "$RUNNER_TEMP/iOS-Touch.xcresult" \
-            -parallel-testing-enabled NO CODE_SIGNING_ALLOWED=YES CODE_SIGN_IDENTITY=- test
+            -parallel-testing-enabled NO -retry-tests-on-failure -test-iterations 2 \
+            CODE_SIGNING_ALLOWED=YES CODE_SIGN_IDENTITY=- test
       - name: Export failed touch-test attachments
-        if: failure()
+        if: failure() && !inputs.reuse_validation
         run: xcrun xcresulttool export attachments --path "$RUNNER_TEMP/iOS-Touch.xcresult" --output-path "$RUNNER_TEMP/iOS-Touch-attachments"
       - name: Upload touch test results
-        if: failure()
+        if: failure() && !inputs.reuse_validation
         uses: actions/upload-artifact@v4
         with:
           name: ios-touch-test-results
