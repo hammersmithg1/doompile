@@ -78,10 +78,10 @@
   max-width: 1160px;
   margin: auto;
   display: grid;
-  grid-template-columns: 1.3fr 1fr;
+  grid-template-columns: minmax(0, 1.3fr) minmax(0, 1fr);
   gap: clamp(32px, 7vw, 110px);
   align-items: center;
-  padding: 76px 0 70px;
+  padding-block: clamp(24px, 5dvh, 60px);
 }
 .landing-copy .eyebrow {
   font-size: 10px;
@@ -380,9 +380,45 @@
 .admin .form-error {
   font-size: 12px;
 }
+@media (min-width: 721px) and (max-height: 800px) {
+  .landing {
+    padding-top: 18px;
+  }
+  .landing-header {
+    padding-bottom: 16px;
+  }
+  .landing-main {
+    padding-block: 20px;
+  }
+  .landing h1 {
+    font-size: clamp(44px, 5vw, 64px);
+    margin-block: 14px;
+  }
+  .landing-actions {
+    margin-top: 16px;
+  }
+  .landing .landing-void {
+    margin-top: 10px;
+  }
+  .landing .landing-void .brand-illustration {
+    width: 96px;
+    height: 96px;
+  }
+  .landing-login {
+    padding: 26px;
+  }
+  .landing-footer {
+    min-height: 64px;
+  }
+  .landing-cat {
+    width: 64px;
+  }
+}
 @media (max-width: 720px) {
   .landing {
-    padding: 23px 22px 0;
+    padding: max(23px, env(safe-area-inset-top))
+      max(22px, env(safe-area-inset-right)) env(safe-area-inset-bottom)
+      max(22px, env(safe-area-inset-left));
   }
   .landing-header {
     padding-bottom: 12px;
@@ -399,7 +435,7 @@
     max-width: 440px;
   }
   .landing h1 {
-    font-size: 54px;
+    font-size: clamp(36px, 12vw, 54px);
     letter-spacing: -2.5px;
   }
   .landing-copy > p {

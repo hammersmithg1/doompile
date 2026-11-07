@@ -131,6 +131,44 @@ test("the public landing offers cloud sign-in, self-hosting, and source code", a
     ),
   ).toBe(true);
 });
+test("the OSS landing fits a short laptop and scrolls on narrow phones", async ({
+  page,
+  isMobile,
+}) => {
+  await page.route("**/api/session", (route) =>
+    route.fulfill({
+      json: { ...configuration, authenticated: false, user: null },
+    }),
+  );
+  const sizes = isMobile
+    ? [
+        { width: 320, height: 568 },
+        { width: 390, height: 664 },
+        { width: 844, height: 390 },
+      ]
+    : [
+        { width: 1280, height: 650 },
+        { width: 1440, height: 750 },
+      ];
+  for (const size of sizes) {
+    await page.setViewportSize(size);
+    await page.goto("/");
+    const footer = page.locator(".landing-footer");
+    await expect(footer).toBeVisible();
+    expect(
+      await page.evaluate(() => document.documentElement.scrollWidth),
+    ).toBeLessThanOrEqual(size.width);
+    if (isMobile) {
+      await footer.getByRole("link").scrollIntoViewIfNeeded();
+      expect(await page.evaluate(() => window.scrollY)).toBeGreaterThan(0);
+    } else {
+      expect(
+        await page.evaluate(() => document.documentElement.scrollHeight),
+      ).toBeLessThanOrEqual(size.height);
+    }
+    await expect(footer).toBeInViewport({ ratio: 0.99 });
+  }
+});
 test("account switches isolate IndexedDB, drafts and old tabs before any queued writes", async ({
   page,
   context,
