@@ -1,0 +1,8 @@
+#!/usr/bin/env bash
+set -euo pipefail
+script_dir=$(cd "$(dirname "$0")" && pwd)
+secrets_wrapper=${DOOMPILE_SECRETS_WRAPPER:-"$HOME/.agents/common/scripts/agent_secrets.py"}
+if [[ -f "$secrets_wrapper" ]]; then
+  exec python3 "$secrets_wrapper" -- python3 "$script_dir/pull_releases.py" "$@"
+fi
+exec python3 "$script_dir/pull_releases.py" "$@"

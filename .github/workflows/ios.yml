@@ -1,0 +1,185 @@
+name: iOS
+
+on:
+  workflow_call:
+    inputs:
+      upload_testflight:
+        type: boolean
+        default: false
+      test_filter:
+        type: string
+        default: ''
+      simulator_os:
+        type: string
+        default: ''
+      signing_mode:
+        type: string
+        default: manual
+    secrets:
+      DOOMPILE_CI_SETEC_URL:
+        required: false
+      DOOMPILE_TS_CLIENT_ID:
+        required: false
+      DOOMPILE_TS_AUDIENCE:
+        required: false
+  workflow_dispatch:
+    inputs:
+      upload_testflight:
+        description: "Sign and upload this build to TestFlight (requires configured Apple credentials)"
+        type: boolean
+        default: false
+      test_filter:
+        description: "Optional single test for unsigned diagnostics (DoompileUITests/TouchUXTests/testName)"
+        type: string
+        default: ''
+      simulator_os:
+        description: "Optional iOS simulator version; empty selects the newest available runtime"
+        type: string
+        default: ''
+      signing_mode:
+        description: "Apple signing: automatic needs only Team ID and the Team API key"
+        type: choice
+        options: [automatic, manual]
+        default: manual
+
+permissions:
+  contents: read
+  id-token: write
+
+concurrency:
+  group: ios-${{ github.ref }}-${{ inputs.test_filter || 'full' }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' || (github.event_name == 'push' && vars.DOOMPILE_TESTFLIGHT_AUTO_UPLOAD != 'true') }}
+
+jobs:
+  build:
+    env:
+      DOOMPILE_PUBLIC_URL: ${{ vars.DOOMPILE_PUBLIC_URL }}
+    runs-on: macos-15
+    timeout-minutes: ${{ inputs.upload_testflight && 60 || 30 }}
+    steps:
+      - name: Require a trusted release run
+        if: inputs.upload_testflight
+        run: |
+          test "$GITHUB_REF" = refs/heads/main
+          case "$GITHUB_EVENT_NAME" in push|workflow_dispatch) ;; *) exit 1 ;; esac
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - name: Select Xcode 26
+        run: |
+          if [ -d /Applications/Xcode_26.2.app ]; then
+            sudo xcode-select -s /Applications/Xcode_26.2.app/Contents/Developer
+          elif [ -d /Applications/Xcode_26.1.app ]; then
+            sudo xcode-select -s /Applications/Xcode_26.1.app/Contents/Developer
+          else
+            xcodebuild -version
+          fi
+      - run: npm ci
+      - run: npm run shared:check
+      - name: Validate signing script and Apple upload receipts
+        run: |
+          bash -n apps/ios/scripts/testflight.sh
+          python3 -m unittest discover -s infra -p 'ios_upload_test.py'
+      - name: Build Safari resources and generate Xcode project
+        run: |
+          node extensions/clipper/build.mjs
+          npm run editor:build
+          python3 apps/ios/generate_project.py
+      - name: Test storage and shared models
+        run: swift test --package-path apps/ios --scratch-path "$RUNNER_TEMP/swift-tests"
+      - name: Build app, Share Extension and Safari Extension
+        run: >-
+          xcodebuild -project apps/ios/Doompile.xcodeproj -scheme Doompile
+          -destination 'generic/platform=iOS Simulator'
+          -derivedDataPath "$RUNNER_TEMP/DerivedData"
+          CODE_SIGNING_ALLOWED=NO build
+      - name: Test iPhone touch flows
+        env:
+          IOS_TEST_FILTER: ${{ inputs.test_filter }}
+          IOS_SIMULATOR_OS: ${{ inputs.simulator_os }}
+          IOS_UPLOAD_REQUESTED: ${{ inputs.upload_testflight }}
+        run: |
+          simulator_id=$(python3 .agents/ci/select_ios_simulator.py --os "$IOS_SIMULATOR_OS")
+          filter_args=()
+          if [[ -n "$IOS_TEST_FILTER" ]]; then
+            if [[ "$IOS_UPLOAD_REQUESTED" == true || ! "$IOS_TEST_FILTER" =~ ^DoompileUITests/TouchUXTests/test[A-Za-z0-9]+$ ]]; then
+              echo 'A single-test filter is supported only for unsigned diagnostics.' >&2
+              exit 1
+            fi
+            filter_args+=("-only-testing:$IOS_TEST_FILTER")
+          fi
+          xcodebuild -project apps/ios/Doompile.xcodeproj -scheme Doompile \
+            "${filter_args[@]}" -destination "platform=iOS Simulator,id=$simulator_id" \
+            -derivedDataPath "$RUNNER_TEMP/DerivedData" \
+            -resultBundlePath "$RUNNER_TEMP/iOS-Touch.xcresult" \
+            -parallel-testing-enabled NO CODE_SIGNING_ALLOWED=YES CODE_SIGN_IDENTITY=- test
+      - name: Export failed touch-test attachments
+        if: failure()
+        run: xcrun xcresulttool export attachments --path "$RUNNER_TEMP/iOS-Touch.xcresult" --output-path "$RUNNER_TEMP/iOS-Touch-attachments"
+      - name: Upload touch test results
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: ios-touch-test-results
+          path: |
+            ${{ runner.temp }}/iOS-Touch.xcresult
+            ${{ runner.temp }}/iOS-Touch-attachments
+          if-no-files-found: ignore
+      - name: Prepare private release packaging
+        if: inputs.upload_testflight
+        env:
+          DOOMPILE_DELIVERY_RECIPIENT: ${{ vars.DOOMPILE_DELIVERY_RECIPIENT }}
+        run: |
+          command -v age >/dev/null || brew install age
+          age --encrypt --recipient "$DOOMPILE_DELIVERY_RECIPIENT" </dev/null >/dev/null
+      - name: Connect signing runner to Tailscale with GitHub identity
+        if: inputs.upload_testflight
+        uses: tailscale/github-action@v4
+        with:
+          oauth-client-id: ${{ secrets.DOOMPILE_TS_CLIENT_ID || vars.DOOMPILE_TS_CLIENT_ID }}
+          audience: ${{ secrets.DOOMPILE_TS_AUDIENCE || vars.DOOMPILE_TS_AUDIENCE }}
+          tags: ${{ vars.DOOMPILE_CI_TAILSCALE_TAG || 'tag:doompile-ci' }}
+          hostname: doompile-ci-${{ github.run_id }}-${{ github.run_attempt }}
+      - name: Prepare central signing secret access
+        if: inputs.upload_testflight
+        env:
+          DOOMPILE_CI_SETEC_URL: ${{ secrets.DOOMPILE_CI_SETEC_URL }}
+          DOOMPILE_CI_SETEC_DEVICE: ${{ vars.DOOMPILE_CI_SETEC_DEVICE }}
+        run: python3 .agents/ci/bootstrap.py
+      - name: Sign and upload to TestFlight using setec
+        if: inputs.upload_testflight
+        env:
+          IOS_SIGNING_MODE: ${{ inputs.signing_mode || vars.DOOMPILE_IOS_SIGNING_MODE || 'manual' }}
+        run: python3 "$HOME/.agents/common/scripts/agent_secrets.py" --scope device -- python3 .agents/ci/native.py ios
+      - name: Seal native release and symbols
+        if: inputs.upload_testflight
+        env:
+          DOOMPILE_DELIVERY_RECIPIENT: ${{ vars.DOOMPILE_DELIVERY_RECIPIENT }}
+        run: |
+          python3 infra/seal_native_artifact.py apps/ios/build/release apps/ios/build/diagnostics "$RUNNER_TEMP/native.tar.age"
+      - name: Upload private native artifact
+        id: sealed
+        if: inputs.upload_testflight
+        uses: actions/upload-artifact@v4
+        with:
+          name: doompile-native-ios-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/native.tar.age
+          if-no-files-found: error
+          retention-days: 30
+      - name: Write release receipt
+        if: inputs.upload_testflight
+        env:
+          ARTIFACT_ID: ${{ steps.sealed.outputs.artifact-id }}
+        run: python3 infra/release_receipt.py ios "$RUNNER_TEMP/delivery.json" --artifact-id "$ARTIFACT_ID"
+      - name: Hand release to the delivery server
+        if: inputs.upload_testflight
+        uses: actions/upload-artifact@v4
+        with:
+          name: doompile-delivery-ios-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/delivery.json
+          if-no-files-found: error
+          retention-days: 30

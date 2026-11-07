@@ -1,0 +1,12 @@
+[Unit]
+Description=Apply verified Doompile releases from GitHub
+Wants=network-online.target
+After=network-online.target docker.service tailscaled.service
+
+[Service]
+Type=oneshot
+User=root
+UMask=0077
+WorkingDirectory=/srv/projects/doompile
+ExecStart=/usr/bin/bash /srv/projects/doompile/.agents/local/ci-delivery/pull-releases --root /srv/projects/doompile
+TimeoutStartSec=30min

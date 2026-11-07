@@ -1,0 +1,13 @@
+[
+  {"name":"HTTPS note", "url":"https://notes.example.test/notes/a6ad6431-ad38-4533-92a0-c337487ef00b", "expected":"a6ad6431-ad38-4533-92a0-c337487ef00b"},
+  {"name":"custom scheme", "url":"doompile://note/a6ad6431-ad38-4533-92a0-c337487ef00b", "expected":"a6ad6431-ad38-4533-92a0-c337487ef00b"},
+  {"name":"legacy browser URL", "url":"http://localhost:3000/?note=a6ad6431-ad38-4533-92a0-c337487ef00b", "expected":"a6ad6431-ad38-4533-92a0-c337487ef00b"},
+  {"name":"case, trailing slash and fragment", "url":"https://notes.example.test/notes/A6AD6431-AD38-4533-92A0-C337487EF00B/#preview", "expected":"a6ad6431-ad38-4533-92a0-c337487ef00b"},
+  {"name":"not an identifier", "url":"https://notes.example.test/notes/hello", "expected":null},
+  {"name":"extra path", "url":"https://notes.example.test/notes/a6ad6431-ad38-4533-92a0-c337487ef00b/delete", "expected":null},
+  {"name":"credentials", "url":"https://token@notes.example.test/notes/a6ad6431-ad38-4533-92a0-c337487ef00b", "expected":null},
+  {"name":"wrong custom host", "url":"doompile://delete/a6ad6431-ad38-4533-92a0-c337487ef00b", "expected":null},
+  {"name":"custom port", "url":"doompile://note:55/a6ad6431-ad38-4533-92a0-c337487ef00b", "expected":null},
+  {"name":"wrong scheme", "url":"ftp://notes.example.test/notes/a6ad6431-ad38-4533-92a0-c337487ef00b", "expected":null},
+  {"name":"encoded identifier rejected", "url":"https://notes.example.test/notes/%616ad6431-ad38-4533-92a0-c337487ef00b", "expected":null}
+]

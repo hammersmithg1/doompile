@@ -1,0 +1,9 @@
+[Unit]
+Description=Verified Doompile production SQLite and S3 backup
+After=docker.service tailscaled.service
+
+[Service]
+Environment=HOME=/root
+Type=oneshot
+WorkingDirectory=/srv/projects/doompile
+ExecStart=/srv/projects/doompile/infra/ops backup prod

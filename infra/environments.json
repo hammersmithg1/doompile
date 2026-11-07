@@ -1,0 +1,14 @@
+{
+  "environments": {
+    "prod": {
+      "port": 3101,
+      "s3_port": 9101,
+      "bucket_prefix": "doompile-prod"
+    },
+    "staging": {
+      "port": 3102,
+      "s3_port": 9102,
+      "bucket_prefix": "doompile-staging"
+    }
+  }
+}

@@ -1,0 +1,11 @@
+#!/usr/bin/env bash
+set -euo pipefail
+source_root=$(cd "$(dirname "$0")/.." && pwd)
+secrets_wrapper=${DOOMPILE_SECRETS_WRAPPER:-"$HOME/.agents/common/scripts/agent_secrets.py"}
+case "${1:-help}" in
+  deploy|promote|rollback|backup|edge)
+    if [[ -f "$secrets_wrapper" ]]; then
+      exec python3 "$secrets_wrapper" -- python3 "$source_root/infra/manage.py" "$@"
+    fi ;;
+esac
+exec python3 "$source_root/infra/manage.py" "$@"

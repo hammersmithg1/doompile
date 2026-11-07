@@ -1,0 +1,1005 @@
+import { test, expect, type Page } from "@playwright/test";
+test("unknown blocks show a local error and survive editing and reload", async ({
+  page,
+}) => {
+  await page.goto("/");
+  const future = { type: "futureWidget", attrs: { value: { answer: 42 } } };
+  await page.evaluate(
+    (future) =>
+      (window as any).controller.setDocument(
+        {
+          type: "doc",
+          content: [
+            { type: "paragraph", content: [{ type: "text", text: "Before" }] },
+            future,
+            { type: "paragraph", content: [{ type: "text", text: "After" }] },
+          ],
+        },
+        false,
+      ),
+    future,
+  );
+  await expect(page.locator(".editor-render-error")).toHaveText(
+    "Ошибка отрисовки",
+  );
+  await page.locator(".tiptap > p").first().click();
+  await page.keyboard.press("End");
+  await page.keyboard.type("!");
+  const body = await page.evaluate(() => (window as any).testEditor.getJSON());
+  expect(
+    body.content.find((node: any) => node.type === "futureWidget"),
+  ).toEqual(future);
+  expect(JSON.stringify(body)).toContain("Before");
+  expect(JSON.stringify(body)).toContain("After");
+  await page.evaluate(
+    (body) => (window as any).controller.setDocument(body, false),
+    body,
+  );
+  await expect(page.locator(".editor-render-error")).toHaveCount(1);
+});
+const paragraph = (text = "") => ({
+  type: "paragraph",
+  ...(text ? { content: [{ type: "text", text }] } : {}),
+});
+const doc = (...content: unknown[]) => ({ type: "doc", content });
+async function setDoc(page: Page, content: unknown) {
+  await page.evaluate((content) => {
+    (window as any).controller.setDocument(content);
+    (window as any).testEditor.commands.focus("end");
+  }, content);
+}
+async function json(page: Page) {
+  return page.evaluate(() => (window as any).testEditor.getJSON());
+}
+test.beforeEach(async ({ page }) => {
+  await page.goto("/");
+  await page.getByRole("textbox").click();
+});
+
+test("list immediately after text, Enter continues, empty Enter exits", async ({
+  page,
+}) => {
+  await page.keyboard.type("Текст");
+  await page.keyboard.press("Enter");
+  await page.keyboard.type("- пункт");
+  await page.keyboard.press("Enter");
+  await page.keyboard.type("второй");
+  await expect(page.locator(".tiptap > ul > li")).toHaveCount(2);
+  expect(
+    await page
+      .locator(".tiptap > ul")
+      .evaluate((ul) => ul.previousElementSibling?.textContent),
+  ).toBe("Текст");
+  await page.keyboard.press("Enter");
+  await page.keyboard.press("Enter");
+  await page.keyboard.type("После");
+  await expect(page.locator(".tiptap > p").last()).toHaveText("После");
+});
+test("ordered list after text and Shift+Enter preserves multiline item", async ({
+  page,
+}) => {
+  await page.keyboard.type("Текст");
+  await page.keyboard.press("Enter");
+  await page.keyboard.type("1. Первый");
+  await page.keyboard.press("Shift+Enter");
+  await page.keyboard.type("продолжение");
+  await page.keyboard.press("Enter");
+  await page.keyboard.type("Второй");
+  await expect(page.locator("ol > li")).toHaveCount(2);
+  await expect(page.locator("ol > li").first().locator("br")).toHaveCount(1);
+});
+test("list marker after a hard break does not require an empty line", async ({
+  page,
+}) => {
+  await page.keyboard.type("Текст");
+  await page.keyboard.press("Shift+Enter");
+  await page.keyboard.type("- пункт");
+  await expect(page.locator("ul > li")).toHaveCount(1);
+  await expect(page.locator(".tiptap > p").first()).toHaveText("Текст");
+});
+test("media stays in a list item and Enter creates the next item; undo restores", async ({
+  page,
+}) => {
+  await page.keyboard.type("- голос");
+  await page.evaluate(() =>
+    (window as any).controller.insertAttachment({
+      url: "/api/attachments/test",
+      name: "Voice.m4a",
+      mimeType: "audio/mp4",
+    }),
+  );
+  await expect(page.locator("ul > li audio")).toHaveCount(1);
+  await page.keyboard.press("Enter");
+  await page.keyboard.type("Следующий");
+  await expect(page.locator("ul > li")).toHaveCount(2);
+  await expect(page.locator("ul > li").last()).toHaveText("Следующий");
+  const result = await json(page);
+  expect(
+    result.content[0].content[0].content[0].content.some(
+      (n: any) => n.type === "attachment",
+    ),
+  ).toBe(true);
+  await page.keyboard.press("ControlOrMeta+z");
+  await expect(page.locator("ul > li audio")).toHaveCount(1);
+});
+test("nested bullet list inside ordered list keeps outer numbering", async ({
+  page,
+}) => {
+  await page.keyboard.type("1. Первый");
+  await page.keyboard.press("Enter");
+  await page.keyboard.type("/nested");
+  await page.keyboard.press("Enter");
+  await page.keyboard.type("Вложенный");
+  await expect(page.locator(".tiptap > ol > li > ul > li")).toHaveText(
+    "Вложенный",
+  );
+  await page.keyboard.press("Enter");
+  await page.keyboard.press("Shift+Tab");
+  await page.keyboard.type("Второй");
+  await expect(page.locator(".tiptap > ol > li")).toHaveCount(2);
+});
+test("slash filters, keyboard selection, Escape and action callback", async ({
+  page,
+}) => {
+  await page.keyboard.type("/h2");
+  await expect(page.getByRole("listbox")).toBeVisible();
+  await page.keyboard.press("Enter");
+  await page.keyboard.type("Глава");
+  await expect(page.locator(".tiptap h2")).toHaveText("Глава");
+  await page.keyboard.press("Enter");
+  await page.keyboard.type("/file");
+  await page.keyboard.press("Escape");
+  await expect(page.getByRole("listbox")).toBeHidden();
+  await expect(page.locator(".tiptap")).toContainText("/file");
+  await page.keyboard.press("Backspace");
+  await page.keyboard.type("e");
+  await page.keyboard.press("Enter");
+  expect(await page.evaluate(() => (window as any).actions)).toEqual(["file"]);
+  await expect(page.locator(".tiptap")).not.toContainText("/file");
+});
+test("slash menu wheel and keyboard scroll only its own list without recreating options", async ({
+  page,
+}) => {
+  await page.keyboard.type("/");
+  const menu = page.getByRole("listbox");
+  await expect(menu).toBeVisible();
+  const pageScroll = await page.evaluate(() => window.scrollY);
+  await menu
+    .getByRole("option")
+    .first()
+    .evaluate((element) => {
+      (window as any).firstOption = element;
+    });
+  await menu.hover();
+  await page.mouse.wheel(0, 180);
+  await expect
+    .poll(() => menu.evaluate((element) => element.scrollTop))
+    .toBeGreaterThan(100);
+  await menu.evaluate(async (element) => {
+    element.dispatchEvent(new Event("scroll"));
+    await new Promise(requestAnimationFrame);
+    await new Promise(requestAnimationFrame);
+  });
+  expect(await menu.evaluate((element) => element.scrollTop)).toBeGreaterThan(
+    100,
+  );
+  expect(
+    await menu.evaluate(
+      (element) => element.firstElementChild === (window as any).firstOption,
+    ),
+  ).toBe(true);
+  await page.keyboard.press("ArrowUp");
+  const selected = menu.getByRole("option", { selected: true });
+  await expect(selected).toHaveText("Настройки команд");
+  const bounds = (await menu.boundingBox())!,
+    option = (await selected.boundingBox())!;
+  expect(option.y).toBeGreaterThanOrEqual(bounds.y);
+  expect(option.y + option.height).toBeLessThanOrEqual(
+    bounds.y + bounds.height,
+  );
+  expect(await page.evaluate(() => window.scrollY)).toBe(pageScroll);
+  await page.keyboard.press("ArrowDown");
+  await expect(menu.getByRole("option", { selected: true })).toHaveText(
+    "Текст",
+  );
+  expect(await menu.evaluate((element) => element.scrollTop)).toBeLessThan(10);
+});
+
+test("selection toolbar waits for pointer release, animates once and respects reduced motion", async ({
+  page,
+}) => {
+  await page.keyboard.type("Выделяем несколько слов мышью");
+  const text = (await page.locator(".tiptap > p").boundingBox())!;
+  await page.mouse.move(text.x + 2, text.y + text.height / 2);
+  await page.mouse.down();
+  await page.mouse.move(text.x + 160, text.y + text.height / 2, { steps: 8 });
+  expect(
+    await page.evaluate(() => window.getSelection()?.toString().length),
+  ).toBeGreaterThan(0);
+  const toolbar = page.getByRole("toolbar");
+  await expect(toolbar).toBeHidden();
+  await page.mouse.up();
+  await expect(toolbar).toBeVisible();
+  expect(
+    await toolbar.evaluate(
+      (element) => getComputedStyle(element).animationName,
+    ),
+  ).toBe("editor-toolbar-appear");
+  await page.getByRole("button", { name: "Жирный", exact: true }).click();
+  await expect(page.locator("strong")).not.toBeEmpty();
+  await expect(page.getByRole("textbox")).toBeFocused();
+  await page.emulateMedia({ reducedMotion: "reduce" });
+  await page.keyboard.press("ArrowRight");
+  await page.keyboard.press("ControlOrMeta+a");
+  await expect(toolbar).toBeVisible();
+  expect(
+    await toolbar.evaluate(
+      (element) => getComputedStyle(element).animationName,
+    ),
+  ).toBe("none");
+});
+
+test("first-line selection toolbar flips below the text instead of clamping onto it", async ({
+  page,
+}, info) => {
+  await page.emulateMedia({ reducedMotion: "reduce" });
+  await page.evaluate(() => {
+    document.getElementById("editor")!.style.marginTop = "140px";
+  });
+  const text = "Текст первой строки для проверки панели форматирования";
+  await page.keyboard.type(text);
+  const selection = await page.evaluate(() => {
+    const editor = (window as any).testEditor;
+    editor.commands.setTextSelection({ from: 30, to: 48 });
+    return editor.view.coordsAtPos(48);
+  });
+  const toolbar = page.getByRole("toolbar");
+  await expect(toolbar).toBeVisible();
+  const bounds = (await toolbar.boundingBox())!;
+  expect(bounds.y).toBeGreaterThanOrEqual(selection.bottom + 6);
+  await page.screenshot({ path: info.outputPath("first-line-toolbar.png") });
+  await toolbar.getByRole("button", { name: "Жирный", exact: true }).click();
+  await expect(page.locator("strong")).toHaveText(text.slice(29, 47));
+});
+
+test("toolbar flips below the whole multiline selection at the top of the editor", async ({
+  page,
+}) => {
+  await page.emulateMedia({ reducedMotion: "reduce" });
+  await setDoc(
+    page,
+    doc(
+      paragraph("Первая строка"),
+      paragraph("Вторая строка"),
+      paragraph("После выделения"),
+    ),
+  );
+  const end = await page.evaluate(() => {
+    const editor = (window as any).testEditor;
+    const to =
+      editor.state.doc.child(0).nodeSize +
+      editor.state.doc.child(1).nodeSize -
+      1;
+    editor.commands.setTextSelection({ from: 1, to });
+    return editor.view.coordsAtPos(to);
+  });
+  const toolbar = page.getByRole("toolbar");
+  await expect(toolbar).toBeVisible();
+  expect((await toolbar.boundingBox())!.y).toBeGreaterThanOrEqual(
+    end.bottom + 6,
+  );
+});
+
+test("toolbar respects the visible top and bottom of a nested scroll container", async ({
+  page,
+}) => {
+  await page.emulateMedia({ reducedMotion: "reduce" });
+  await page.evaluate(() => {
+    const wrapper = document.createElement("div");
+    wrapper.id = "scroll-container";
+    wrapper.style.cssText = "height:240px;overflow:auto;margin-top:80px";
+    const root = document.getElementById("editor")!;
+    root.before(wrapper);
+    wrapper.append(root);
+  });
+  await setDoc(
+    page,
+    doc(...Array.from({ length: 30 }, (_, i) => paragraph(`Строка ${i}`))),
+  );
+  const topLine = await page.evaluate(() => {
+    const editor = (window as any).testEditor;
+    let from = 1;
+    for (let i = 0; i < 10; i++) from += editor.state.doc.child(i).nodeSize;
+    editor.commands.setTextSelection({ from, to: from + 6 });
+    const wrapper = document.getElementById("scroll-container")!;
+    wrapper.scrollTop +=
+      editor.view.coordsAtPos(from).top -
+      wrapper.getBoundingClientRect().top -
+      4;
+    return editor.view.coordsAtPos(from);
+  });
+  const toolbar = page.getByRole("toolbar");
+  await expect(toolbar).toBeVisible();
+  await expect
+    .poll(async () => (await toolbar.boundingBox())!.y)
+    .toBeGreaterThanOrEqual(topLine.bottom + 6);
+  const bottomLine = await page.evaluate(() => {
+    const editor = (window as any).testEditor;
+    const wrapper = document.getElementById("scroll-container")!;
+    wrapper.scrollTop +=
+      editor.view.coordsAtPos(editor.state.selection.from).bottom -
+      wrapper.getBoundingClientRect().bottom +
+      4;
+    return editor.view.coordsAtPos(editor.state.selection.from);
+  });
+  await expect
+    .poll(async () => {
+      const box = (await toolbar.boundingBox())!;
+      return box.y + box.height;
+    })
+    .toBeLessThanOrEqual(bottomLine.top - 6);
+});
+
+test("wrapped toolbar in a narrow editor does not overlap the first line", async ({
+  page,
+}) => {
+  await page.setViewportSize({ width: 280, height: 500 });
+  await page.emulateMedia({ reducedMotion: "reduce" });
+  await page.evaluate(() => {
+    document.getElementById("editor")!.style.marginTop = "100px";
+  });
+  await page.keyboard.type("Первая строка");
+  await page.keyboard.press("ControlOrMeta+a");
+  const line = await page.evaluate(() =>
+    (window as any).testEditor.view.coordsAtPos(1),
+  );
+  const toolbar = page.getByRole("toolbar");
+  await expect(toolbar).toBeVisible();
+  const box = (await toolbar.boundingBox())!;
+  expect(box.y).toBeGreaterThanOrEqual(line.bottom + 6);
+  expect(box.x).toBeGreaterThanOrEqual(0);
+  expect(box.x + box.width).toBeLessThanOrEqual(280);
+});
+
+test("source snippet can be added from slash commands, validates links and remains undoable", async ({
+  page,
+}) => {
+  await page.keyboard.type("До");
+  await page.keyboard.press("Enter");
+  await page.keyboard.type("/source");
+  await page.keyboard.press("Enter");
+  const dialog = page.getByRole("dialog", { name: "Источник с цитатой" });
+  await expect(dialog).toBeVisible();
+  await dialog
+    .getByLabel("Ссылка", { exact: true })
+    .fill("javascript:alert(1)");
+  await dialog.getByRole("button", { name: "Добавить источник" }).click();
+  await expect(dialog).toBeVisible();
+  await expect(page.locator(".source-snippet")).toHaveCount(0);
+  await dialog
+    .getByLabel("Ссылка", { exact: true })
+    .fill("https://example.com/article");
+  await dialog
+    .getByLabel("Название (необязательно)", { exact: true })
+    .fill("Статья");
+  await dialog
+    .getByLabel("Цитата (необязательно)", { exact: true })
+    .fill("Точный фрагмент <b>текстом</b>");
+  await dialog.getByRole("button", { name: "Добавить источник" }).click();
+  await expect(dialog).toBeHidden();
+  await expect(page.locator(".source-snippet a")).toHaveAttribute(
+    "href",
+    /https:\/\/example.com\/article#:~:text=/,
+  );
+  await expect(page.locator(".source-snippet .source-quote")).toHaveText(
+    "Точный фрагмент <b>текстом</b>",
+  );
+  await expect(page.locator(".source-snippet")).toHaveAttribute(
+    "data-title",
+    "Статья",
+  );
+  await expect(page.getByRole("textbox")).toBeFocused();
+  await page.keyboard.press("ControlOrMeta+z");
+  await expect(page.locator(".source-snippet")).toHaveCount(0);
+  await expect(page.locator(".tiptap")).toContainText("До");
+  await page.keyboard.press("ControlOrMeta+Shift+z");
+  await expect(page.locator(".source-snippet")).toHaveCount(1);
+});
+
+test("source dialog cancels back to the editor without inserting a card", async ({
+  page,
+}) => {
+  await page.setViewportSize({ width: 390, height: 600 });
+  await page.keyboard.type("/источник");
+  await page.keyboard.press("Enter");
+  const dialog = page.getByRole("dialog");
+  await expect(dialog).toBeVisible();
+  const bounds = (await dialog.boundingBox())!;
+  expect(bounds.x).toBeGreaterThanOrEqual(0);
+  expect(bounds.x + bounds.width).toBeLessThanOrEqual(390);
+  await page.keyboard.press("Escape");
+  await expect(dialog).toBeHidden();
+  await expect(page.getByRole("textbox")).toBeFocused();
+  await page.keyboard.type("Продолжаем");
+  await expect(page.locator(".tiptap")).toHaveText("Продолжаем");
+  await expect(page.locator(".source-snippet")).toHaveCount(0);
+});
+
+test("mention filters notes, inserts an atom, and opens its target", async ({
+  page,
+}) => {
+  await page.keyboard.type("Смотри @Вторая");
+  await page.keyboard.press("Enter");
+  await expect(page.locator("[data-note-reference]")).toHaveText(
+    "↗ Вторая мысль",
+  );
+  await page.locator("[data-note-reference]").click();
+  expect(await page.evaluate(() => (window as any).references)).toEqual([
+    "note-two",
+  ]);
+  expect(
+    (await json(page)).content[0].content.some(
+      (n: any) => n.type === "noteReference",
+    ),
+  ).toBe(true);
+});
+test("selection toolbar preserves selection and applies bold, undo keeps focus", async ({
+  page,
+}) => {
+  await page.keyboard.type("Слова");
+  await page.keyboard.press("ControlOrMeta+a");
+  await expect(page.getByRole("toolbar")).toBeVisible();
+  await page.getByRole("button", { name: "Жирный", exact: true }).click();
+  await expect(page.locator("strong")).toHaveText("Слова");
+  await expect(page.getByRole("textbox")).toBeFocused();
+  await page.keyboard.press("ControlOrMeta+z");
+  await expect(page.locator("strong")).toHaveCount(0);
+});
+test("paragraph, hard break and list line heights use the same rhythm", async ({
+  page,
+}) => {
+  await setDoc(
+    page,
+    doc(
+      paragraph("один"),
+      paragraph("два"),
+      {
+        type: "paragraph",
+        content: [
+          { type: "text", text: "три" },
+          { type: "hardBreak" },
+          { type: "text", text: "четыре" },
+        ],
+      },
+      {
+        type: "orderedList",
+        content: [
+          { type: "listItem", content: [paragraph("пять")] },
+          { type: "listItem", content: [paragraph("шесть")] },
+        ],
+      },
+    ),
+  );
+  const sizes = await page
+    .locator(".tiptap p")
+    .evaluateAll((ps) => ps.map((p) => p.getBoundingClientRect().height));
+  expect(Math.abs(sizes[0] - sizes[1])).toBeLessThan(1);
+  expect(Math.abs(sizes[2] - sizes[0] * 2)).toBeLessThan(1);
+  expect(Math.abs(sizes[3] - sizes[0])).toBeLessThan(1);
+  const gaps = await page
+    .locator(".tiptap > p")
+    .evaluateAll(
+      (ps) =>
+        ps[1].getBoundingClientRect().top -
+        ps[0].getBoundingClientRect().bottom,
+    );
+  expect(gaps).toBe(0);
+});
+test("outline expands on hover and jumps to headings", async ({ page }) => {
+  await setDoc(
+    page,
+    doc(
+      {
+        type: "heading",
+        attrs: { level: 1 },
+        content: [{ type: "text", text: "Начало" }],
+      },
+      ...Array.from({ length: 40 }, () => paragraph("Текст")),
+      {
+        type: "heading",
+        attrs: { level: 2 },
+        content: [{ type: "text", text: "Конец" }],
+      },
+    ),
+  );
+  const nav = page.getByRole("navigation");
+  await expect(nav.getByRole("button")).toHaveCount(2);
+  await expect(nav.locator("span").first()).toBeHidden();
+  await nav.hover();
+  await expect(nav.locator("span").first()).toBeVisible();
+  await nav.getByRole("button", { name: "Конец" }).click();
+  await expect.poll(() => page.evaluate(() => scrollY)).toBeGreaterThan(500);
+});
+test("source snippet and paragraphs can be reordered by drag handle", async ({
+  page,
+}) => {
+  await setDoc(
+    page,
+    doc(
+      {
+        type: "sourceSnippet",
+        attrs: {
+          url: "https://example.com/article",
+          title: "Статья",
+          quote: "Цитата",
+        },
+      },
+      paragraph("Первый"),
+      paragraph("Второй"),
+    ),
+  );
+  await page.locator(".source-snippet").hover();
+  const handle = page.getByRole("button", {
+    name: "Перетащить блок",
+    exact: true,
+  });
+  await expect(handle).toBeVisible();
+  const target = page.locator(".tiptap > p").last();
+  await handle.hover();
+  await page.mouse.down();
+  const rect = (await target.boundingBox())!;
+  await page.mouse.move(rect.x + 30, rect.y + 24, { steps: 10 });
+  await page.mouse.up();
+  expect(
+    (await json(page)).content
+      .slice(0, 3)
+      .map((n: any) =>
+        n.content?.[0]?.type === "sourceSnippet"
+          ? "sourceSnippet"
+          : n.content?.[0]?.text,
+      ),
+  ).toEqual(["Первый", "Второй", "sourceSnippet"]);
+  await page.keyboard.press("ControlOrMeta+z");
+  expect((await json(page)).content[0].content[0].type).toBe("sourceSnippet");
+});
+test("document roundtrip preserves nested lists, checked tasks, media, links and snippets", async ({
+  page,
+}) => {
+  const body = doc(
+    {
+      type: "orderedList",
+      attrs: { start: 3 },
+      content: [
+        {
+          type: "listItem",
+          content: [
+            paragraph("Пункт"),
+            {
+              type: "bulletList",
+              content: [
+                { type: "listItem", content: [paragraph("Вложенный")] },
+              ],
+            },
+          ],
+        },
+      ],
+    },
+    {
+      type: "taskList",
+      content: [
+        {
+          type: "taskItem",
+          attrs: { checked: true },
+          content: [paragraph("Готово")],
+        },
+      ],
+    },
+    {
+      type: "sourceSnippet",
+      attrs: { url: "https://example.com", title: "Сайт", quote: "Цитата" },
+    },
+    {
+      type: "attachment",
+      attrs: {
+        url: "/api/attachments/a",
+        name: "file.txt",
+        mimeType: "text/plain",
+      },
+    },
+  );
+  await setDoc(page, body);
+  const before = await json(page);
+  await setDoc(page, before);
+  expect(await json(page)).toEqual(before);
+});
+
+test("image inside a numbered item continues numbering and can be undone separately", async ({
+  page,
+}) => {
+  await page.keyboard.type("1. Фото");
+  await page.evaluate(() =>
+    (window as any).controller.insertAttachment({
+      url: "https://example.com/image.png",
+      name: "Фото",
+      mimeType: "image/png",
+    }),
+  );
+  await expect(
+    page.locator("ol > li img:not(.ProseMirror-separator)"),
+  ).toHaveCount(1);
+  await page.keyboard.press("Enter");
+  await page.keyboard.type("Дальше");
+  await expect(page.locator("ol > li")).toHaveCount(2);
+  await page.keyboard.press("ControlOrMeta+z");
+  await expect(
+    page.locator("ol > li img:not(.ProseMirror-separator)"),
+  ).toHaveCount(1);
+});
+test("multiple paragraphs belong to one item; Enter after the continuation creates a sibling", async ({
+  page,
+}) => {
+  await page.keyboard.type("- Начало");
+  await page.keyboard.press("Alt+Enter");
+  await page.keyboard.type("Абзац");
+  await expect(page.locator("ul > li")).toHaveCount(1);
+  await expect(page.locator("ul > li > p")).toHaveCount(2);
+  await page.keyboard.press("Enter");
+  await page.keyboard.type("Следующий");
+  await expect(page.locator("ul > li")).toHaveCount(2);
+});
+test("task item with an attachment creates a new unchecked task", async ({
+  page,
+}) => {
+  await page.keyboard.type("/todo");
+  await page.keyboard.press("Enter");
+  await page.keyboard.type("Задача");
+  await page.evaluate(() =>
+    (window as any).controller.insertAttachment({
+      url: "/api/attachments/file",
+      name: "file.pdf",
+      mimeType: "application/pdf",
+    }),
+  );
+  await page.keyboard.press("Enter");
+  await page.keyboard.type("Следующая");
+  await expect(page.locator('[data-type="taskList"] > li')).toHaveCount(2);
+  await expect(
+    page.locator('[data-type="taskList"] > li').last(),
+  ).toHaveAttribute("data-checked", "false");
+});
+test("Tab nests, Shift+Tab restores, and Backspace merges list content", async ({
+  page,
+}) => {
+  await page.keyboard.type("- Один");
+  await page.keyboard.press("Enter");
+  await page.keyboard.type("Два");
+  await page.keyboard.press("Tab");
+  await expect(page.locator("ul > li > ul > li")).toHaveText("Два");
+  await page.keyboard.press("Shift+Tab");
+  await expect(page.locator(".tiptap > ul > li")).toHaveCount(2);
+  await page.keyboard.press("ArrowLeft");
+  await page.keyboard.press("ArrowLeft");
+  await page.keyboard.press("ArrowLeft");
+  await page.keyboard.press("Backspace");
+  await expect(page.locator(".tiptap")).toContainText("Один");
+  await expect(page.locator(".tiptap")).toContainText("Два");
+});
+test("keyboard block movement reorders list items and paragraphs without losing marks", async ({
+  page,
+}) => {
+  await page.keyboard.type("- Один");
+  await page.keyboard.press("Enter");
+  await page.keyboard.type("Два");
+  await page.keyboard.press("Alt+Shift+ArrowUp");
+  await expect(page.locator(".tiptap > ul > li").first()).toHaveText("Два");
+  await page.keyboard.press("ControlOrMeta+z");
+  await expect(page.locator(".tiptap > ul > li").first()).toHaveText("Один");
+});
+test("slash never opens inside code or a URL, mentions ignore emails", async ({
+  page,
+}) => {
+  await page.keyboard.type("https://example.com @");
+  await page.keyboard.press("Escape");
+  await page.keyboard.type("user@example.com");
+  await expect(page.getByRole("listbox")).toBeHidden();
+  await setDoc(
+    page,
+    doc({ type: "codeBlock", content: [{ type: "text", text: "/h2" }] }),
+  );
+  await page.keyboard.type(" ");
+  await expect(page.getByRole("listbox")).toBeHidden();
+});
+test("read-only editor hides editing controls and remains navigable", async ({
+  page,
+}) => {
+  await page.keyboard.type("Текст");
+  await page.keyboard.press("ControlOrMeta+a");
+  await expect(page.getByRole("toolbar")).toBeVisible();
+  await page.evaluate(() => (window as any).testEditor.setEditable(false));
+  await expect(page.getByRole("toolbar")).toBeHidden();
+  await page.keyboard.type("Не добавится");
+  await expect(page.locator(".tiptap")).toHaveText("Текст");
+});
+test("native bridge document roundtrip does not emit saves or steal focus on snapshot", async ({
+  page,
+}) => {
+  await page.goto("/editor.html");
+  await page.evaluate(() =>
+    (window as any).doompileEditor.setDocument({
+      type: "doc",
+      content: [
+        { type: "paragraph", content: [{ type: "text", text: "Текст" }] },
+      ],
+    }),
+  );
+  await page.getByRole("textbox").click();
+  await page.keyboard.press("End");
+  await page.keyboard.type("!");
+  const snapshot = await page.evaluate(() =>
+    (window as any).doompileEditor.getState(),
+  );
+  expect(snapshot.plainText).toBe("Текст!");
+  await expect(page.getByRole("textbox")).toBeFocused();
+});
+test("source quotes stay in metadata and are not duplicated in the plain text excerpt", async ({
+  page,
+}) => {
+  await setDoc(
+    page,
+    doc(
+      {
+        type: "sourceSnippet",
+        attrs: { url: "https://example.com", quote: "Exact quote" },
+      },
+      paragraph("My annotation"),
+    ),
+  );
+  await page.keyboard.type("!");
+  const changes = await page.evaluate(() => (window as any).changes);
+  expect(changes.at(-1).text).toBe("My annotation!");
+});
+
+test("plain text uses one newline between list items and paragraphs", async ({
+  page,
+}) => {
+  await page.keyboard.type("Текст");
+  await page.keyboard.press("Enter");
+  await page.keyboard.type("- один");
+  await page.keyboard.press("Enter");
+  await page.keyboard.type("два");
+  expect(await page.evaluate(() => (window as any).changes.at(-1).text)).toBe(
+    "Текст\nодин\nдва",
+  );
+});
+
+test("pasting plain text creates lists without a blank line and preserves mixed nesting", async ({
+  page,
+}) => {
+  await page.getByRole("textbox").evaluate((element) => {
+    const clipboardData = new DataTransfer();
+    clipboardData.setData(
+      "text/plain",
+      "Текст\n1. Первый\n   - Вложенный\n2. Второй",
+    );
+    element.dispatchEvent(
+      new ClipboardEvent("paste", {
+        clipboardData,
+        bubbles: true,
+        cancelable: true,
+      }),
+    );
+  });
+  await expect(page.locator(".tiptap > p").first()).toHaveText("Текст");
+  await expect(page.locator(".tiptap > ol > li")).toHaveCount(2);
+  await expect(page.locator("ol > li > ul > li")).toHaveText("Вложенный");
+});
+
+test("menus stay within a narrow viewport and light theme", async ({
+  page,
+}, testInfo) => {
+  await page.setViewportSize({ width: 390, height: 720 });
+  await page.evaluate(() => {
+    document.documentElement.dataset.theme = "light";
+  });
+  await page.keyboard.type("/h2");
+  await page.keyboard.press("Enter");
+  await page.keyboard.type("Идеи на неделю");
+  await page.keyboard.press("Enter");
+  await page.keyboard.type("- Первая мысль");
+  await page.keyboard.press("Enter");
+  await page.keyboard.type("/file");
+  const menu = page.getByRole("listbox");
+  await expect(menu).toBeVisible();
+  const rect = (await menu.boundingBox())!;
+  expect(rect.x).toBeGreaterThanOrEqual(0);
+  expect(rect.x + rect.width).toBeLessThanOrEqual(390);
+  expect(rect.y + rect.height).toBeLessThanOrEqual(720);
+  await page.screenshot({ path: testInfo.outputPath("editor-light.png") });
+});
+
+test("Enter while an attachment is selected creates a sibling list item", async ({
+  page,
+}) => {
+  await page.keyboard.type("- Файл");
+  await page.evaluate(() => {
+    const app = (window as any).controller;
+    app.insertAttachment({
+      url: "/api/attachments/file",
+      name: "file.pdf",
+      mimeType: "application/pdf",
+    });
+    app.editor.state.doc.descendants((node: any, pos: number) => {
+      if (node.type.name === "attachment")
+        app.editor.commands.setNodeSelection(pos);
+    });
+  });
+  await page.keyboard.press("Enter");
+  await page.keyboard.type("Следующий");
+  await expect(page.locator(".tiptap > ul > li")).toHaveCount(2);
+  await expect(page.locator("ul > li").last()).toHaveText("Следующий");
+});
+
+test("HTML copy and paste retains reference targets, source quotes and attachment metadata", async ({
+  page,
+}) => {
+  await setDoc(
+    page,
+    doc(
+      {
+        type: "sourceSnippet",
+        attrs: {
+          url: "https://example.com",
+          quote: "Exact quote",
+          title: "Source",
+          timestampSeconds: 0,
+        },
+      },
+      {
+        type: "paragraph",
+        content: [
+          {
+            type: "noteReference",
+            attrs: { id: "note-one", title: "Первая заметка" },
+          },
+        ],
+      },
+      {
+        type: "attachment",
+        attrs: {
+          url: "/api/attachments/file",
+          name: "report.pdf",
+          mimeType: "application/pdf",
+        },
+      },
+    ),
+  );
+  const before = await json(page);
+  await page.evaluate(() => {
+    const editor = (window as any).testEditor;
+    editor.commands.setContent(editor.getHTML());
+  });
+  expect(await json(page)).toEqual(before);
+});
+
+test("native touch commands preserve the caret, support lists and report selected formats", async ({
+  page,
+}) => {
+  await page.goto("/editor.html");
+  await page.evaluate(() => {
+    const api = (window as any).doompileEditor;
+    api.setTheme("light");
+    api.setTouchMode(true);
+    api.setDocument({ type: "doc", content: [{ type: "paragraph" }] });
+    api.focus();
+  });
+  await expect(page.getByRole("textbox")).toBeFocused();
+  await page.keyboard.type("Before ");
+  await page.evaluate(() => (window as any).doompileEditor.command("bold"));
+  await page.keyboard.type("bold");
+  await expect(page.locator("strong")).toHaveText("bold");
+  await page.evaluate(() => (window as any).doompileEditor.command("bold"));
+  await page.keyboard.press("Enter");
+  await page.evaluate(() =>
+    (window as any).doompileEditor.command("checklist"),
+  );
+  await page.keyboard.type("Task");
+  await expect(page.locator('[data-type="taskList"] li p')).toHaveText("Task");
+  await page.evaluate(() => (window as any).doompileEditor.blur());
+  await expect(page.getByRole("textbox")).not.toBeFocused();
+  await page.evaluate(() => (window as any).doompileEditor.command("italic"));
+  await expect(page.getByRole("textbox")).toBeFocused();
+  await page.keyboard.type(" italic");
+  await expect(page.locator("em")).toHaveText(" italic");
+  await expect(page.getByRole("textbox")).toBeFocused();
+  const snapshot = await page.evaluate(() =>
+    (window as any).doompileEditor.getState(),
+  );
+  expect(snapshot.plainText).toBe("Before bold\nTask italic");
+  await expect(page.getByRole("textbox")).toBeFocused();
+});
+
+test("native touch layout fits an iPhone and suppresses desktop formatting chrome", async ({
+  page,
+}) => {
+  await page.setViewportSize({ width: 390, height: 440 });
+  await page.goto("/editor.html");
+  await page.evaluate(() => {
+    const api = (window as any).doompileEditor;
+    api.setTheme("light");
+    api.setTouchMode(true);
+    api.focus();
+  });
+  await page.keyboard.type("Touch text");
+  await page.keyboard.press("ControlOrMeta+a");
+  await expect(page.getByRole("toolbar")).toBeHidden();
+  await expect(page.locator(".block-handle")).toBeHidden();
+  expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBe(
+    390,
+  );
+  const padding = await page
+    .locator(".block-editor")
+    .evaluate((node) => getComputedStyle(node).paddingLeft);
+  expect(padding).toBe("22px");
+});
+
+test("native touch table tools edit structure and Tab enters the next cell", async ({
+  page,
+}) => {
+  await page.goto("/editor.html");
+  await page.evaluate(() => {
+    const api = (window as any).doompileEditor;
+    api.setTouchMode(true);
+    api.focus();
+  });
+  await expect(page.getByRole("textbox")).toBeFocused();
+  await page.evaluate(() => (window as any).doompileEditor.command("table"));
+  await expect(page.locator("table tr")).toHaveCount(3);
+  await page.keyboard.type("Cell");
+  await page.evaluate(() => (window as any).doompileEditor.command("tableRow"));
+  await expect(page.locator("table tr")).toHaveCount(4);
+  await page.evaluate(() =>
+    (window as any).doompileEditor.command("tableColumn"),
+  );
+  await expect(page.locator("table tr").first().locator("th, td")).toHaveCount(
+    4,
+  );
+  await page.evaluate(() => (window as any).doompileEditor.command("indent"));
+  await page.keyboard.type("Next");
+  await expect(page.locator("table")).toContainText("Next");
+  await page.evaluate(() =>
+    (window as any).doompileEditor.command("deleteTable"),
+  );
+  await expect(page.locator("table")).toHaveCount(0);
+});
+
+test("native short note fills the page and blank-page taps focus without touching text", async ({
+  page,
+}) => {
+  await page.setViewportSize({ width: 390, height: 720 });
+  await page.goto("/editor.html");
+  await page.evaluate(() => {
+    const api = (window as any).doompileEditor;
+    api.setTouchMode(true);
+    api.setTheme("light");
+    api.setDocument({
+      type: "doc",
+      content: [
+        { type: "paragraph", content: [{ type: "text", text: "Short note" }] },
+      ],
+    });
+  });
+  const editor = page.getByRole("textbox");
+  const bounds = (await editor.boundingBox())!;
+  expect(bounds.y + bounds.height).toBeGreaterThan(680);
+  await page.mouse.click(180, 610);
+  await expect(editor).toBeFocused();
+  await page.keyboard.press("ControlOrMeta+End");
+  await page.keyboard.type(" extended");
+  await expect(editor).toContainText("Short note extended");
+  await page.evaluate(() => (window as any).doompileEditor.setTheme("dark"));
+  expect(
+    await page
+      .locator("html")
+      .evaluate((e) => getComputedStyle(e).backgroundColor),
+  ).toBe("rgb(22, 22, 23)");
+});

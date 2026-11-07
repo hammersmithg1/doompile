@@ -1,0 +1,46 @@
+{
+  "version": 2,
+  "name": "Doompile",
+  "language": { "brand": "en", "interface": "ru" },
+  "copy": {
+    "tagline": "Your digital pile of good intentions.",
+    "motto": "Save it. Forget it.",
+    "capture": "Save it.",
+    "forget": "Forget it.",
+    "later": "Organize later. Probably.",
+    "saved": "In the void.",
+    "empty": "Good ideas. Deep down.",
+    "cat": "Great things. Someday. Maybe.",
+    "aside": "Your ambition exceeds your free time."
+  },
+  "ui": {
+    "save": "Сохранить в Doompile",
+    "saved": "Сохранено в Doompile",
+    "savedLocal": "Сохранено на устройстве. Синхронизируем при подключении.",
+    "emptyTitle": "Пока пусто. Ненадолго.",
+    "emptyBody": "Сохрани ссылку, находку или мысль. Когда-нибудь пригодится. Наверное.",
+    "searchEmpty": "Ничего не найдено",
+    "searchHint": "Попробуй другие слова или выбери другой тег.",
+    "capturePlaceholder": "Добавить в Doompile…",
+    "searchPlaceholder": "Найти в куче…",
+    "commentPlaceholder": "Добавить свою мысль (необязательно)",
+    "pin": "Закрепить",
+    "unpin": "Открепить",
+    "important": "Сделать важной",
+    "unimportant": "Убрать из важного"
+  },
+  "colors": {
+    "ink": "#191a23",
+    "paper": "#f7f5f2",
+    "lime": "#cff641",
+    "void": "#161617"
+  },
+  "iconStyle": { "viewBox": "0 0 24 24", "strokeWidth": 1.75 },
+  "wordmark": {
+    "font": "Sora ExtraBold",
+    "source": "fonts/Sora-ExtraBold.ttf",
+    "letterSpacing": -0.045
+  },
+  "appIcon": { "artwork": "illustrations/app-icon-void.png" },
+  "illustrations": ["void", "cat"]
+}

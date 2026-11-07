@@ -1,0 +1,190 @@
+{
+  "version": "0.1.0",
+  "build": "2.2",
+  "files": [
+    {
+      "path": "apps/ios/Doompile/App.entitlements",
+      "sha256": "6845dcef510e3f5b8d67e8a8151aa3871bb92516ad597d14e1c19245d27ea052"
+    },
+    {
+      "path": "apps/ios/Doompile/Assets.xcassets/AppIcon.appiconset/AppIcon.png",
+      "sha256": "146f5d2d214851da6343d56634ad8e158810f090ce71887e4cc2fe0d293dd48b"
+    },
+    {
+      "path": "apps/ios/Doompile/Assets.xcassets/AppIcon.appiconset/Contents.json",
+      "sha256": "852920cb36e95beb53771138a4b8195a16fcce1cc31250632f246081cc638f9a"
+    },
+    {
+      "path": "apps/ios/Doompile/Assets.xcassets/Contents.json",
+      "sha256": "f5fb0e1f3a8142892ed092efb5955c1c2cc537003a89ad7bbdb9dade7fe8985f"
+    },
+    {
+      "path": "apps/ios/Doompile/Assets.xcassets/LaunchBackground.colorset/Contents.json",
+      "sha256": "317870c65868222076246462909437f5b60755c2fb35e126c9666e5d4e79a651"
+    },
+    {
+      "path": "apps/ios/Doompile/DoompileApp.swift",
+      "sha256": "cff2ac612f68c68b05268fc4049917efafff1e7c725b11ec852a13ed68821088"
+    },
+    {
+      "path": "apps/ios/Doompile/Info.plist",
+      "sha256": "41823e94bc946317c3df4897cc04da704c770f206b971263d425d0179c02e4f3"
+    },
+    {
+      "path": "apps/ios/Doompile/RichEditorView.swift",
+      "sha256": "9c8c77a9537f7dd9b95171857d99d9a429c7e046bc91e3ec2f103ebb80f34256"
+    },
+    {
+      "path": "apps/ios/Shared/Models.swift",
+      "sha256": "15a65ccc20beab4b3f683e6ac64af714571e77e91b3fbc3fe6739e7a2682ddcb"
+    },
+    {
+      "path": "apps/ios/Shared/SourceLink.swift",
+      "sha256": "8150105528d0cdf39c9d2eb22beec9065145fd8790e754a81c728a7269f3e2c6"
+    },
+    {
+      "path": "apps/ios/Shared/Storage.swift",
+      "sha256": "912a7eab6ca57665f645bbce742fcf636c4c3605306d0cd2d113e45d1b6b2fd9"
+    },
+    {
+      "path": "apps/ios/Share/App.entitlements",
+      "sha256": "6845dcef510e3f5b8d67e8a8151aa3871bb92516ad597d14e1c19245d27ea052"
+    },
+    {
+      "path": "apps/ios/Share/Info.plist",
+      "sha256": "290c0b3c3f6f98e2ea86cc814ede267f0c6c734b933ba870f31294c212989405"
+    },
+    {
+      "path": "apps/ios/Share/Preprocess.js",
+      "sha256": "6b995dd90e11eeda52720e6212e013c6fc94fda8229978faa0291643beb8bcaf"
+    },
+    {
+      "path": "apps/ios/Share/ShareViewController.swift",
+      "sha256": "5bc41c852759bcbff0d77f37159c4a152d5e3c5facf7ee902c77ef5c815746bd"
+    },
+    {
+      "path": "apps/ios/Safari/App.entitlements",
+      "sha256": "6845dcef510e3f5b8d67e8a8151aa3871bb92516ad597d14e1c19245d27ea052"
+    },
+    {
+      "path": "apps/ios/Safari/Info.plist",
+      "sha256": "7f7daa5c9ca7fa04785f8b3efecdbab9d2aead47e5192df47855cf3d1885a2ea"
+    },
+    {
+      "path": "apps/ios/Safari/SafariWebExtensionHandler.swift",
+      "sha256": "ffd8ec8cf0e0593a72e9bf17de622696dfc6e0e074c2d76e95cf331dd7ea1615"
+    },
+    {
+      "path": "packages/editor/src/block-editor.ts",
+      "sha256": "266531dc1e447db93a234d2c130bcc028d3023294c1e24102d3beb5e17f58829"
+    },
+    {
+      "path": "packages/editor/src/blocks.css",
+      "sha256": "5c9016195767b651ce715615b2a69913589852bc51b6af477300aa39d8e25304"
+    },
+    {
+      "path": "packages/editor/src/blocks.ts",
+      "sha256": "88d7432cebf916e3708bb45778c8d69b31cc73fa4033c5fc584caef6ae926180"
+    },
+    {
+      "path": "packages/editor/src/editor.css",
+      "sha256": "dbbbb9639b838ad6880c5dfeaf41d2052bd4233006dadd1ada3139d20fa4308c"
+    },
+    {
+      "path": "packages/editor/src/editor.html",
+      "sha256": "95221e410c4ec93c2831c3f19a59dbb3241b7f194932df2ab1af4071687bf30a"
+    },
+    {
+      "path": "packages/editor/src/editor.ts",
+      "sha256": "a0bacc90860ded325008f059155cc8b4973f9278c53dbb07ec816e8076c0d857"
+    },
+    {
+      "path": "packages/editor/src/media-preview.tsx",
+      "sha256": "58e7344a6b5702389496ee8d7819d5f8f949987a2d6500c53e7615f2d7a59109"
+    },
+    {
+      "path": "packages/editor/src/media.css",
+      "sha256": "c17f674b691ddcee569ca55659fc5b461c05199d85d7f469b57ea6d03cde6b3d"
+    },
+    {
+      "path": "packages/editor/src/source-dialog.ts",
+      "sha256": "728d3fb3947d77242d25c5887c0b80e15effb82d245181ecf324cefc11ce7c40"
+    },
+    {
+      "path": "extensions/clipper/src/background.js",
+      "sha256": "f6fa624d62067fff8f53040a0854221276b3b5e8d631d569a7187d5a9f66c380"
+    },
+    {
+      "path": "extensions/clipper/src/composer.css",
+      "sha256": "91bf2b45cc1a9e0e9723e5dc7ba64454b51d0d185a6f25674185b82c32eb6540"
+    },
+    {
+      "path": "extensions/clipper/src/composer.js",
+      "sha256": "4a855be8a0d6015df8f03477178c82005ce8783a978bb599cd93637a7da58b20"
+    },
+    {
+      "path": "extensions/clipper/src/content.js",
+      "sha256": "cfb0ed9a2e20663a2c6a3d837cb2e1be429136be1e81e2a17b0af0eb7efb0ffc"
+    },
+    {
+      "path": "extensions/clipper/src/core.js",
+      "sha256": "21a2eacaa7b9a6a67e1c3406269ddeb0f80e029dc72aa6917f093f45e6cd26d8"
+    },
+    {
+      "path": "extensions/clipper/src/popup.css",
+      "sha256": "67f07202dff04afc32ef081c1f55250ff8818063f4a13911563c93c49da6b73d"
+    },
+    {
+      "path": "extensions/clipper/src/popup.html",
+      "sha256": "3093d3b67f4e72e1b4f2fb9409408b7c25415431d93b764783d3845bea5300d1"
+    },
+    {
+      "path": "extensions/clipper/src/popup.js",
+      "sha256": "4a270b1befa56ba799003b4539c55b0839c08af08993463f3cab026ff85d72af"
+    },
+    {
+      "path": "extensions/clipper/src/receipt.css",
+      "sha256": "1fa8b3cecf0715940a70272481c08261f6a275d166d276cc746920b82aa751de"
+    },
+    {
+      "path": "extensions/clipper/src/receipt.html",
+      "sha256": "748e121be1e7f0a85855c5e670322c125ea41dba0b153243f2c01fe1cb04a8e0"
+    },
+    {
+      "path": "extensions/clipper/src/receipt.js",
+      "sha256": "3eaafa7b4ba56e860b0741a49d16900c41dcfb68df4b1f721bddc0a6dccf17c9"
+    },
+    {
+      "path": "extensions/clipper/src/rich-editor.js",
+      "sha256": "b724600b069e50cea0f60ec1b18d98c50b8774ea422eec32a7a96ca14685d705"
+    },
+    {
+      "path": "extensions/clipper/src/transport.js",
+      "sha256": "d114ba412073950f9789f11b46b062ac6f9d2322b54d8bb74eeefda2d73b8dc3"
+    },
+    {
+      "path": "apps/ios/generate_project.py",
+      "sha256": "8f8baedb1e3c2d2ca0d1803958077cb98669430bc7fef0186a53b80bd00fd677"
+    },
+    {
+      "path": "apps/ios/scripts/testflight.sh",
+      "sha256": "713af94f9a2d71fcf7ec278341ee71191f46f1b8883524bb3517860095fb8740"
+    },
+    {
+      "path": "packages/editor/build.mjs",
+      "sha256": "5171fa32734c519f4c9f5fc4e038e229fd46bab16d7c283e916b2aa2aee0ad21"
+    },
+    {
+      "path": "extensions/clipper/build.mjs",
+      "sha256": "02dd96b404ce9fb247837187ce02a86024c0ec8ddf8ffb2145ca2b1d303725d2"
+    },
+    {
+      "path": "package.json",
+      "sha256": "6191c8414c87b522d478be87ebe83b43f675df54d6e9c94741953dd20653ae5a"
+    },
+    {
+      "path": "package-lock.json",
+      "sha256": "c21613f4440fec7006f68ead29424043bf97a74f98a93fa59f2625ff44b595af"
+    }
+  ]
+}

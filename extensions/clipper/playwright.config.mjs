@@ -1,0 +1,5 @@
+import {defineConfig} from '@playwright/test';
+const isolated=process.env.DOOMPILE_CLIPPER_ISOLATED_TEST==='1';
+const port=isolated?4191:4188;
+const command=isolated?'node extensions/clipper/build.mjs --out-dir extensions/clipper/.test-build && DOOMPILE_CLIPPER_TEST_DIST=extensions/clipper/.test-build/safari DOOMPILE_CLIPPER_TEST_PORT=4191 node extensions/clipper/test/serve.mjs':'node extensions/clipper/build.mjs && node extensions/clipper/test/serve.mjs';
+export default defineConfig({outputDir:'../../test-results/clipper',testDir:'./test',testMatch:'*.spec.mjs',timeout:30000,fullyParallel:true,use:{browserName:'webkit',baseURL:`http://127.0.0.1:${port}`,viewport:{width:1200,height:1000}},projects:[{name:'desktop',testMatch:'ui.spec.mjs'},{name:'iPhone',testMatch:'mobile.spec.mjs',use:{viewport:{width:393,height:852},isMobile:true,hasTouch:true,userAgent:'Mozilla/5.0 (iPhone; CPU iPhone OS 18_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/18.0 Mobile/15E148 Safari/604.1'}}],webServer:{command,cwd:'../..',url:`http://127.0.0.1:${port}`,reuseExistingServer:false}});

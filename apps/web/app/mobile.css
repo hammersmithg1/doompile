@@ -1,0 +1,489 @@
+/* iPhone shell. Desktop layout and the shared document model stay unchanged. */
+.mobile-compose-plus,
+.mobile-welcome,
+.mobile-editor-tools,
+.mobile-new-flags,
+.mobile-row-actions {
+  display: none;
+}
+.urgent-stack > .mobile-note-row {
+  display: contents;
+}
+.mobile-tag-label {
+  display: none;
+}
+@media (min-width: 761px) {
+  .mobile-row-content {
+    transform: none !important;
+  }
+}
+@media (max-width: 760px) {
+  .mobile-tag-label {
+    display: inline;
+  }
+  .desktop-tag-label {
+    display: none;
+  }
+  html,
+  body {
+    height: 100%;
+    overflow: hidden;
+  }
+  .app-shell {
+    position: fixed;
+    inset-inline: 0;
+    top: var(--mobile-top, 0px);
+    height: var(--mobile-height, 100dvh);
+    min-height: 0;
+  }
+  .main-scroll,
+  .has-detail .main-scroll {
+    padding: max(20px, env(safe-area-inset-top)) 16px 16px;
+    overscroll-behavior-y: contain;
+  }
+  .main-column {
+    min-height: 0;
+  }
+  .mobile-tools {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    overflow: hidden;
+    clip-path: inset(50%);
+  }
+  .mobile-tools:focus-within {
+    position: static;
+    width: auto;
+    height: auto;
+    clip-path: none;
+  }
+  .sidebar {
+    top: var(--mobile-top, 0px);
+    bottom: auto;
+    height: var(--mobile-height, 100dvh);
+    padding-top: max(24px, env(safe-area-inset-top));
+    width: min(310px, 86vw) !important;
+  }
+  .sidebar .nav-item {
+    min-height: 46px;
+    font-size: 15px;
+  }
+  .sidebar .search-box {
+    min-height: 42px;
+  }
+  .search-box input,
+  .tag-editor-search input {
+    font-size: 16px;
+  }
+  .sidebar .cat-card {
+    display: none;
+  }
+  .sidebar .packs {
+    flex: 1;
+  }
+  .sidebar-bottom {
+    padding-top: 12px;
+  }
+  .sidebar .settings-link {
+    margin: 0;
+  }
+  .welcome {
+    display: block;
+    text-align: left;
+    padding: min(18vh, 130px) 0 24px;
+  }
+  .welcome > :not(.mobile-welcome) {
+    display: none;
+  }
+  .mobile-welcome {
+    display: block;
+  }
+  .mobile-welcome > svg {
+    width: 54px;
+    height: 30px;
+    color: #a8c86c;
+    margin: 0 0 18px;
+  }
+  .mobile-welcome h2 {
+    font-size: 28px;
+    letter-spacing: -0.9px;
+    margin: 0 0 16px;
+  }
+  .mobile-welcome p {
+    font-size: 16px;
+    line-height: 1.55;
+    color: var(--muted);
+    margin: 0;
+  }
+  .composer-dock,
+  .has-detail .composer-dock {
+    flex-shrink: 0;
+    padding: 8px 12px max(10px, env(safe-area-inset-bottom));
+  }
+  .quick-composer {
+    border-color: var(--line);
+    border-radius: 24px;
+    padding: 4px 7px;
+    min-height: 50px;
+    box-shadow: none;
+  }
+  .composer-input-row {
+    align-items: center;
+  }
+  .mobile-compose-plus {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: 36px;
+    height: 40px;
+    flex-shrink: 0;
+    color: var(--muted);
+  }
+  .composer-input-row textarea {
+    padding: 9px 2px;
+    min-height: 40px;
+    line-height: 22px;
+    font-size: 16px;
+  }
+  .composer-input-row textarea::placeholder {
+    font-size: 16px;
+  }
+  .composer-tools {
+    height: auto;
+  }
+  .composer-tools > .icon-button:not(.quick-voice),
+  .composer-tools > .attachment-trigger {
+    display: none !important;
+  }
+  .composer-tools .quick-voice {
+    width: 40px;
+    height: 40px;
+  }
+  .send-button {
+    width: 38px;
+    height: 38px;
+    border-radius: 50%;
+    margin: 0;
+  }
+  .send-button:disabled {
+    display: none;
+  }
+  .quick-composer:has(textarea:not(:placeholder-shown)) .quick-voice {
+    display: none;
+  }
+  .composer-footnote {
+    display: none;
+  }
+  .note-row {
+    padding: 15px 2px;
+  }
+  .note-preview-text {
+    font-size: 15px;
+    line-height: 1.5;
+  }
+  .note-meta,
+  .row-time {
+    font-size: 11px;
+  }
+  .row-time {
+    min-width: 38px;
+    right: 2px;
+    text-align: right;
+  }
+  .feed-section-toggle {
+    min-height: 40px;
+    font-size: 13px;
+  }
+  .urgent-stack {
+    display: flex;
+    flex-direction: column;
+    gap: 7px;
+  }
+  .urgent-stack > .mobile-note-row {
+    display: block;
+  }
+  .urgent-stack .urgent-card {
+    width: 100%;
+    min-width: 0;
+    max-width: none;
+    min-height: 60px;
+    height: auto;
+    max-height: none;
+    flex: auto;
+    padding: 12px 16px;
+    border: 0;
+    border-radius: 9px;
+    background: #fbe3e2;
+    color: var(--text);
+    box-shadow: none;
+    position: relative;
+    justify-content: center;
+  }
+  .urgent-stack .urgent-card strong {
+    font-size: 15px;
+    margin: 0;
+    line-height: 1.4;
+  }
+  .urgent-stack .urgent-card-top,
+  .urgent-stack .urgent-card p {
+    display: none;
+  }
+  .urgent-stack .urgent-card-bottom {
+    margin-top: 5px;
+    color: var(--muted);
+    font-size: 10px;
+  }
+  html[data-theme="dark"] .urgent-stack .urgent-card {
+    background: #392529;
+  }
+  .urgent-stack > .urgent-card {
+    flex: auto;
+    min-height: 60px;
+    height: auto;
+    max-height: none;
+    padding: 12px 16px;
+  }
+  .urgent-stack > .urgent-card strong {
+    font-size: 15px;
+  }
+  .mobile-note-row {
+    position: relative;
+    overflow: hidden;
+    border-radius: 9px;
+  }
+  .mobile-row-content {
+    position: relative;
+    z-index: 1;
+    background: var(--bg);
+    transition: transform 140ms ease-out;
+    touch-action: pan-y pinch-zoom;
+  }
+  .mobile-row-content.is-dragging {
+    transition: none;
+  }
+  .mobile-row-actions {
+    display: flex;
+    position: absolute;
+    inset: 0 0 0 auto;
+    width: 156px;
+    align-items: stretch;
+  }
+  .mobile-row-actions button {
+    width: 52px;
+    background: var(--sidebar);
+    color: var(--muted);
+    display: grid;
+    place-items: center;
+  }
+  .mobile-row-actions button:nth-child(2) {
+    background: #da8a5230;
+    color: #d47b43;
+  }
+  .mobile-row-actions button:last-child {
+    background: #d9536326;
+    color: #d95363;
+  }
+  .detail-pane,
+  .detail-expanded > .detail-pane {
+    top: 0;
+    height: 100%;
+    bottom: auto;
+    position: absolute;
+  }
+  .expanded-editor {
+    height: 100%;
+    max-height: 100%;
+    border-radius: 0;
+  }
+  .composing .composer-dock {
+    position: absolute;
+    inset: 0 !important;
+    height: 100% !important;
+    max-height: 100% !important;
+    padding: 0 !important;
+  }
+  .note-editor-surface {
+    height: 100%;
+  }
+  .note-editor-header {
+    min-height: 60px;
+    padding: env(safe-area-inset-top) 10px 0;
+    border: 0;
+  }
+  .note-editor-header-inner {
+    min-height: 58px;
+    padding: 0;
+    justify-content: flex-end;
+  }
+  .note-editor-actions {
+    margin-left: auto;
+    gap: 2px;
+  }
+  .note-editor-actions .editor-action {
+    width: 38px;
+    height: 44px;
+  }
+  .note-editor-actions .editor-delete,
+  .note-editor-actions .editor-action-divider,
+  .note-editor-actions [aria-label="Развернуть заметку"],
+  .note-editor-actions [aria-label="Свернуть заметку"] {
+    display: none;
+  }
+  .editor-save-status {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    overflow: hidden;
+    clip-path: inset(50%);
+  }
+  .mobile-new-flags {
+    display: flex;
+  }
+  .note-tags-editor {
+    position: absolute;
+    top: max(12px, env(safe-area-inset-top));
+    left: 16px;
+    padding: 0;
+    max-width: calc(100% - 174px);
+    min-height: 40px;
+  }
+  .note-tags-editor .editor-tag {
+    display: none;
+  }
+  .tag-editor-add {
+    min-height: 40px;
+    font-size: 14px;
+  }
+  .tag-editor-picker {
+    width: 100%;
+  }
+  .note-tags-editor[data-tag-editor-picker-open="true"] {
+    position: absolute;
+    left: 12px;
+    right: 12px;
+    top: max(8px, env(safe-area-inset-top));
+    max-width: none;
+    background: var(--surface);
+    padding: 10px;
+    border: 1px solid var(--line);
+    border-radius: 12px;
+    box-shadow: var(--shadow);
+  }
+  .note-tags-editor[data-tag-editor-picker-open="true"] .editor-tag {
+    display: inline-flex;
+    font-size: 14px;
+    height: 34px;
+  }
+  .note-tags-editor[data-tag-editor-picker-open="true"] .editor-tag > button {
+    opacity: 1;
+    width: 30px;
+    height: 30px;
+  }
+  .note-tags-editor[data-tag-editor-picker-open="true"]
+    .tag-editor-suggestions {
+    max-height: min(240px, 40vh);
+  }
+  .tag-editor-search {
+    width: 100%;
+  }
+  .tag-editor-search > button {
+    width: 36px;
+    height: 36px;
+    display: grid;
+    place-items: center;
+    color: var(--muted);
+    flex-shrink: 0;
+  }
+  .note-editor-scroll {
+    overscroll-behavior: contain;
+    display: flex;
+    flex-direction: column;
+  }
+  .note-editor-document,
+  .note-editor-document > .rich-editor,
+  .rich-editor > div:first-child,
+  .rich-editor .block-editor {
+    display: flex;
+    flex-direction: column;
+    flex: 1;
+  }
+  .rich-editor .block-editor {
+    padding: 16px 20px 32px;
+    min-height: 100%;
+  }
+  .rich-editor .block-editor > div:first-child {
+    display: flex;
+    flex-direction: column;
+    flex: 1;
+  }
+  .rich-editor .block-editor .tiptap {
+    flex: 1;
+    min-height: 100%;
+    font-size: 17px;
+    line-height: 1.55;
+  }
+  .mobile-editor-tools {
+    display: flex;
+    flex-shrink: 0;
+    align-items: center;
+    border-top: 1px solid var(--line);
+    background: var(--surface);
+    padding: 4px 6px max(4px, env(safe-area-inset-bottom));
+  }
+  html[data-keyboard="true"] .mobile-editor-tools {
+    padding-bottom: 4px;
+  }
+  .mobile-editor-tools > div {
+    display: flex;
+    flex: 1;
+    min-width: 0;
+    overflow-x: auto;
+    overscroll-behavior-x: contain;
+    scrollbar-width: none;
+  }
+  .mobile-editor-tools button {
+    display: grid;
+    place-items: center;
+    min-width: 44px;
+    width: 44px;
+    height: 44px;
+    color: var(--muted);
+    border-radius: 7px;
+    flex-shrink: 0;
+  }
+  .mobile-editor-tools button:active {
+    background: var(--sidebar);
+  }
+  .mobile-editor-tools > button {
+    border-left: 1px solid var(--line);
+    margin-left: 4px;
+    border-radius: 0;
+  }
+  .toast {
+    bottom: calc(env(safe-area-inset-bottom) + 76px);
+  }
+  .settings-modal,
+  .tag-modal {
+    max-height: 100%;
+  }
+  .modal-backdrop {
+    top: var(--mobile-top, 0);
+    bottom: auto;
+    height: var(--mobile-height, 100dvh);
+  }
+  .header-recording {
+    position: absolute;
+    top: 54px;
+    z-index: 3;
+    padding: 6px 12px;
+    background: var(--surface);
+  }
+  .note-editor-header:has(.header-recording) {
+    padding-bottom: 36px;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .mobile-row-content {
+    transition: none;
+  }
+}

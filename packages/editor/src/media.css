@@ -1,0 +1,509 @@
+.attachment-card {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  min-width: 0;
+  min-height: 60px;
+  padding: 7px 10px 7px 7px;
+  border: 1px solid var(--line, var(--editor-line, #2b3025));
+  border-radius: 10px;
+  background: var(--input, var(--editor-panel, #1c1f18));
+  color: var(--text, inherit);
+  text-decoration: none;
+  transition:
+    background 0.15s,
+    border-color 0.15s;
+}
+.attachment-card:hover {
+  background: var(--surface, var(--editor-panel, #1c1f18));
+  border-color: #9a949b66;
+}
+.attachment-card:focus-visible,
+.attachment-audio:focus-within {
+  outline: 2px solid #2d94d4;
+  outline-offset: 2px;
+}
+.attachment-art {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 44px;
+  height: 44px;
+  flex: 0 0 44px;
+  border-radius: 6px;
+  overflow: hidden;
+  background: #8c869610;
+  color: var(--muted, var(--editor-muted, #92998a));
+}
+.attachment-art img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+.attachment-info {
+  min-width: 0;
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+.attachment-info strong {
+  font-size: 12px;
+  line-height: 17px;
+  font-weight: 550;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--text, inherit);
+}
+.attachment-info small {
+  display: flex;
+  gap: 6px;
+  color: var(--muted, var(--editor-muted, #92998a));
+  font-size: 10px;
+  line-height: 14px;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+.attachment-action {
+  flex-shrink: 0;
+  color: var(--muted, var(--editor-muted, #92998a));
+}
+.link-description {
+  font-size: 11px;
+  line-height: 16px;
+  color: var(--muted, var(--editor-muted, #92998a));
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 1;
+  overflow: hidden;
+}
+.link-preview .attachment-art {
+  width: 56px;
+  height: 56px;
+  flex-basis: 56px;
+}
+.attachment-audio {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  min-height: 74px;
+  padding: 10px 12px;
+  border-radius: 12px;
+  background: #eaf3fa;
+  color: #258bc7;
+  min-width: 0;
+  max-width: 560px;
+}
+.attachment-audio > audio {
+  display: none;
+}
+.audio-play {
+  border: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 44px;
+  height: 44px;
+  flex: 0 0 44px;
+  border-radius: 50%;
+  background: #2d94d4;
+  color: white;
+  transition:
+    background 0.15s,
+    transform 0.15s;
+}
+.audio-play:hover {
+  background: #1d85c4;
+  transform: scale(1.04);
+}
+.audio-track {
+  position: relative;
+  min-width: 0;
+  flex: 1;
+  padding: 0;
+}
+.audio-waveform {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 2px;
+  height: 28px;
+  width: 100%;
+  pointer-events: none;
+}
+.audio-waveform i {
+  display: block;
+  min-width: 1px;
+  width: 3px;
+  max-width: 3px;
+  flex: 1;
+  border-radius: 3px;
+  background: #2d94d480;
+  transition: background 0.1s;
+}
+.audio-waveform i.played {
+  background: #2187c9;
+}
+.audio-seek {
+  appearance: none;
+  -webkit-appearance: none;
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 28px;
+  margin: 0;
+  opacity: 0;
+  cursor: pointer;
+}
+.audio-seek:focus-visible {
+  opacity: 0.3;
+}
+.audio-time {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  line-height: 17px;
+  font-variant-numeric: tabular-nums;
+  letter-spacing: 0.2px;
+}
+.audio-time small {
+  font-size: 10px;
+  opacity: 0.7;
+}
+.audio-dot {
+  width: 5px;
+  height: 5px;
+  border-radius: 50%;
+  background: currentColor;
+}
+.audio-download {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: inherit;
+  border-radius: 8px;
+  width: 29px;
+  height: 32px;
+  flex-shrink: 0;
+  background: #2d94d40d;
+}
+.audio-download:hover {
+  background: #2d94d41c;
+}
+.attachment-video {
+  border: 1px solid var(--line, var(--editor-line, #2b3025));
+  border-radius: 10px;
+  overflow: hidden;
+  background: var(--input, var(--editor-panel, #1c1f18));
+}
+.attachment-video video {
+  display: block;
+  max-width: 100%;
+  width: 100%;
+  max-height: 200px;
+  background: #141419;
+}
+.attachment-video > span {
+  display: block;
+  padding: 7px 10px;
+  font-size: 11px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+html[data-theme="dark"] .attachment-audio {
+  background: #192731;
+  color: #49a4df;
+}
+html[data-theme="dark"] .audio-waveform i {
+  background: #399cdb70;
+}
+html[data-theme="dark"] .audio-waveform i.played {
+  background: #49a9e7;
+}
+.recording-snippet {
+  min-width: 0;
+  margin: 0;
+}
+.recording-live {
+  display: flex;
+  gap: 12px;
+  align-items: center;
+  min-height: 74px;
+  padding: 12px;
+  border-radius: 12px;
+  color: #d15b48;
+  background: #d15b4812;
+}
+.recording-dot {
+  width: 9px;
+  height: 9px;
+  flex: 0 0 9px;
+  border-radius: 50%;
+  background: #e25a42;
+  animation: recording-pulse 1.5s ease-in-out infinite;
+}
+.recording-live > div {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  flex: 1;
+  min-width: 0;
+}
+.recording-live strong {
+  font-size: 12px;
+  font-weight: 550;
+}
+.recording-live span {
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+}
+.recording-live button,
+.recording-recovery button {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  border: 1px solid currentColor;
+  border-radius: 6px;
+  background: transparent;
+  color: inherit;
+  padding: 5px 9px;
+  font: inherit;
+  font-size: 12px;
+  cursor: pointer;
+}
+.recording-recovery {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+  padding: 7px 2px;
+  font-size: 11px;
+  color: var(--muted, var(--editor-muted, #92998a));
+}
+@keyframes recording-pulse {
+  50% {
+    opacity: 0.35;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .recording-dot {
+    animation: none;
+  }
+}
+.attachment-card,
+.attachment-audio,
+.attachment-video,
+.recording-snippet {
+  font-family: var(
+    --sans,
+    -apple-system,
+    BlinkMacSystemFont,
+    "Segoe UI",
+    sans-serif
+  );
+}
+.audio-track {
+  container-type: inline-size;
+}
+.audio-waveform {
+  display: grid;
+  grid-template-columns: repeat(64, minmax(0, 1fr));
+  gap: min(2px, 0.4cqw);
+  overflow: hidden;
+}
+.audio-waveform i {
+  min-width: 0;
+  width: 100%;
+  justify-self: center;
+}
+.audio-status-label {
+  min-width: 0;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+.audio-dot {
+  flex-shrink: 0;
+}
+
+/* Media-sized snippets: small files, visual images and videos at their native ratio. */
+.attachment-card {
+  width: 320px;
+  max-width: 100%;
+  min-height: 50px;
+  padding: 6px 9px 6px 6px;
+  gap: 8px;
+  border-radius: 9px;
+}
+.attachment-art {
+  width: 34px;
+  height: 34px;
+  flex-basis: 34px;
+}
+.attachment-art > svg {
+  width: 19px;
+  height: 19px;
+}
+.attachment-info {
+  gap: 2px;
+}
+.attachment-info strong {
+  font-size: 11px;
+  line-height: 16px;
+}
+.link-preview {
+  width: 340px;
+}
+.link-preview .attachment-art {
+  width: 40px;
+  height: 40px;
+  flex-basis: 40px;
+}
+.link-description {
+  font-size: 10px;
+  line-height: 14px;
+}
+.attachment-audio {
+  width: 320px;
+  max-width: 100%;
+  min-height: 60px;
+  padding: 8px 10px;
+  gap: 10px;
+  border-radius: 10px;
+}
+.audio-play {
+  width: 36px;
+  height: 36px;
+  flex-basis: 36px;
+}
+.audio-play > svg {
+  width: 17px;
+  height: 17px;
+}
+.audio-waveform {
+  height: 26px;
+}
+.audio-time {
+  font-size: 11px;
+  line-height: 15px;
+}
+.audio-download {
+  width: 25px;
+  height: 29px;
+}
+.attachment-picture {
+  position: relative;
+  display: block;
+  width: fit-content;
+  max-width: 100%;
+  border-radius: 9px;
+  overflow: hidden;
+  line-height: 0;
+  background: #8c869610;
+}
+.attachment-picture > img {
+  display: block;
+  width: auto;
+  height: auto;
+  max-width: min(240px, 100%);
+  max-height: 180px;
+  object-fit: contain;
+  margin: 0;
+  border-radius: 0;
+}
+.picture-open {
+  position: absolute;
+  bottom: 6px;
+  right: 6px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 23px;
+  height: 23px;
+  border-radius: 6px;
+  background: #1119;
+  color: white;
+  opacity: 0;
+  transition: opacity 0.15s;
+}
+.attachment-picture:hover .picture-open,
+.attachment-picture:focus-visible .picture-open {
+  opacity: 1;
+}
+.attachment-picture:focus-visible {
+  outline: 2px solid #2d94d4;
+  outline-offset: 2px;
+}
+.attachment-video {
+  width: fit-content;
+  max-width: 100%;
+  border-radius: 9px;
+}
+.attachment-video video {
+  width: 100%;
+  height: auto;
+  max-width: 100%;
+  max-height: none;
+}
+.attachment-video > span {
+  padding: 5px 8px;
+  font-size: 10px;
+  line-height: 14px;
+}
+.recording-snippet {
+  width: 320px;
+  max-width: 100%;
+}
+.recording-live {
+  color: #258bc7;
+  background: #eaf3fa;
+}
+.recording-live > .audio-track {
+  display: block;
+}
+.recording-live .audio-time {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.recording-live .audio-time > span {
+  font-size: 11px;
+}
+.recording-live .audio-time .recording-dot {
+  width: 5px;
+  height: 5px;
+  flex: 0 0 5px;
+}
+.recording-live .recording-stop {
+  padding: 0;
+  border: 0;
+  border-radius: 50%;
+  color: white;
+  background: #2d94d4;
+}
+.recording-live .audio-status-label {
+  font-size: 10px;
+  opacity: 0.8;
+}
+.recording-live .recording-waveform {
+  display: grid;
+}
+.recording-spinner {
+  animation: microphone-spin 1s linear infinite;
+}
+@keyframes microphone-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .recording-spinner {
+    animation: none;
+  }
+}

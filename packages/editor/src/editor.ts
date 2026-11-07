@@ -1,0 +1,285 @@
+import {
+  createBlockEditor,
+  documentPlainText,
+  prepareDocument,
+  type Media,
+  type NoteOption,
+} from "./block-editor";
+import type { JSONContent } from "@tiptap/core";
+import { setBlockType } from "./formatting-ui";
+import { indentText } from "./formatting";
+import { errorProperties } from "../../telemetry/core";
+declare global {
+  interface Window {
+    webkit?: {
+      messageHandlers: {
+        doompile: { postMessage: (message: unknown) => void };
+      };
+    };
+    doompileEditor: typeof api;
+  }
+}
+function post(message: unknown) {
+  window.webkit?.messageHandlers.doompile.postMessage(message);
+}
+window.addEventListener("error", event => post({ type: "telemetry", name: "runtime.error", properties: errorProperties(event.error) }));
+window.addEventListener("unhandledrejection", event => post({ type: "telemetry", name: "runtime.error", properties: errorProperties(event.reason) }));
+function mediaURL(value: unknown): string {
+  const url = String(value || "");
+  const remote = url.match(/^\/api\/attachments\/([0-9a-f-]{36})$/i);
+  if (remote) return `doompile-media://attachment/${remote[1]}`;
+  const local = url.match(/^local:([0-9a-f-]{36})$/i);
+  if (local) return `doompile-media://local/${local[1]}`;
+  return /^https?:\/\//.test(url) ? url : "";
+}
+let frame = 0;
+function height() {
+  cancelAnimationFrame(frame);
+  frame = requestAnimationFrame(() =>
+    post({
+      type: "height",
+      height: Math.max(
+        280,
+        document.getElementById("editor")!.getBoundingClientRect().height,
+      ),
+    }),
+  );
+}
+const controller = createBlockEditor(document.getElementById("editor")!, {
+  onTelemetry: (name, properties) => post({ type: "telemetry", name, properties }),
+  mediaURL,
+  onChange: (body, plainText) => {
+    post({ type: "change", body, plainText });
+    height();
+  },
+  onReference: (id) => post({ type: "reference", id }),
+  onAction: (action) => post({ type: "action", action }),
+  onLink: (href) => post({ type: "requestLink", href }),
+  onHeight: height,
+  onOpenAttachment: (url) => post({ type: "openAttachment", url }),
+  onMediaPaste: (attachments) => post({ type: "pastedMedia", attachments }),
+});
+const { editor } = controller;
+// The Mac capture panel keeps this editor alive when it changes size.
+// Compact mode only changes presentation; it never serializes rich blocks to text.
+editor.view.dom.addEventListener("keydown", (event) => {
+  if (document.documentElement.dataset.nativeCapture !== "compact" || event.isComposing) return;
+  if (event.key === "/" || event.key === "@") post({ type: "action", action: "expandCapture" });
+  if (event.key === "Enter" && !event.shiftKey && !event.altKey && !event.ctrlKey && !document.querySelector(".command-menu:not([hidden])")) {
+    event.preventDefault();
+    event.stopImmediatePropagation();
+    post({ type: "action", action: "sendCapture" });
+  }
+}, true);
+const api = {
+  setCaptureMode(compact: boolean) {
+    document.documentElement.dataset.nativeCapture = compact ? "compact" : "expanded";
+    height();
+  },
+  setNoteURL(value: string) {
+    controller.setNoteURL(value);
+  },
+  openPreferences() {
+    controller.openPreferences();
+  },
+  setTheme(theme: "light" | "dark") {
+    document.documentElement.dataset.theme =
+      theme === "light" ? "light" : "dark";
+  },
+  setEditable(editable: boolean) {
+    editor.setEditable(editable === true);
+    height();
+  },
+  setDocument(
+    body: JSONContent,
+    title?: string,
+    source?: Record<string, unknown>,
+  ) {
+    controller.setDocument(
+      title !== undefined || source !== undefined
+        ? prepareDocument(body, title, source)
+        : body,
+      false,
+    );
+    height();
+  },
+  setAttachments(value: Media[]) {
+    controller.setAttachments(value || []);
+  },
+  setNotes(value: NoteOption[]) {
+    controller.setNotes(value || []);
+  },
+  reconcileAttachments(updates: { from: string; to: string }[]) {
+    const replacements = new Map(updates.map(({ from, to }) => [from, to]));
+    const transaction = editor.state.tr;
+    editor.state.doc.descendants((node, position) => {
+      const attribute =
+        node.type.name === "image"
+          ? "src"
+          : node.type.name === "attachment"
+            ? "url"
+            : null;
+      if (!attribute) return;
+      const replacement = replacements.get(node.attrs[attribute]);
+      if (replacement && replacement !== node.attrs[attribute])
+        transaction.setNodeMarkup(position, undefined, {
+          ...node.attrs,
+          [attribute]: replacement,
+        });
+    });
+    if (transaction.docChanged)
+      editor.view.dispatch(transaction.setMeta("addToHistory", false));
+  },
+  insertAttachment(attachment: Media) {
+    controller.insertAttachment(attachment);
+  },
+  insertRecording(id: string) {
+    controller.insertRecording(id);
+  },
+  setRecordingState(state: import("./media-preview").RecordingDisplay) {
+    controller.setRecordingState(state);
+  },
+  completeRecording(id: string, attachment: Media) {
+    controller.completeRecording(id, attachment);
+    controller.reconcileMedia({
+      type: "doc",
+      content: [
+        { type: "attachment", attrs: { ...attachment, recordingId: id } },
+      ],
+    });
+  },
+  setLink(url: string) {
+    if (/^https?:\/\//.test(url))
+      editor
+        .chain()
+        .focus()
+        .extendMarkRange("link")
+        .setLink({ href: url })
+        .run();
+    else if (!url) editor.chain().focus().unsetLink().run();
+  },
+  toggleTaskList() {
+    editor.chain().focus().toggleTaskList().run();
+  },
+  focus() {
+    editor.commands.focus("end");
+  },
+  blur() {
+    editor.commands.blur();
+  },
+  setTouchMode(enabled: boolean) {
+    document.documentElement.dataset.nativeTouch = String(enabled);
+    formats();
+    height();
+  },
+  command(action: string) {
+    const chain = editor.chain().focus();
+    switch (action) {
+      case "colors":
+        controller.openFormatting("colors");
+        return true;
+      case "more":
+        controller.openFormatting("more");
+        return true;
+      case "blockType":
+        controller.openFormatting("type");
+        return true;
+      case "blockActions":
+        controller.openBlockActions();
+        return true;
+      case "bold":
+        return chain.toggleBold().run();
+      case "italic":
+        return chain.toggleItalic().run();
+      case "underline":
+        return chain.toggleUnderline().run();
+      case "heading":
+        return setBlockType(
+          editor,
+          editor.isActive("heading", { level: 2 }) ? "paragraph" : "h2",
+        );
+      case "checklist":
+        return chain.toggleTaskList().run();
+      case "bulletList":
+        return chain.toggleBulletList().run();
+      case "orderedList":
+        return chain.toggleOrderedList().run();
+      case "quote":
+        return chain.toggleBlockquote().run();
+      case "code":
+        return chain.toggleCodeBlock().run();
+      case "table":
+        return chain
+          .insertTable({ rows: 3, cols: 3, withHeaderRow: true })
+          .run();
+      case "indent":
+        if (editor.isActive("table")) return chain.goToNextCell().run();
+        if (editor.isActive("codeBlock"))
+          return chain.insertContent("\t").run();
+        editor.view.focus();
+        return indentText(editor, 1);
+      case "outdent":
+        if (editor.isActive("table")) return chain.goToPreviousCell().run();
+        editor.view.focus();
+        return indentText(editor, -1);
+      case "tableRow":
+        return chain.addRowAfter().run();
+      case "tableColumn":
+        return chain.addColumnAfter().run();
+      case "deleteTable":
+        return chain.deleteTable().run();
+      case "mention":
+        return chain.insertContent("@").run();
+      case "undo":
+        return chain.undo().run();
+      case "redo":
+        return chain.redo().run();
+      default:
+        return false;
+    }
+  },
+  getDocument() {
+    return editor.getJSON();
+  },
+  getState() {
+    return { body: editor.getJSON(), plainText: documentPlainText(editor) };
+  },
+};
+function formats() {
+  if (document.documentElement.dataset.nativeTouch !== "true") return;
+  const active = [
+    ["bold", editor.isActive("bold")],
+    ["italic", editor.isActive("italic")],
+    ["underline", editor.isActive("underline")],
+    ["heading", editor.isActive("heading")],
+    ["checklist", editor.isActive("taskList")],
+    ["bulletList", editor.isActive("bulletList")],
+    ["orderedList", editor.isActive("orderedList")],
+    ["quote", editor.isActive("blockquote")],
+    ["code", editor.isActive("codeBlock")],
+    ["table", editor.isActive("table")],
+  ]
+    .filter(([, enabled]) => enabled)
+    .map(([name]) => name);
+  post({ type: "formats", active });
+}
+editor.on("selectionUpdate", formats);
+editor.on("transaction", formats);
+// Padding and the bottom of a short native note are capture targets too.
+// A click listener preserves selection, links, media controls and scroll gestures.
+document.addEventListener("click", (event) => {
+  if (document.documentElement.dataset.nativeTouch !== "true") return;
+  const target = event.target as HTMLElement;
+  if (
+    target === document.body ||
+    target === document.documentElement ||
+    target.id === "editor" ||
+    target.classList.contains("block-editor")
+  )
+    api.focus();
+});
+window.doompileEditor = api;
+new ResizeObserver(height).observe(document.getElementById("editor")!);
+window.addEventListener("load", height);
+post({ type: "ready" });
+height();

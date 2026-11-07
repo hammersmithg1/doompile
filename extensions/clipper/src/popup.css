@@ -1,0 +1,20 @@
+:root{font:400 13px/1.5 -apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;color-scheme:light;background:var(--bg);color:var(--text);width:520px;min-width:520px}*{box-sizing:border-box}body{margin:0;width:520px;min-width:520px;padding:10px;overflow-x:hidden}button,input{font:inherit;min-width:0}button{cursor:pointer}button:focus-visible,input:focus-visible{outline:2px solid var(--snippet-accent);outline-offset:2px}#capture{display:flex;gap:5px;align-items:center}#composer{min-width:0;flex:1}.gear{align-self:center;border:0;background:none;color:var(--muted);font-size:18px;width:24px;padding:0}.expanded #capture{display:block;position:relative}.expanded .gear{position:absolute;right:15px;bottom:16px;z-index:1}.settings-top{display:flex;align-items:center;justify-content:space-between;gap:12px}h2{font-size:16px;margin:0}.quiet{border:0;background:none;color:var(--muted);padding:8px 0}.hint{font-size:11px;line-height:1.5;color:var(--muted)}label{font-size:11px;color:var(--muted);display:block;margin:12px 0 5px}#settings input{display:block;width:100%;border:1px solid #dedbd7;background:var(--surface);color:inherit;border-radius:9px;padding:10px;font-size:13px}.primary{display:block;width:100%;background:var(--send);color:var(--text);border:0;border-radius:10px;padding:11px;font-weight:600;margin-top:14px}.secondary{border:1px solid #dedbd7;border-radius:9px;background:none;color:inherit;padding:9px;width:100%;margin-top:8px;font-size:12px}#status{font-size:12px;overflow-wrap:anywhere;margin-top:12px}.error{color:#cf5341!important}#queue{padding:0;list-style:none;max-height:140px;overflow:auto}#queue li{font-size:11px;padding:8px 0;border-bottom:1px solid #dedbd7}#queue small{display:block;color:#b65d66}.receipt-mode,.receipt-mode body{width:300px!important;min-width:300px!important}.receipt-mode body{padding:12px}.receipt{display:flex;align-items:center;gap:9px;min-height:25px}.receipt-mark{display:flex;align-items:center;justify-content:center;width:25px;height:25px;border-radius:50%;background:var(--send);color:var(--text);font-weight:700}.receipt-text{white-space:nowrap;font-weight:500}[hidden]{display:none!important}
+@media(prefers-color-scheme:dark){:root{color-scheme:dark;background:var(--bg);color:var(--text)}#settings input{background:var(--surface);border-color:var(--line)}.secondary,#queue li{border-color:var(--line)}}
+
+.expanded #composer{max-height:560px}
+
+/* Safari supplies the sheet size. Never impose desktop width or height on it. */
+:root.mobile-popup,.mobile-popup body{width:100%;min-width:0;max-width:100%;height:auto;min-height:0}
+.mobile-popup body{padding:12px}
+.mobile-popup #capture{align-items:flex-start}
+.mobile-popup #composer{width:0;flex:1}
+.mobile-popup .gear{width:32px;min-height:44px;flex-shrink:0}
+.mobile-popup .dp-quick{width:100%}
+.mobile-popup .dp-comment{flex-basis:100%;min-height:48px}
+.mobile-popup .dp-tools{margin-left:auto}
+.mobile-popup .hint{font-size:13px}
+.mobile-popup #settings input{font-size:16px}
+
+.receipt-link{margin-left:auto;color:inherit;white-space:nowrap;font-size:12px;text-decoration:underline;text-underline-offset:3px}[hidden]{display:none!important}
+
+.gear svg{display:block;width:18px;height:18px}.receipt-mark svg{width:16px;height:16px}

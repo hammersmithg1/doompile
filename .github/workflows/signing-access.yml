@@ -1,0 +1,49 @@
+name: Signing access
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  id-token: write
+
+jobs:
+  verify:
+    if: github.ref == 'refs/heads/main'
+    runs-on: macos-15
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - name: Inspect public OIDC claims
+        uses: actions/github-script@v7
+        env:
+          TS_AUDIENCE: ${{ secrets.DOOMPILE_TS_AUDIENCE || vars.DOOMPILE_TS_AUDIENCE }}
+        with:
+          script: |
+            const token = await core.getIDToken(process.env.TS_AUDIENCE);
+            const claims = JSON.parse(Buffer.from(token.split('.')[1], 'base64url'));
+            if (claims.repository !== process.env.GITHUB_REPOSITORY
+                || claims.repository_id !== process.env.GITHUB_REPOSITORY_ID
+                || claims.ref !== 'refs/heads/main'
+                || claims.event_name !== 'workflow_dispatch') {
+              throw new Error('Signing access is limited to this repository and main');
+            }
+            core.info('Verified repository and main workflow identity.');
+      - name: Connect to Tailscale with GitHub identity
+        uses: tailscale/github-action@v4
+        with:
+          oauth-client-id: ${{ secrets.DOOMPILE_TS_CLIENT_ID || vars.DOOMPILE_TS_CLIENT_ID }}
+          audience: ${{ secrets.DOOMPILE_TS_AUDIENCE || vars.DOOMPILE_TS_AUDIENCE }}
+          tags: ${{ vars.DOOMPILE_CI_TAILSCALE_TAG || 'tag:doompile-ci' }}
+          hostname: doompile-ci-access-${{ github.run_id }}-${{ github.run_attempt }}
+      - name: Prepare central signing secret access
+        env:
+          DOOMPILE_CI_SETEC_URL: ${{ secrets.DOOMPILE_CI_SETEC_URL }}
+          DOOMPILE_CI_SETEC_DEVICE: ${{ vars.DOOMPILE_CI_SETEC_DEVICE }}
+        run: python3 .agents/ci/bootstrap.py
+      - name: Verify signing inputs without printing values
+        run: >-
+          python3 "$HOME/.agents/common/scripts/agent_secrets.py" --scope device --
+          python3 -c 'import importlib.util,os; spec=importlib.util.spec_from_file_location("native", ".agents/ci/native.py"); module=importlib.util.module_from_spec(spec); spec.loader.exec_module(module); required=[name for name in module.NAMES if not name.startswith("MACOS_DEVELOPER_ID_")]; missing=[name for name in required if not os.environ.get(name)]; assert not missing, "Missing signing inputs: "+", ".join(missing); module.restore_ci_dns(); print("All "+str(len(required))+" required signing inputs are available")'

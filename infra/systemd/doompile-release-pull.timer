@@ -1,0 +1,10 @@
+[Unit]
+Description=Check GitHub for verified Doompile releases
+
+[Timer]
+OnBootSec=90s
+OnUnitInactiveSec=90s
+AccuracySec=15s
+
+[Install]
+WantedBy=timers.target

@@ -1,0 +1,5 @@
+:root{color-scheme:light;font:13px/1.5 -apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;background:var(--surface);color:var(--text)}body{margin:0;padding:12px;width:300px;min-width:300px;box-sizing:border-box}.receipt{display:flex;align-items:center;gap:9px;min-height:25px}.receipt-mark{display:flex;align-items:center;justify-content:center;width:25px;height:25px;border-radius:50%;background:var(--send);color:var(--text);font-weight:700;flex-shrink:0}.receipt-text{white-space:nowrap;font-weight:500}.receipt-error{color:#cf5341}@media(prefers-color-scheme:dark){:root{color-scheme:dark;background:var(--surface);color:var(--text)}}@media(prefers-reduced-motion:no-preference){.receipt{animation:receipt-in .12s ease-out}@keyframes receipt-in{from{opacity:0}to{opacity:1}}}
+
+.receipt-link{margin-left:auto;color:inherit;white-space:nowrap;font-size:12px;text-decoration:underline;text-underline-offset:3px}[hidden]{display:none!important}
+
+.gear svg{display:block;width:18px;height:18px}.receipt-mark svg{width:16px;height:16px}

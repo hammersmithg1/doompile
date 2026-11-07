@@ -1,0 +1,9 @@
+[
+  {"name":"plain note", "title":"Обычная заметка", "tags":["Идеи"], "attachmentCount":0, "valid":true},
+  {"name":"maximum title", "titleLength":2000, "tags":[], "attachmentCount":0, "valid":true},
+  {"name":"oversized title", "titleLength":2001, "tags":[], "attachmentCount":0, "valid":false},
+  {"name":"maximum attachments", "title":"Files", "tags":[], "attachmentCount":100, "valid":true},
+  {"name":"too many attachments", "title":"Files", "tags":[], "attachmentCount":101, "valid":false},
+  {"name":"maximum tag", "title":"Tags", "tagLength":100, "attachmentCount":0, "valid":true},
+  {"name":"oversized tag", "title":"Tags", "tagLength":101, "attachmentCount":0, "valid":false}
+]

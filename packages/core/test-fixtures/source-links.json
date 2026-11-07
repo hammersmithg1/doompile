@@ -1,0 +1,10 @@
+[
+ {"name":"exact with context and existing anchor","source":{"url":"https://example.com/article#section","quote":"Useful idea","selector":{"prefix":"Before","suffix":"after"}},"expected":"https://example.com/article#section:~:text=Before-,Useful%20idea,-after"},
+ {"name":"reserved characters","source":{"url":"https://example.com/","quote":"quoted-part, # & %"},"expected":"https://example.com/#:~:text=quoted%2Dpart%2C%20%23%20%26%20%25"},
+ {"name":"Unicode","source":{"url":"https://example.com/","quote":"Да 😀"},"expected":"https://example.com/#:~:text=%D0%94%D0%B0%20%F0%9F%98%80"},
+ {"name":"multiple blocks","source":{"url":"https://example.com/","quote":"First paragraph.\nLast paragraph."},"expected":"https://example.com/#:~:text=First%20paragraph.,Last%20paragraph."},
+ {"name":"replace old text directive","source":{"url":"https://example.com/#part:~:text=Old","quote":"New"},"expected":"https://example.com/#part:~:text=New"},
+ {"name":"video timestamp zero","source":{"url":"https://www.youtube.com/watch?v=x&t=23#keep","timestampSeconds":0},"expected":"https://www.youtube.com/watch?v=x&t=0#keep"},
+ {"name":"plain source","source":{"url":"https://example.com/article#section"},"expected":"https://example.com/article#section"},
+ {"name":"unsafe protocol","source":{"url":"javascript:alert(1)","quote":"No"},"expected":""}
+]

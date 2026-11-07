@@ -1,0 +1,22 @@
+<!doctype html>
+<html lang="ru"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Doompile Clipper</title><link rel="stylesheet" href="composer.css"><link rel="stylesheet" href="popup.css"></head>
+<body>
+  <main id="capture"><div id="composer"></div><button id="settings-toggle" class="gear" title="Настройки подключения" aria-label="Настройки подключения"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"></svg></button></main>
+  <section id="settings" hidden>
+    <div class="settings-top"><h2>Подключение хранилища</h2><button id="back" class="quiet">Назад</button></div>
+    <form id="connection-form">
+      <label for="endpoint">Адрес хранилища</label><input id="endpoint" type="url" placeholder="https://doompile.example.com" required autocomplete="url">
+      <button id="login" class="primary" type="button">Войти через Яндекс / Google ↗</button><p id="account" class="hint"></p><button id="logout" type="button" class="quiet" hidden>Выйти из аккаунта</button><details><summary class="hint">Подключить персональным токеном</summary><label for="token">Персональный токен</label><input id="token" type="password" placeholder="Персональный токен приложения" autocomplete="off">
+      <p class="hint">Персональный токен остаётся в расширении и не передаётся странице.</p><button class="primary" type="submit">Сохранить подключение ↗</button>
+    </details></form>
+    <button id="check" class="secondary">Проверить соединение</button><button id="native" class="secondary">Взять подключение из приложения</button>
+    <button id="editor-commands" class="secondary">Команды и алиасы редактора</button>
+    <button id="diagnostics-export" class="secondary">Поделиться диагностикой</button>
+    <label><input id="diagnostics-enabled" type="checkbox" checked> Отправлять диагностику и события использования</label>
+    <p class="hint">Локальный журнал работает без интернета. Дамп не содержит текстов заметок, адресов страниц и ключей доступа.</p>
+    <p id="mobile-help" class="hint" hidden>Для кнопки у выделения разреши Doompile доступ к сайтам в настройках расширений Safari. Затем обнови страницу.</p>
+    <div id="status" role="status" aria-live="polite"></div><button id="grant" class="secondary" hidden>Разрешить доступ к хранилищу</button><button id="retry" class="quiet" hidden>Отправить повторно</button><ul id="queue" aria-label="Ожидают отправки"></ul>
+  </section>
+  <p id="page-error" class="hint" hidden></p><div id="confirmation" hidden></div>
+  <script src="core.js"></script><script src="transport.js"></script><script src="composer.js"></script><script src="receipt.js"></script><script src="popup.js"></script>
+</body></html>

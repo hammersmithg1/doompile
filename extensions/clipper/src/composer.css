@@ -1,0 +1,626 @@
+:host,
+.dp-composer {
+  --dp-bg: var(--bg);
+  --dp-input: var(--surface);
+  --dp-text: var(--text);
+  --dp-muted: var(--muted);
+  --dp-line: var(--line);
+  --dp-tool: var(--tool);
+  --dp-accent: var(--send);
+  --dp-selected: var(--lime-soft);
+  color-scheme: light;
+}
+@media (prefers-color-scheme: dark) {
+  :host,
+  .dp-composer {
+    --dp-bg: var(--bg);
+    --dp-input: var(--surface);
+    --dp-text: var(--text);
+    --dp-muted: var(--muted);
+    --dp-line: var(--line);
+    --dp-tool: var(--tool);
+    --dp-selected: var(--lime-soft);
+    color-scheme: dark;
+  }
+}
+.dp-composer {
+  font:
+    400 13px/1.5 -apple-system,
+    BlinkMacSystemFont,
+    "Segoe UI",
+    sans-serif;
+  color: var(--dp-text);
+  text-align: left;
+  direction: ltr;
+  letter-spacing: normal;
+  width: 100%;
+  max-height: inherit;
+  pointer-events: auto;
+  -webkit-font-smoothing: antialiased;
+}
+.dp-composer * {
+  box-sizing: border-box;
+}
+.dp-composer [hidden] {
+  display: none !important;
+}
+.dp-composer button,
+.dp-composer input,
+.dp-composer textarea {
+  font: inherit;
+  color: inherit;
+}
+.dp-composer button {
+  cursor: pointer;
+  border: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  background: none;
+  transition:
+    background 0.14s,
+    transform 0.14s;
+  touch-action: manipulation;
+}
+.dp-composer button:active {
+  transform: translateY(1px);
+}
+.dp-composer button:disabled {
+  opacity: 0.5;
+  cursor: wait;
+}
+.dp-composer button:focus-visible,
+.dp-composer input:focus-visible {
+  outline: 2px solid #98b327;
+  outline-offset: 2px;
+}
+.dp-composer svg {
+  width: 19px;
+  height: 19px;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.8;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  flex-shrink: 0;
+}
+.dp-composer textarea::placeholder,
+.dp-composer input::placeholder {
+  color: var(--dp-muted);
+}
+.dp-quick {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  gap: 7px;
+  padding: 6px;
+  border: 1px solid var(--dp-line);
+  border-radius: 15px;
+  background: var(--dp-input);
+  box-shadow: 0 3px 15px #25212d08;
+  min-height: 54px;
+}
+.dp-quick:focus-within {
+  border-color: #aaa5a0;
+}
+.dp-comment {
+  display: block;
+  flex: 1 1 140px;
+  min-width: 0;
+  width: 100%;
+  height: 39px;
+  max-height: 136px;
+  resize: none;
+  outline: 0 !important;
+  border: 0;
+  background: none;
+  padding: 8px 8px;
+  line-height: 23px !important;
+  overflow-y: auto;
+}
+.dp-tools {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  height: 39px;
+  flex-shrink: 0;
+}
+.dp-composer .dp-icon {
+  width: 34px;
+  height: 37px;
+  border-radius: 10px;
+  color: var(--dp-muted);
+  background: var(--dp-tool);
+  padding: 0;
+}
+.dp-composer .dp-send {
+  width: 39px;
+  height: 39px;
+  border-radius: 11px;
+  background: var(--dp-accent);
+  color: #25251f;
+  padding: 0;
+}
+.dp-send svg {
+  width: 22px;
+  height: 22px;
+}
+.dp-expanded {
+  border: 1px solid var(--dp-line);
+  border-radius: 16px;
+  background: var(--dp-bg);
+  box-shadow: 0 12px 40px #0002;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+  max-height: inherit;
+}
+.dp-modal-top {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  min-height: 55px;
+  padding: 10px 18px;
+  flex-shrink: 0;
+}
+.dp-scroll {
+  padding: 14px 24px 22px;
+  overflow: auto;
+  overscroll-behavior: contain;
+  min-height: 0;
+}
+.dp-options {
+  border-top: 1px solid var(--dp-line);
+  margin-top: 20px;
+  padding-top: 16px;
+  display: grid;
+  gap: 12px;
+}
+.dp-timestamp {
+  width: 100%;
+  min-width: 0;
+  border: 1px solid var(--dp-line);
+  background: var(--dp-input);
+  border-radius: 9px;
+  padding: 9px 11px;
+}
+.dp-label {
+  display: grid;
+  gap: 5px;
+  color: var(--dp-muted);
+  font-size: 12px;
+}
+.dp-hint {
+  margin: 0;
+  color: var(--dp-muted);
+  font-size: 11px;
+}
+.dp-status {
+  font-size: 12px;
+  color: var(--dp-muted);
+  padding: 6px 10px 0;
+  margin: 0;
+}
+.dp-status:empty {
+  display: none;
+}
+.dp-status.dp-error {
+  color: #cf5341;
+}
+.dp-link-form {
+  display: flex;
+  gap: 6px;
+  margin-bottom: 12px;
+}
+.dp-link-form input {
+  min-width: 0;
+  flex: 1;
+  border: 1px solid var(--dp-line);
+  border-radius: 8px;
+  background: var(--dp-input);
+  padding: 7px;
+}
+.dp-link-form button {
+  padding: 6px 10px;
+  background: var(--dp-selected);
+  border-radius: 8px;
+}
+.dp-composer ::selection {
+  background: #c6ff0066;
+}
+@media (prefers-reduced-motion: no-preference) {
+  .dp-expanded {
+    animation: dp-grow 0.16s ease-out;
+  }
+  @keyframes dp-grow {
+    from {
+      opacity: 0.5;
+      transform: translateY(4px);
+    }
+    to {
+      opacity: 1;
+      transform: translateY(0);
+    }
+  }
+}
+
+.dp-composer .dp-urgent-toggle[aria-pressed="true"] {
+  color: #e56a42;
+  background: #fae4e4;
+}
+.dp-reading-row {
+  flex-basis: 100%;
+  display: flex;
+  padding: 0 8px 3px;
+}
+.dp-reading-row:has(.dp-reading[hidden]) {
+  display: none;
+}
+.dp-reading {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--dp-muted);
+  font-size: 11px;
+  cursor: pointer;
+  line-height: 20px;
+}
+.dp-reading input {
+  appearance: none;
+  width: 14px;
+  height: 14px;
+  border: 1px solid var(--dp-line);
+  border-radius: 4px;
+  margin: 0;
+  display: grid;
+  place-content: center;
+  background: var(--dp-input);
+  cursor: pointer;
+}
+.dp-reading input:checked {
+  background: var(--dp-accent);
+  border-color: #b3c964;
+}
+.dp-reading input:checked:after {
+  content: "✓";
+  color: #25251f;
+  font-size: 11px;
+  font-weight: 700;
+}
+.dp-reading:has(input:checked) {
+  color: var(--dp-text);
+}
+/* The document and contextual controls come from the desktop block editor. */
+.dp-modal-top {
+  border-bottom: 1px solid var(--dp-line);
+  padding: 8px 16px;
+  gap: 8px;
+}
+.dp-draft-status {
+  font-size: 11px;
+  color: var(--dp-muted);
+}
+.dp-header-actions {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+.dp-header-actions .dp-icon {
+  background: transparent;
+  width: 30px;
+  height: 32px;
+  border-radius: 6px;
+}
+.dp-header-actions .dp-send {
+  width: 32px;
+  height: 32px;
+  border-radius: 8px;
+}
+.dp-header-actions svg {
+  width: 17px;
+  height: 17px;
+}
+.dp-divider {
+  height: 16px;
+  width: 1px;
+  background: var(--dp-line);
+  margin: 0 5px;
+}
+.dp-scroll {
+  padding: 0;
+  min-height: 0;
+}
+.dp-options {
+  margin: 0;
+  padding: 12px 24px;
+  border: 0;
+  gap: 8px;
+}
+.dp-options:has(.dp-label[hidden]):has(.dp-reading[hidden]) {
+  display: none;
+}
+.dp-reading-row {
+  padding: 0;
+}
+.dp-quick > .dp-reading-row {
+  padding: 0 8px 3px;
+}
+.dp-tag-editor {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  min-height: 52px;
+  padding: 15px 24px 4px;
+}
+.dp-tag-chips {
+  display: contents;
+}
+.dp-tag {
+  display: inline-flex;
+  gap: 4px;
+  align-items: center;
+  background: var(--dp-tool);
+  border-radius: 6px;
+  padding: 2px 6px;
+  color: var(--dp-muted);
+  font-size: 12px;
+  max-width: 100%;
+  overflow-wrap: anywhere;
+}
+.dp-tag .dp-remove-tag {
+  width: 18px;
+  height: 18px;
+  padding: 2px;
+  color: var(--dp-muted);
+}
+.dp-remove-tag svg {
+  width: 12px;
+  height: 12px;
+}
+.dp-tag-picker {
+  position: relative;
+  max-width: 100%;
+}
+.dp-composer .dp-add-tag {
+  padding: 3px 0;
+  color: var(--dp-muted);
+  font-size: 12px;
+  gap: 6px;
+}
+.dp-add-tag svg {
+  width: 13px;
+  height: 13px;
+}
+.dp-tag-input {
+  width: 210px;
+  max-width: 100%;
+  border: 0;
+  border-radius: 5px;
+  background: var(--dp-tool);
+  outline: 0;
+  padding: 4px 8px;
+  font-size: 12px !important;
+}
+.dp-tag-menu {
+  position: absolute;
+  z-index: 20;
+  left: 0;
+  top: calc(100% + 6px);
+  width: 230px;
+  max-width: calc(100vw - 80px);
+  max-height: 200px;
+  overflow: auto;
+  padding: 5px;
+  background: var(--dp-input);
+  border: 1px solid var(--dp-line);
+  border-radius: 9px;
+  box-shadow: 0 8px 28px #0002;
+}
+.dp-composer .dp-tag-option {
+  display: block;
+  width: 100%;
+  text-align: left;
+  border-radius: 5px;
+  padding: 6px 8px;
+  font-size: 12px;
+  overflow-wrap: anywhere;
+}
+.dp-tag-option[aria-selected="true"],
+.dp-tag-option:hover {
+  background: var(--dp-selected);
+}
+.dp-tag-menu p {
+  margin: 5px 8px;
+  font-size: 12px;
+  color: var(--dp-muted);
+}
+.dp-rich.block-editor {
+  --editor-bg: var(--dp-bg);
+  --editor-panel: var(--dp-input);
+  --editor-line: var(--dp-line);
+  --editor-muted: var(--dp-muted);
+  --editor-accent: #849b48;
+  padding: 20px 40px 70px 24px;
+  font-size: 15px;
+  min-height: 280px;
+}
+.dp-rich.block-editor .tiptap {
+  font-size: 15px;
+  min-height: 230px;
+  line-height: 1.65;
+}
+.dp-rich.block-editor .tiptap :is(p, ul, ol, li) {
+  margin: 0;
+}
+.dp-rich.block-editor .tiptap :is(ul, ol) {
+  padding-inline-start: 26px;
+}
+.dp-rich.block-editor .tiptap h1 {
+  font-size: 28px;
+}
+.dp-rich.block-editor .tiptap h2 {
+  font-size: 23px;
+}
+.dp-rich.block-editor .tiptap blockquote {
+  border-left-color: var(--editor-accent);
+  color: var(--dp-muted);
+}
+.dp-rich.block-editor .tiptap a {
+  color: var(--editor-accent);
+}
+.dp-rich.block-editor .editor-outline {
+  display: none;
+}
+.dp-link-form {
+  padding: 12px 24px 0;
+  margin: 0;
+}
+.dp-composer .selection-toolbar button {
+  font-size: 13px;
+}
+.dp-composer .command-menu button {
+  display: flex;
+  justify-content: space-between;
+  text-align: left;
+}
+.dp-composer .command-menu {
+  font-size: 13px;
+}
+.dp-composer .dp-header-actions .dp-icon[aria-pressed="true"] {
+  background: var(--dp-selected);
+  color: var(--dp-text);
+}
+.dp-composer .dp-header-actions .dp-urgent-toggle[aria-pressed="true"] {
+  color: #e56a42;
+  background: transparent;
+}
+/* iPhone annotation stays inside the visual viewport above the keyboard. */
+.mobile-card .dp-comment {
+  font-size: 16px;
+  line-height: 24px !important;
+  min-height: 44px;
+}
+.mobile-card .dp-tools {
+  height: 44px;
+}
+.mobile-card .dp-composer .dp-icon,
+.mobile-card .dp-composer .dp-send {
+  width: 44px;
+  height: 44px;
+}
+.mobile-card .dp-quick {
+  gap: 4px;
+}
+.mobile-card .dp-tools {
+  gap: 4px;
+}
+.mobile-card .dp-reading {
+  min-height: 32px;
+  font-size: 12px;
+}
+.mobile-card .dp-reading input {
+  width: 18px;
+  height: 18px;
+}
+.mobile-card .dp-header-actions .dp-divider {
+  margin: 0;
+}
+.mobile-card .dp-draft-status {
+  font-size: 11px;
+}
+.mobile-card .dp-modal-top {
+  min-height: 60px;
+  padding: 8px 12px;
+}
+.mobile-card .dp-tag-editor {
+  padding: 12px 20px 0;
+}
+.mobile-card .dp-tag-input,
+.mobile-card .dp-timestamp {
+  font-size: 16px !important;
+}
+.mobile-card .dp-composer .dp-add-tag {
+  min-height: 36px;
+}
+.mobile-card .dp-tag .dp-remove-tag {
+  width: 28px;
+  height: 28px;
+}
+.mobile-card .dp-rich.block-editor {
+  min-height: 140px;
+  padding: 16px 20px 32px;
+}
+.mobile-card .dp-rich.block-editor .tiptap {
+  min-height: 120px;
+  font-size: 16px;
+}
+.mobile-card .dp-rich .block-handle,
+.mobile-card .dp-rich .editor-outline {
+  display: none !important;
+}
+.mobile-card.expanded .dp-rich .block-handle:not([hidden]) { display: block !important; }
+.mobile-card.expanded .dp-scroll { display: flex; flex-direction: column; }
+.mobile-card.expanded .dp-rich.block-editor { flex: 1; display: flex; flex-direction: column; }
+.mobile-card.expanded .dp-rich.block-editor > div:first-child { flex: 1; display: flex; flex-direction: column; }
+.mobile-card.expanded .dp-rich.block-editor .tiptap { flex: 1; }
+.mobile-card .dp-link-form {
+  padding: 12px 20px 0;
+}
+.mobile-card .dp-link-form input {
+  font-size: 16px;
+}
+.mobile-card .dp-status {
+  border-radius: 8px;
+  background: var(--dp-bg);
+  padding: 8px 12px;
+}
+@media (prefers-reduced-motion: no-preference) {
+  .mobile-card .dp-quick {
+    animation: dp-grow 0.16s ease-out;
+  }
+}
+.mobile-card .dp-draft-status {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.mobile-card .dp-header-actions {
+  flex-shrink: 0;
+}
+
+.dp-expanded > .dp-options {
+  flex-shrink: 0;
+}
+.mobile-card .dp-expanded > .dp-options {
+  border-top: 1px solid var(--dp-line);
+  padding: 8px 20px;
+}
+/* Compact and full views share one live editor and one document. */
+.dp-quick > .dp-rich { flex:1 1 140px;min-width:0;max-width:100%; }
+.dp-quick .dp-rich.block-editor { padding:7px 8px;min-height:39px;max-height:136px;overflow:auto;font-size:13px; }
+.dp-quick .dp-rich .tiptap { min-height:25px;font-size:13px;line-height:23px; }
+.dp-quick .dp-rich .source-snippet,.dp-quick .dp-rich .selection-toolbar,.dp-quick .dp-rich .command-menu,.dp-quick .dp-rich .block-handle,.dp-quick .dp-rich .editor-outline { display:none!important; }
+.mobile-card .dp-quick .dp-rich .tiptap { font-size:16px;line-height:24px; }
+.mobile-card.expanded { background:var(--dp-bg,#f8f7f4);pointer-events:auto;overflow:hidden; }
+.mobile-card.expanded .dp-composer { height:100%;max-height:100%;display:flex;flex-direction:column; }
+.mobile-card.expanded .dp-expanded { height:100%;max-height:none;min-height:0;flex:1;border:0;border-radius:0;box-shadow:none;animation:none; }
+.mobile-card.expanded .dp-scroll { flex:1;min-height:0;overflow:auto;overscroll-behavior:contain;touch-action:pan-y;-webkit-overflow-scrolling:touch; }
+.mobile-card.expanded .dp-modal-top { padding-top:max(8px,env(safe-area-inset-top)); }
+.mobile-card.expanded .dp-options { padding-bottom:max(8px,env(safe-area-inset-bottom)); }
+.mobile-card.expanded .dp-status { flex-shrink:0;margin:0; }
+
+/* Cover the layout viewport too: Safari can leave a gap above the keyboard
+   accessory while visualViewport describes only the usable editing area. */
+.mobile-backdrop{position:fixed;inset:0;min-height:100lvh;background:var(--dp-bg,#f8f7f4);pointer-events:auto}
+.mobile-backdrop[hidden]{display:none!important}
+.dp-expanded .dp-scroll{display:flex;flex-direction:column}
+.dp-expanded .dp-rich.block-editor{flex:1;display:flex;flex-direction:column}
+.dp-expanded .dp-rich.block-editor .tiptap{flex:1;min-height:230px}
+.mobile-card.expanded .dp-rich.block-editor{min-height:0;padding-bottom:20px}
+.mobile-card.expanded .dp-rich.block-editor .tiptap{min-height:160px}
+
+.dp-expanded .dp-editor-canvas{flex:1;display:flex;flex-direction:column;min-height:0}

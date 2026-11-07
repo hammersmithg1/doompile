@@ -1,0 +1,45 @@
+{
+    admin localhost:2019
+}
+
+(privacy_log) {
+    format filter {
+        wrap json
+        fields {
+            request>headers delete
+            request>uri delete
+            request>remote_ip delete
+            request>client_ip delete
+        }
+    }
+}
+
+{$DOOMPILE_PROD_URL} {
+    encode zstd gzip
+    @root path /
+    redir @root /doompile 302
+    header X-Doompile-Environment production
+    reverse_proxy 127.0.0.1:3101
+    log {
+        output file /logs/prod.json {
+            roll_size 10MiB
+            roll_keep 7
+        }
+        import privacy_log
+    }
+}
+
+{$DOOMPILE_STAGING_URL} {
+    encode zstd gzip
+    @root path /
+    redir @root /doompile 302
+    header X-Doompile-Environment staging
+    reverse_proxy 127.0.0.1:3102
+    log {
+        output file /logs/staging.json {
+            roll_size 10MiB
+            roll_keep 7
+        }
+        import privacy_log
+    }
+}

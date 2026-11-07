@@ -1,0 +1,89 @@
+@import url("blocks.css");
+:root {
+  color-scheme: dark;
+  color: var(--text);
+  background: var(--bg);
+  -webkit-font-smoothing: antialiased;
+}
+:root[data-theme="light"] {
+  color-scheme: light;
+  color: var(--text);
+  background: var(--bg);
+}
+* {
+  box-sizing: border-box;
+}
+body {
+  margin: 0;
+  overflow-x: hidden;
+}
+button {
+  -webkit-tap-highlight-color: transparent;
+  touch-action: manipulation;
+}
+::selection {
+  background: #c6ff0044;
+}
+
+/* Native Mac chrome and editor use the same neutral palette as desktop web. */
+:root[data-native-desktop="true"] {
+  background: var(--bg);
+  color: var(--text);
+}
+:root[data-native-desktop="true"][data-theme="light"] {
+  background: var(--bg);
+  color: var(--text);
+}
+:root[data-native-desktop="true"] .block-editor {
+  min-height: 100dvh;
+}
+:root[data-native-desktop="true"] .block-editor .tiptap {
+  min-height: calc(100dvh - 120px);
+}
+:root[data-native-capture="compact"] {
+  background: transparent !important;
+}
+:root[data-native-capture="compact"] .block-editor {
+  min-height: 39px;
+  padding: 8px 6px;
+  font-size: 13px;
+  line-height: 23px;
+}
+:root[data-native-capture="compact"] .block-editor .tiptap {
+  min-height: 23px;
+}
+:root[data-native-capture="compact"] :is(.block-handle, .editor-outline, .selection-toolbar) {
+  display: none !important;
+}
+
+/* Only the native iPhone shell opts into these rules. Desktop and clipper
+   keep their floating menus and block handles. The native strip handles touch. */
+:root[data-native-touch="true"] {
+  background: var(--bg);
+  color: var(--text);
+}
+:root[data-native-touch="true"] .block-editor {
+  min-height: 100dvh;
+  padding: 18px 22px 26px;
+  --editor-bg: var(--bg);
+  --editor-panel: var(--surface);
+  --editor-line: var(--line);
+  --editor-muted: var(--muted);
+  --editor-accent: var(--native-accent, var(--snippet-accent));
+}
+:root[data-native-touch="true"] .block-editor .tiptap {
+  min-height: calc(100dvh - 44px);
+  font-size: 17px;
+  line-height: 1.6;
+}
+:root[data-native-touch="true"]
+  :is(.selection-toolbar, .block-handle, .editor-outline) {
+  display: none !important;
+}
+
+:root[data-native-touch="true"][data-theme="dark"] {
+  color-scheme: dark;
+  background: var(--bg);
+  color: var(--text);
+  --native-accent: var(--snippet-accent);
+}

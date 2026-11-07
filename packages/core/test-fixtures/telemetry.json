@@ -1,0 +1,26 @@
+[
+  {
+    "name": "only declared properties and enum values survive",
+    "event": "note.saved",
+    "input": {"note_id":"AAAAAAAA-AAAA-4AAA-8AAA-AAAAAAAAAAAA","operation":"create","kind":"note","duration_ms":12.345,"plainText":"private note","token":"secret","email":"private@example.com","url":"https://private.test/?token=secret"},
+    "expected": {"note_id":"aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa","operation":"create","kind":"note","duration_ms":12.35}
+  },
+  {
+    "name": "messages URLs and user paths are excluded from stack frames",
+    "event": "runtime.error",
+    "input": {"error_type":"TypeError","error_code":"unknown","stack":"TypeError: private note Bearer secret\n at save (https://user:secret@private.test/_next/app.js:12:4)\nload@file:///Users/alice/private/editor.ts:200:8\nsecret=42","message":"private note"},
+    "expected": {"error_type":"TypeError","error_code":"unknown","stack":"app.js:12:4\neditor.ts:200:8"}
+  },
+  {
+    "name": "numeric fields reject strings negatives and booleans",
+    "event": "sync.completed",
+    "input": {"pending":true,"duration_ms":-1,"failed":"123","pull":false},
+    "expected": {"pull":false}
+  },
+  {
+    "name": "an enum cannot carry arbitrary user text",
+    "event": "screen.viewed",
+    "input": {"screen":"private note","filter":"my secret tag"},
+    "expected": {}
+  }
+]

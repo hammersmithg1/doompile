@@ -1,0 +1,182 @@
+name: macOS
+
+on:
+  workflow_call:
+    inputs:
+      publish_release:
+        type: boolean
+        default: false
+      signed_release:
+        type: boolean
+        default: false
+      build_number:
+        type: string
+        default: ''
+    secrets:
+      DOOMPILE_CI_SETEC_URL:
+        required: false
+      DOOMPILE_TS_CLIENT_ID:
+        required: false
+      DOOMPILE_TS_AUDIENCE:
+        required: false
+  workflow_dispatch:
+    inputs:
+      publish_release:
+        description: "Publish a personal ad-hoc release signed with the existing Sparkle key"
+        type: boolean
+        default: false
+      signed_release:
+        description: "Build a signed and notarized download (requires Developer ID credentials)"
+        type: boolean
+        default: false
+      build_number:
+        description: "Optional increasing Mac build number (e.g. 124.1)"
+        type: string
+        default: ''
+
+permissions:
+  contents: read
+  id-token: write
+
+concurrency:
+  group: macos-${{ github.ref }}
+  cancel-in-progress: ${{ !inputs.publish_release && !inputs.signed_release }}
+
+jobs:
+  build:
+    env:
+      DOOMPILE_PUBLIC_URL: ${{ vars.DOOMPILE_PUBLIC_URL }}
+      DOOMPILE_MACOS_UPDATE_FEED_URL: ${{ vars.DOOMPILE_MACOS_UPDATE_FEED_URL }}
+      DOOMPILE_MACOS_UPDATE_PUBLIC_KEY: ${{ vars.DOOMPILE_MACOS_UPDATE_PUBLIC_KEY }}
+      DOOMPILE_MACOS_BUILD_NUMBER: ${{ inputs.build_number }}
+      DOOMPILE_MACOS_BUILD_SERIES: ${{ vars.DOOMPILE_MACOS_BUILD_SERIES }}
+    runs-on: macos-15
+    timeout-minutes: ${{ (inputs.publish_release || inputs.signed_release) && 60 || 25 }}
+    steps:
+      - name: Require a trusted release run
+        if: inputs.publish_release || inputs.signed_release
+        run: |
+          test "$GITHUB_REF" = refs/heads/main
+          case "$GITHUB_EVENT_NAME" in push|workflow_dispatch) ;; *) exit 1 ;; esac
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - name: Select Xcode 26
+        run: |
+          if [ -d /Applications/Xcode_26.2.app ]; then
+            sudo xcode-select -s /Applications/Xcode_26.2.app/Contents/Developer
+          elif [ -d /Applications/Xcode_26.1.app ]; then
+            sudo xcode-select -s /Applications/Xcode_26.1.app/Contents/Developer
+          else
+            xcodebuild -version
+          fi
+      - run: npm ci
+      - run: npm run shared:check
+      - name: Prepare Safari and offline editor resources
+        run: |
+          npm run clipper:build
+          npm run editor:build
+          python3 apps/macos/generate_project.py
+      - name: Test shared native storage
+        run: swift test --package-path apps/ios --scratch-path "$RUNNER_TEMP/macos-core-tests"
+      - name: Test Mac capture, shortcut preferences and timeline
+        run: bash apps/macos/scripts/test.sh
+      - name: Test atomic Mac update publication
+        run: python3 -m unittest discover -s infra -p 'publish_macos_update_test.py'
+      - name: Test native editor capture behavior in WebKit
+        run: |
+          npx playwright install webkit
+          npx playwright test -c packages/editor/playwright.macos.config.ts --project=webkit
+      - name: Test real WebKit audio encoding and checkpoint recovery on macOS
+        run: npx playwright test -c packages/editor/playwright.config.ts --project=web-webkit --grep "native MediaRecorder produces playable" --workers=1 --reporter=line
+      - name: Preserve failed browser diagnostics
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: macos-browser-test-results
+          path: test-results
+          if-no-files-found: ignore
+          retention-days: 7
+      - name: Build native Mac app and embedded Safari Extension
+        run: >-
+          xcodebuild -project apps/macos/Doompile.xcodeproj -scheme Doompile
+          -configuration Debug -destination 'generic/platform=macOS'
+          -derivedDataPath "$RUNNER_TEMP/MacDerivedData"
+          CODE_SIGNING_ALLOWED=NO DEBUG_INFORMATION_FORMAT=dwarf-with-dsym build
+      - name: Verify signed update delivery with an ephemeral test key
+        run: >-
+          python3 apps/macos/scripts/test-update-delivery.py
+          "$RUNNER_TEMP/MacDerivedData/Build/Products/Debug/Doompile.app"
+          "$RUNNER_TEMP/MacDerivedData/SourcePackages/artifacts/sparkle/Sparkle/bin"
+      - name: Package unsigned developer build
+        run: ditto -c -k --keepParent "$RUNNER_TEMP/MacDerivedData/Build/Products/Debug/Doompile.app" "$RUNNER_TEMP/Doompile-macOS-unsigned.zip"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: Doompile-macOS-unsigned
+          path: ${{ runner.temp }}/Doompile-macOS-unsigned.zip
+          retention-days: 14
+      - name: Prepare private release packaging
+        if: inputs.publish_release || inputs.signed_release
+        env:
+          DOOMPILE_DELIVERY_RECIPIENT: ${{ vars.DOOMPILE_DELIVERY_RECIPIENT }}
+        run: |
+          command -v age >/dev/null || brew install age
+          age --encrypt --recipient "$DOOMPILE_DELIVERY_RECIPIENT" </dev/null >/dev/null
+      - name: Connect signing runner to Tailscale with GitHub identity
+        if: inputs.publish_release || inputs.signed_release
+        uses: tailscale/github-action@v4
+        with:
+          oauth-client-id: ${{ secrets.DOOMPILE_TS_CLIENT_ID || vars.DOOMPILE_TS_CLIENT_ID }}
+          audience: ${{ secrets.DOOMPILE_TS_AUDIENCE || vars.DOOMPILE_TS_AUDIENCE }}
+          tags: ${{ vars.DOOMPILE_CI_TAILSCALE_TAG || 'tag:doompile-ci' }}
+          hostname: doompile-ci-${{ github.run_id }}-${{ github.run_attempt }}
+      - name: Prepare central signing secret access
+        if: inputs.publish_release || inputs.signed_release
+        env:
+          DOOMPILE_CI_SETEC_URL: ${{ secrets.DOOMPILE_CI_SETEC_URL }}
+          DOOMPILE_CI_SETEC_DEVICE: ${{ vars.DOOMPILE_CI_SETEC_DEVICE }}
+        run: python3 .agents/ci/bootstrap.py
+      - name: Package personal Mac update using setec
+        if: inputs.publish_release && !inputs.signed_release
+        env:
+          DOOMPILE_MACOS_APP_PATH: ${{ runner.temp }}/MacDerivedData/Build/Products/Debug/Doompile.app
+          DOOMPILE_SPARKLE_BIN: ${{ runner.temp }}/MacDerivedData/SourcePackages/artifacts/sparkle/Sparkle/bin
+        run: python3 "$HOME/.agents/common/scripts/agent_secrets.py" --scope device -- python3 .agents/ci/native.py macos-personal
+      - name: Sign and notarize release download using setec
+        if: inputs.signed_release
+        run: python3 "$HOME/.agents/common/scripts/agent_secrets.py" --scope device -- python3 .agents/ci/native.py macos-notarized
+      - name: Seal native release and symbols
+        if: inputs.publish_release || inputs.signed_release
+        env:
+          DOOMPILE_DELIVERY_RECIPIENT: ${{ vars.DOOMPILE_DELIVERY_RECIPIENT }}
+          NOTARIZED: ${{ inputs.signed_release }}
+        run: |
+          symbols="$RUNNER_TEMP/MacDerivedData/Build/Products/Debug/Doompile.app.dSYM"
+          if [ "$NOTARIZED" = true ]; then symbols=apps/macos/dist/symbols; fi
+          python3 infra/seal_native_artifact.py apps/macos/dist/release "$symbols" "$RUNNER_TEMP/native.tar.age"
+      - name: Upload private native artifact
+        id: sealed
+        if: inputs.publish_release || inputs.signed_release
+        uses: actions/upload-artifact@v4
+        with:
+          name: doompile-native-macos-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/native.tar.age
+          if-no-files-found: error
+          retention-days: 30
+      - name: Write release receipt
+        if: (inputs.publish_release || inputs.signed_release) && vars.DOOMPILE_MACOS_UPDATE_PUBLISH_ENABLED == 'true'
+        env:
+          ARTIFACT_ID: ${{ steps.sealed.outputs.artifact-id }}
+        run: python3 infra/release_receipt.py macos "$RUNNER_TEMP/delivery.json" --artifact-id "$ARTIFACT_ID"
+      - name: Hand release to the delivery server
+        if: (inputs.publish_release || inputs.signed_release) && vars.DOOMPILE_MACOS_UPDATE_PUBLISH_ENABLED == 'true'
+        uses: actions/upload-artifact@v4
+        with:
+          name: doompile-delivery-macos-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/delivery.json
+          if-no-files-found: error
+          retention-days: 30

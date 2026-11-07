@@ -1,0 +1,45 @@
+{
+  "tag": "tag:doompile-ci",
+  "setec_grant": {
+    "src": [
+      "tag:doompile-ci"
+    ],
+    "dst": [
+      "SETec_TAILNET_IP"
+    ],
+    "ip": [
+      "tcp:443"
+    ],
+    "app": {
+      "tailscale.com/cap/secrets": [
+        {
+          "action": [
+            "get",
+            "info"
+          ],
+          "secret": [
+            "devices/doompile-ci/APPLE_TEAM_ID",
+            "devices/doompile-ci/APP_STORE_CONNECT_KEY_ID",
+            "devices/doompile-ci/APP_STORE_CONNECT_ISSUER_ID",
+            "devices/doompile-ci/APP_STORE_CONNECT_P8_BASE64",
+            "devices/doompile-ci/IOS_DISTRIBUTION_P12_BASE64",
+            "devices/doompile-ci/IOS_DISTRIBUTION_P12_PASSWORD",
+            "devices/doompile-ci/IOS_PROFILE_APP_BASE64",
+            "devices/doompile-ci/IOS_PROFILE_SHARE_BASE64",
+            "devices/doompile-ci/IOS_PROFILE_SAFARI_BASE64",
+            "devices/doompile-ci/IOS_PROFILE_ACTION_BASE64",
+            "devices/doompile-ci/MACOS_DEVELOPER_ID_P12_BASE64",
+            "devices/doompile-ci/MACOS_DEVELOPER_ID_P12_PASSWORD",
+            "devices/doompile-ci/DOOMPILE_MACOS_UPDATE_PRIVATE_KEY"
+          ]
+        }
+      ]
+    }
+  },
+  "subject": "repo:OWNER@OWNER_ID/REPOSITORY@REPOSITORY_ID:ref:refs/heads/main",
+  "issuer": "https://token.actions.githubusercontent.com",
+  "customClaimRules": {
+    "repository": "OWNER/REPOSITORY",
+    "ref": "refs/heads/main"
+  }
+}

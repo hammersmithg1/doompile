@@ -1,0 +1,91 @@
+/* Geometry and illustration sources live in packages/design. */
+.wordmark {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.brand-wordmark {
+  display: block;
+  width: 142px;
+  height: auto;
+  color: var(--text);
+  flex-shrink: 0;
+}
+.wordmark .brand-halo {
+  position: static;
+  width: 38px;
+  height: 22px;
+  transform: none;
+  color: var(--brand);
+  flex-shrink: 0;
+}
+.brand p {
+  font-size: 12px;
+  line-height: 1.5;
+}
+.brand-illustration {
+  display: block;
+  object-fit: contain;
+  height: auto;
+  user-select: none;
+}
+.cat-card .pile-cat {
+  width: 92px;
+  flex: 0 0 92px;
+}
+.welcome-art {
+  width: 200px;
+  height: 180px;
+  display: grid;
+  place-items: center;
+}
+.welcome-art .brand-illustration {
+  width: 180px;
+  height: 180px;
+}
+.welcome .eyebrow {
+  font-family: var(--sans);
+  letter-spacing: 0.06em;
+}
+.settings-brand .brand-wordmark {
+  width: 100px;
+}
+.settings-brand > span {
+  max-width: 220px;
+  line-height: 1.5;
+}
+.landing-void {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  margin-top: 20px;
+  max-width: 400px;
+}
+.landing-void .brand-illustration {
+  width: 200px;
+  height: 200px;
+  flex-shrink: 0;
+}
+.landing-void > span {
+  max-width: 130px;
+  font-size: 12px;
+  line-height: 1.5;
+  color: var(--muted);
+}
+@media (max-width: 760px) {
+  .landing-void .brand-illustration {
+    width: 120px;
+    height: 120px;
+  }
+  .landing-void {
+    margin-top: 10px;
+  }
+  .mobile-welcome > .brand-illustration {
+    width: 104px;
+    height: 104px;
+    margin: 0 0 20px;
+  }
+  .wordmark .brand-halo {
+    display: block;
+  }
+}

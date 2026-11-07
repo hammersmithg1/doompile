@@ -1,0 +1,110 @@
+name: Web and clipper
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: web-${{ github.ref }}
+  cancel-in-progress: true
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22.18.0
+          cache: npm
+      - run: npm ci
+      - run: npm run verify
+      - run: npm run clipper:build
+      - uses: actions/upload-artifact@v4
+        with:
+          name: web-standalone
+          path: |
+            apps/web/.next-verify/standalone
+            apps/web/.next-verify/static
+          include-hidden-files: true
+          retention-days: 7
+      - uses: actions/upload-artifact@v4
+        with:
+          name: browser-clipper
+          path: extensions/clipper/dist
+          retention-days: 14
+  ui:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22.18.0
+          cache: npm
+      - run: npm ci
+      - run: npx playwright install --with-deps chromium webkit
+      - run: npm run verify:ui
+      - uses: actions/upload-artifact@v4
+        if: failure() || cancelled()
+        with:
+          name: browser-test-results
+          path: test-results
+          retention-days: 7
+  ios:
+    permissions:
+      contents: read
+      id-token: write
+    uses: ./.github/workflows/ios.yml
+  macos:
+    permissions:
+      contents: read
+      id-token: write
+    uses: ./.github/workflows/macos.yml
+  release-ios:
+    needs: [check, ui, ios, macos]
+    if: github.ref == 'refs/heads/main' && github.event_name == 'push' && vars.DOOMPILE_TESTFLIGHT_AUTO_UPLOAD == 'true'
+    permissions:
+      contents: read
+      id-token: write
+    uses: ./.github/workflows/ios.yml
+    with:
+      upload_testflight: true
+      signing_mode: ${{ vars.DOOMPILE_IOS_SIGNING_MODE || 'automatic' }}
+    secrets:
+      DOOMPILE_CI_SETEC_URL: ${{ secrets.DOOMPILE_CI_SETEC_URL }}
+      DOOMPILE_TS_CLIENT_ID: ${{ secrets.DOOMPILE_TS_CLIENT_ID }}
+      DOOMPILE_TS_AUDIENCE: ${{ secrets.DOOMPILE_TS_AUDIENCE }}
+  release-macos:
+    needs: [check, ui, ios, macos]
+    if: github.ref == 'refs/heads/main' && github.event_name == 'push' && vars.DOOMPILE_MACOS_RELEASE_ENABLED == 'true'
+    permissions:
+      contents: read
+      id-token: write
+    uses: ./.github/workflows/macos.yml
+    with:
+      publish_release: true
+    secrets:
+      DOOMPILE_CI_SETEC_URL: ${{ secrets.DOOMPILE_CI_SETEC_URL }}
+      DOOMPILE_TS_CLIENT_ID: ${{ secrets.DOOMPILE_TS_CLIENT_ID }}
+      DOOMPILE_TS_AUDIENCE: ${{ secrets.DOOMPILE_TS_AUDIENCE }}
+  delivery-web:
+    needs: [check, ui, ios, macos]
+    if: github.ref == 'refs/heads/main' && (github.event_name == 'push' || github.event_name == 'workflow_dispatch') && vars.DOOMPILE_DEPLOY_ENABLED == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - run: python3 infra/release_receipt.py web "$RUNNER_TEMP/delivery.json"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: doompile-delivery-web-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/delivery.json
+          if-no-files-found: error
+          retention-days: 30

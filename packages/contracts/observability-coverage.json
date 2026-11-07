@@ -1,0 +1,235 @@
+{
+  "version": 1,
+  "features": [
+    {
+      "name": "lifecycle",
+      "events": [
+        "app.started",
+        "app.state",
+        "screen.viewed"
+      ],
+      "instrumentation": {
+        "web": {
+          "path": "apps/web/lib/client/telemetry.ts",
+          "marker": "app.started"
+        },
+        "native": {
+          "path": "apps/ios/Shared/Telemetry.swift",
+          "marker": ".appStarted"
+        },
+        "clipper": {
+          "path": "extensions/clipper/src/telemetry.ts",
+          "marker": "app.started"
+        }
+      }
+    },
+    {
+      "name": "capture-and-notes",
+      "events": [
+        "note.saved",
+        "note.opened",
+        "capture.saved",
+        "note.committed",
+        "clipper.opened"
+      ],
+      "instrumentation": {
+        "web": {
+          "path": "apps/web/lib/client/store.ts",
+          "marker": "note.saved"
+        },
+        "native": {
+          "path": "apps/ios/Shared/Storage.swift",
+          "marker": ".noteSaved"
+        },
+        "clipper": {
+          "path": "extensions/clipper/src/background.js",
+          "marker": "capture.saved"
+        },
+        "server": {
+          "path": "apps/web/app/api/notes/[id]/route.ts",
+          "marker": "note.committed"
+        }
+      }
+    },
+    {
+      "name": "search",
+      "events": [
+        "search.performed"
+      ],
+      "instrumentation": {
+        "web": {
+          "path": "apps/web/components/doompile.tsx",
+          "marker": "search.performed"
+        },
+        "ios": {
+          "path": "apps/ios/Doompile/DoompileApp.swift",
+          "marker": ".searchPerformed"
+        },
+        "macos": {
+          "path": "apps/macos/Doompile/DesktopHome.swift",
+          "marker": ".searchPerformed"
+        }
+      }
+    },
+    {
+      "name": "sync",
+      "events": [
+        "sync.started",
+        "sync.completed",
+        "sync.failed",
+        "sync.conflict"
+      ],
+      "instrumentation": {
+        "web": {
+          "path": "apps/web/lib/client/store.ts",
+          "marker": "sync.started"
+        },
+        "native": {
+          "path": "apps/ios/Shared/Storage.swift",
+          "marker": ".syncStarted"
+        },
+        "clipper": {
+          "path": "extensions/clipper/src/background.js",
+          "marker": "sync.started"
+        }
+      }
+    },
+    {
+      "name": "editor",
+      "events": [
+        "editor.ready",
+        "editor.action",
+        "editor.failed"
+      ],
+      "instrumentation": {
+        "shared": {
+          "path": "packages/editor/src/block-editor.ts",
+          "marker": "editor.ready"
+        },
+        "web": {
+          "path": "apps/web/components/rich-editor.tsx",
+          "marker": "onTelemetry: track"
+        },
+        "native": {
+          "path": "packages/editor/src/editor.ts",
+          "marker": "onTelemetry:"
+        },
+        "clipper": {
+          "path": "extensions/clipper/src/rich-editor.js",
+          "marker": "onTelemetry:"
+        }
+      }
+    },
+    {
+      "name": "attachments",
+      "events": [
+        "attachment.saved",
+        "attachment.uploaded"
+      ],
+      "instrumentation": {
+        "native": {
+          "path": "apps/ios/Shared/Storage.swift",
+          "marker": ".attachmentSaved"
+        },
+        "server": {
+          "path": "apps/web/app/api/attachments/route.ts",
+          "marker": "attachment.uploaded"
+        }
+      }
+    },
+    {
+      "name": "recording",
+      "events": [
+        "recording.started",
+        "recording.completed",
+        "recording.failed"
+      ],
+      "instrumentation": {
+        "web": {
+          "path": "apps/web/lib/client/recording.ts",
+          "marker": "recording.started"
+        },
+        "ios": {
+          "path": "apps/ios/Doompile/DoompileApp.swift",
+          "marker": ".recordingStarted"
+        },
+        "macos": {
+          "path": "apps/macos/Doompile/DoompileApp.swift",
+          "marker": ".recordingStarted"
+        }
+      }
+    },
+    {
+      "name": "technical-errors",
+      "events": [
+        "runtime.error",
+        "runtime.crash",
+        "runtime.hang",
+        "storage.failed",
+        "clipper.failed",
+        "http.completed",
+        "http.failed",
+        "telemetry.rejected"
+      ],
+      "instrumentation": {
+        "web": {
+          "path": "apps/web/lib/client/telemetry.ts",
+          "marker": "unhandledrejection"
+        },
+        "native": {
+          "path": "apps/ios/Shared/NativeDiagnostics.swift",
+          "marker": ".runtimeCrash"
+        },
+        "clipper": {
+          "path": "extensions/clipper/src/diagnostics.ts",
+          "marker": "unhandledrejection"
+        },
+        "server": {
+          "path": "apps/web/lib/server/http.ts",
+          "marker": "observeRequest"
+        }
+      }
+    },
+    {
+      "name": "account",
+      "events": [
+        "auth.succeeded",
+        "auth.signed_out"
+      ],
+      "instrumentation": {
+        "server": {
+          "path": "apps/web/lib/server/oauth.ts",
+          "marker": "auth.succeeded"
+        },
+        "native": {
+          "path": "apps/ios/Shared/Account.swift",
+          "marker": ".authSignedOut"
+        },
+        "web": {
+          "path": "apps/web/lib/client/account.ts",
+          "marker": "auth.signed_out"
+        }
+      }
+    },
+    {
+      "name": "offline-diagnostics",
+      "events": [
+        "diagnostics.exported"
+      ],
+      "instrumentation": {
+        "web": {
+          "path": "apps/web/components/settings-dialog.tsx",
+          "marker": "exportDiagnostics"
+        },
+        "native": {
+          "path": "apps/ios/Shared/DiagnosticsView.swift",
+          "marker": "Telemetry.shared.export"
+        },
+        "clipper": {
+          "path": "extensions/clipper/src/popup.js",
+          "marker": "doompile:diagnostics"
+        }
+      }
+    }
+  ]
+}

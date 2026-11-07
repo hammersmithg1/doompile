@@ -1,0 +1,30 @@
+{
+  "tool": "built-in image_gen",
+  "transparent_background": true,
+  "date": "2026-11-01",
+  "prompts": {
+    "pile": "Use case: illustration-story. Asset type: small premium brand illustration for Doompile, an ironic bookmarking app, usable as a transparent cutout in a quiet warm-white or charcoal UI. Art direction: tactile monochrome paper collage, crisp off-white paper shapes with charcoal ink edges, subtle restrained print grain, one electric lime #CFF641 double-stroke hand-drawn halo as the only saturated accent. Internet-native, sly, calm, elegantly strange, not cute emoji, not glossy 3D, not corporate vector clip art. Strong readable silhouette at 160px. No text, letters, logos, UI, frame, cast-shadow rectangle, background field or watermark. Actual transparent background. Keep all visible artwork within the middle 78% of a square image with generous transparent margin. Subject: an attractively disordered small stack of three saved paper cards, each at a slightly different angle, one tiny picture cutout and a single short black rule on the front card, floating at slight perspective. A distinctive loose elliptical double-stroke lime halo floats above the pile, tilted upward to the right. Beautiful good intentions, waiting for later. Paper cards occupy the lower center, halo upper center. No trash can.",
+    "void": "Use case: illustration-story. Asset type: small premium brand illustration for Doompile, an ironic bookmarking app, usable as a transparent cutout in a quiet warm-white or charcoal UI. Art direction: tactile monochrome paper collage, crisp off-white paper shapes with charcoal ink edges, subtle restrained print grain, one electric lime #CFF641 double-stroke hand-drawn halo as the only saturated accent. Internet-native, sly, calm, elegantly strange, not cute emoji, not glossy 3D, not corporate vector clip art. Strong readable silhouette at 160px. No text, letters, logos, UI, frame, cast-shadow rectangle, background field or watermark. Actual transparent background. Keep all visible artwork within the middle 78% of a square image with generous transparent margin. Subject: a compact bottomless oval paper funnel / beautiful abyss built from thin charcoal concentric rings and torn off-white edges, with exactly three tiny blank saved paper cards gently falling toward it. A loose elliptical double-stroke lime halo traces the mouth of the abyss. Mostly an open airy composition, strange but friendly. Avoid full black disk, horror, glowing magic, explosion, trash cans.",
+    "cat": "Use case: illustration-story. Asset type: small premium brand illustration for Doompile, an ironic bookmarking app, usable as a transparent cutout in a quiet warm-white or charcoal UI. Art direction: tactile monochrome paper collage, crisp off-white paper shapes with charcoal ink edges, subtle restrained print grain, one electric lime #CFF641 double-stroke hand-drawn halo as the only saturated accent. Internet-native, sly, calm, elegantly strange, not cute emoji, not glossy 3D, not corporate vector clip art. Strong readable silhouette at 160px. No text, letters, logos, UI, frame, cast-shadow rectangle, background field or watermark. Actual transparent background. Keep all visible artwork within the middle 78% of a square image with generous transparent margin. Subject: a quietly mischievous charcoal black cat sitting behind a small uneven pile of three off-white saved paper cards, only head and one front paw peeking over the cards. Bright off-white eyes looking slightly upward with dry curiosity. A loose elliptical double-stroke lime halo floats over one ear. Sly internet-native editorial collage character, not smiling cartoon, not a trash can, no crown.",
+    "app-icon-void": "Use case: logo-brand. Edit the reference into a finished square app icon for Doompile, an ironic bookmarking app for friends. Preserve the reference's torn-paper collage aesthetic and unmistakable bottomless funnel / black hole with saved cards falling into it. Make a polished, exceptionally legible app-icon composition: a large central charcoal-and-off-white layered paper funnel, an inky black oval mouth with one vivid yellow-lime #CFF641 loose double-stroke elliptical ring tracing its rim, and exactly two small off-white paper note cards falling in above it. The ring is the signature; keep it prominent, clean and continuous rather than paint splatter. Funnel in the lower two thirds, cards in the upper third, generous optical breathing room; the complete symbol stays inside the central 78% of the square so OS icon masks cannot crop it. Strong graphic silhouette readable at 64px, only 5–6 broad paper layers, reduce tiny texture details and scratchy lines. Flat full-bleed solid charcoal #161617 background all the way to every edge; do not draw a rounded-square frame or outer shadow, the operating system provides its mask. Mood is mischievous, welcoming, a beautiful abyss for all those things you'll definitely read later. No lettering, no letters, no text, no envelope, no mail icon, no stacks of paper, no trash can, no UI, no photoreal lighting, no 3D bevel, no watermark. Output a single square app icon."
+  },
+  "identityVersion": 2,
+  "active": [
+    "app-icon-void",
+    "void",
+    "cat"
+  ],
+  "archived": [
+    "pile"
+  ],
+  "notes": {
+    "app-icon-void": "Reference-based edit with a full charcoal background; exported app icon. Other illustration assets retain transparency."
+  },
+  "overrides": {
+    "app-icon-void": {
+      "transparent_background": false,
+      "intent": "edit",
+      "reference": "void.png"
+    }
+  }
+}

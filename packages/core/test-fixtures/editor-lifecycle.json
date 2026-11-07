@@ -1,0 +1,110 @@
+[
+  {
+    "name": "empty",
+    "plainText": "",
+    "body": {
+      "type": "doc",
+      "content": [
+        {
+          "type": "paragraph"
+        }
+      ]
+    },
+    "attachments": [],
+    "expected": false
+  },
+  {
+    "name": "quick-draft",
+    "plainText": "Before expanding",
+    "body": {
+      "type": "doc",
+      "content": [
+        {
+          "type": "paragraph",
+          "content": [
+            {
+              "type": "text",
+              "text": "Before expanding"
+            }
+          ]
+        }
+      ]
+    },
+    "attachments": [],
+    "expected": true
+  },
+  {
+    "name": "table-only",
+    "plainText": "",
+    "body": {
+      "type": "doc",
+      "content": [
+        {
+          "type": "table",
+          "content": []
+        }
+      ]
+    },
+    "attachments": [],
+    "expected": true
+  },
+  {
+    "name": "formatted-text",
+    "plainText": "",
+    "body": {
+      "type": "doc",
+      "content": [
+        {
+          "type": "paragraph",
+          "content": [
+            {
+              "type": "text",
+              "text": "Important",
+              "marks": [
+                {
+                  "type": "bold"
+                }
+              ]
+            }
+          ]
+        }
+      ]
+    },
+    "attachments": [],
+    "expected": true
+  },
+  {
+    "name": "source-only",
+    "plainText": "",
+    "body": {
+      "type": "doc",
+      "content": [
+        {
+          "type": "paragraph"
+        }
+      ]
+    },
+    "attachments": [],
+    "source": {
+      "url": "https://example.com"
+    },
+    "expected": true
+  },
+  {
+    "name": "unsupported block is meaningful data",
+    "plainText": "",
+    "body": {
+      "type": "doc",
+      "content": [
+        {
+          "type": "futureWidget",
+          "attrs": {
+            "value": 42
+          }
+        }
+      ]
+    },
+    "attachments": [],
+    "expected": true
+  }
+]
