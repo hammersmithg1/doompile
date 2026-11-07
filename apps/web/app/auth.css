@@ -28,6 +28,8 @@
   display: flex;
   align-items: center;
   justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 8px 20px;
   padding-bottom: 28px;
   border-bottom: 1px solid var(--line);
 }
@@ -45,7 +47,26 @@
   width: 44px;
   color: var(--lime);
 }
-.landing-header > span,
+.landing-links {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0 20px;
+}
+.landing-links a,
+.landing-footer > a {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  min-height: 44px;
+  color: var(--text);
+  font-size: 13px;
+  font-weight: 600;
+  text-decoration: none;
+}
+.landing-links a:hover,
+.landing-footer > a:hover {
+  text-decoration: underline;
+}
 .landing-footer > span {
   font-family: monospace;
   font-size: 10px;
@@ -89,9 +110,38 @@
   transform: rotate(-3deg);
 }
 .landing-copy > p {
+  max-width: 440px;
   font-size: 16px;
   line-height: 1.8;
   color: var(--muted);
+}
+.landing-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  margin-top: 22px;
+}
+.landing-actions > a {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  min-height: 44px;
+  padding: 10px 15px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-control);
+  background: var(--surface);
+  color: var(--text);
+  font-size: 13px;
+  font-weight: 650;
+  text-decoration: none;
+}
+.landing-actions > .landing-action-primary {
+  border-color: var(--lime);
+  background: var(--lime);
+  color: var(--on-lime);
+}
+.landing-actions > a:hover {
+  text-decoration: underline;
 }
 .landing-scrap {
   margin: 36px 0 0 8px;
@@ -192,6 +242,9 @@
 }
 .landing-login .landing-pending {
   font-size: 11px;
+}
+.landing-pending a {
+  color: inherit;
 }
 .landing-footer {
   display: flex;
@@ -332,10 +385,7 @@
     padding: 23px 22px 0;
   }
   .landing-header {
-    padding-bottom: 20px;
-  }
-  .landing-header > span {
-    font-size: 8px;
+    padding-bottom: 12px;
   }
   .landing-brand {
     font-size: 25px;
@@ -367,20 +417,16 @@
   }
   .landing-footer {
     min-height: 75px;
+    flex-wrap: wrap;
+    gap: 0 12px;
   }
   .landing-footer > span {
     font-size: 8px;
     max-width: 180px;
     line-height: 1.6;
   }
-  .landing-footer > span:last-child {
-    display: none;
-  }
   .landing-cat {
     width: 58px;
-  }
-  .landing-break {
-    display: none;
   }
 }
 

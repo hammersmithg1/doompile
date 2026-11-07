@@ -9,7 +9,7 @@ import { brandCopy } from "../../../packages/design/copy";
 import TelemetryLifecycle from "../components/telemetry-lifecycle";
 export const metadata: Metadata = {
   title: `Doompile — ${brandCopy.tagline}`,
-  description: "Ссылки, находки и мысли — в одну кучу. Сохраняй статьи, видео и цитаты в Doompile.",
+  description: "Doompile с открытым исходным кодом для заметок, ссылок и цитат. Начни в облаке или разверни свой сервер.",
   icons: { icon: [{ url: "/icon.svg", type: "image/svg+xml" }, { url: "/brand/app-32.png", sizes: "32x32", type: "image/png" }], apple: "/brand/app-192.png" },
   manifest: "/manifest.webmanifest",
   appleWebApp: {

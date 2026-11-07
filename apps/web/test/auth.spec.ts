@@ -87,7 +87,7 @@ test("typing across a save acknowledgement keeps one note through repeated autos
   await expect(page.locator(".note-row")).toHaveCount(1);
   await expect(page.locator(".note-row")).toContainText("Final edit");
 });
-test("the public landing has OAuth, no private data, and no disabled provider redirect", async ({
+test("the public landing offers cloud sign-in, self-hosting, and source code", async ({
   page,
 }) => {
   await page.route("**/api/session", (route) =>
@@ -97,8 +97,27 @@ test("the public landing has OAuth, no private data, and no disabled provider re
   );
   await page.goto("/");
   await expect(
+    page.getByText("ОТКРЫТЫЙ КОД · MIT", { exact: true }),
+  ).toBeVisible();
+  await expect(
     page.getByRole("heading", { name: "Заходи. Сохраняй." }),
   ).toBeVisible();
+  const repositoryUrl = "https://github.com/hammersmithg1/doompile";
+  const quickStartUrl = `${repositoryUrl}/blob/main/docs/get-started.md`;
+  await expect(
+    page.getByRole("link", { name: "Код на GitHub" }),
+  ).toHaveAttribute("href", repositoryUrl);
+  await expect(
+    page.getByRole("link", { name: "Быстрый старт" }),
+  ).toHaveAttribute("href", quickStartUrl);
+  await expect(
+    page.getByRole("link", { name: "Развернуть у себя" }),
+  ).toHaveAttribute("href", `${quickStartUrl}#свой-сервер`);
+  await page.getByRole("link", { name: "Начать в браузере" }).click();
+  await expect(page).toHaveURL(/#sign-in$/);
+  await expect(
+    page.getByRole("heading", { name: "Заходи. Сохраняй." }),
+  ).toBeInViewport();
   await expect(
     page.getByRole("link", { name: "Войти через Яндекс" }),
   ).toHaveAttribute("href", /\/api\/auth\/yandex\?returnTo=/);

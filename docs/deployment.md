@@ -1,6 +1,6 @@
 # Deployment
 
-Follow [server operations](server-operations.md) for staging, immutable releases, backups and delivery from GitHub. Use [authentication](authentication.md) to register OAuth callbacks and [Apple signing](apple-signing-setup.md) to configure native releases.
+Start with the [self-hosting guide](get-started.md#свой-сервер) to run Doompile with Docker Compose. Follow [server operations](server-operations.md) for staging, immutable releases, backups and delivery from GitHub. Use [authentication](authentication.md) to register OAuth callbacks and [Apple signing](apple-signing-setup.md) to configure native releases.
 
 The web entry rewrites /doompile to the app. Preserve API and OAuth paths, /notes/<uuid>, and both existing Mac download paths. App and clipper connection settings take an origin such as https://notes.example.org. The web entry is https://notes.example.org/doompile.
 

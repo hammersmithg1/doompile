@@ -2,6 +2,11 @@
 import { ArrowUpRight, LockKeyhole } from "../../../packages/design/ui-icons";
 import { Halo, PileCat, Wordmark, BrandIllustration } from "./brand";
 import { brandCopy } from "../../../packages/design/copy";
+
+const repositoryUrl = "https://github.com/hammersmithg1/doompile";
+const quickStartUrl = `${repositoryUrl}/blob/main/docs/get-started.md`;
+const selfHostUrl = `${quickStartUrl}#свой-сервер`;
+
 export default function Landing({
   configuration,
 }: {
@@ -22,27 +27,45 @@ export default function Landing({
           <Wordmark />
           <Halo />
         </a>
-        <span>{brandCopy.empty}</span>
+        <nav className="landing-links" aria-label="О проекте">
+          <a href={quickStartUrl}>Быстрый старт</a>
+          <a href={repositoryUrl}>
+            Код на GitHub <ArrowUpRight size={14} />
+          </a>
+        </nav>
       </header>
       <div className="landing-main">
         <section className="landing-copy">
-          <span className="eyebrow">{brandCopy.tagline}</span>
+          <span className="eyebrow">ОТКРЫТЫЙ КОД · MIT</span>
           <h1>
             {brandCopy.capture}
             <br />
             <em>{brandCopy.forget}</em>
           </h1>
           <p>
-            Мысль, ссылка, цитата или голосовая заметка.
-            <br className="landing-break" /> Сохрани сейчас. Разберёшься потом.
+            Собирай мысли, ссылки, цитаты и голосовые заметки в одном месте.
+            Пользуйся готовым облаком Doompile или разверни свой сервер.
           </p>
+          <div className="landing-actions">
+            <a className="landing-action-primary" href="#sign-in">
+              Начать в браузере
+            </a>
+            <a href={selfHostUrl}>
+              Развернуть у себя <ArrowUpRight size={16} />
+            </a>
+          </div>
           <div className="landing-void">
             <BrandIllustration kind="void" />
             <span>{brandCopy.aside}</span>
           </div>
         </section>
-        <section className="landing-login" aria-labelledby="login-title">
-          <span className="eyebrow">ТВОЯ ЛИЧНАЯ КУЧА</span>
+        <section
+          className="landing-login"
+          id="sign-in"
+          aria-labelledby="login-title"
+          tabIndex={-1}
+        >
+          <span className="eyebrow">ВЕБ-ВЕРСИЯ</span>
           <h2 id="login-title">Заходи. Сохраняй.</h2>
           <p>
             Войди, чтобы заметки были рядом
@@ -69,7 +92,7 @@ export default function Landing({
                     {provider.id === "yandex" ? "Я" : "G"}
                   </b>
                   {provider.id === "yandex" ? "Яндекс" : "Google"}
-                  <small>Скоро</small>
+                  <small>Недоступно</small>
                 </button>
               ),
             )}
@@ -79,11 +102,12 @@ export default function Landing({
               Вход не завершён. Попробуй ещё раз.
             </p>
           )}
-          {!configuration.providers.some((p) => p.enabled) && (
-            <p className="landing-pending">
-              Вход скоро откроется — подключаем аккаунты.
-            </p>
-          )}
+          {!configuration.development &&
+            !configuration.providers.some((p) => p.enabled) && (
+              <p className="landing-pending">
+                Для входа <a href={selfHostUrl}>настрой OAuth</a> на сервере.
+              </p>
+            )}
           {configuration.development && (
             <form method="post" action="/api/auth/development">
               <button className="quiet-button">
@@ -102,7 +126,7 @@ export default function Landing({
         <div className="landing-cat">
           <PileCat />
         </div>
-        <span>МАЛЕНЬКОЕ МЕСТО ДЛЯ БОЛЬШИХ «ПОТОМ»</span>
+        <a href={`${quickStartUrl}#клиенты`}>Приложения и расширения</a>
       </footer>
     </main>
   );
