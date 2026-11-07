@@ -828,7 +828,7 @@ struct NoteEditor: View {
         self.capture = capture
         self.onSave = onSave
     }
-    var body: some View {
+    private var editorSurface: some View {
         VStack(spacing: 0) {
             metadata
             RichEditorView(document: $note.body, plainText: $text, height: $editorHeight,
@@ -847,6 +847,9 @@ struct NoteEditor: View {
         // Unlike a navigation bottomBar, it stays above the keyboard for WKWebView too.
         .safeAreaInset(edge: .bottom, spacing: 0) { touchToolbar }
         .interactiveDismissDisabled()
+    }
+    private var recordingSurface: some View {
+        editorSurface
         .onChange(of: photo) { _, item in
             Task {
                 do {
@@ -868,6 +871,9 @@ struct NoteEditor: View {
         .onReceive(NotificationCenter.default.publisher(for: AVAudioSession.interruptionNotification)) { _ in
             if recorder.recording { finishRecording() }
         }
+    }
+    private var editorPresentation: some View {
+        recordingSurface
         .fileImporter(isPresented: $importer, allowedContentTypes: [.item], allowsMultipleSelection: true) { result in
             do {
                 for url in try result.get() {
@@ -892,6 +898,9 @@ struct NoteEditor: View {
             Button("Отмена", role: .cancel) { editorBridge.focus() }
         } message: { Text("Введи адрес или оставь поле пустым, чтобы убрать ссылку.") }
         .quickLookPreview($preview)
+    }
+    var body: some View {
+        editorPresentation
         .onAppear {
             NoteLinkEditors.register(linkEditorToken) {
                 if capture != nil { return await preserveCapture() }
