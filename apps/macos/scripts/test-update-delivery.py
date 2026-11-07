@@ -25,6 +25,14 @@ spec.loader.exec_module(generator)
 
 
 def test_delivery(application, sparkle_bin):
+    # Assert the shipped app and clipper have no session Keychain entry points.
+    # This also covers compile-time platform guards in the shared iOS sources.
+    for bundle in [application, *application.glob('Contents/PlugIns/*.appex')]:
+        info = plistlib.loads((bundle / 'Contents/Info.plist').read_bytes())
+        assert 'DoompileKeychainGroup' not in info, 'Mac build still configures a Keychain group'
+        symbols = subprocess.run(['nm', '-u', str(bundle / 'Contents/MacOS' / info['CFBundleExecutable'])],
+                                 capture_output=True, text=True, check=True).stdout
+        assert not any(symbol in symbols for symbol in ['_SecItemCopyMatching', '_SecItemAdd', '_SecItemDelete', '_SecItemUpdate']), 'Mac binary still accesses Keychain'
     with tempfile.TemporaryDirectory(prefix='doompile-update-delivery-') as temporary:
         root = Path(temporary)
         generated = subprocess.run([

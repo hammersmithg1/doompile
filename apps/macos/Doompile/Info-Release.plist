@@ -52,7 +52,5 @@
 			</array>
 		</dict>
 	</array>
-	<key>DoompileKeychainGroup</key>
-	<string>$(AppIdentifierPrefix)app.doompile.shared</string>
 </dict>
 </plist>

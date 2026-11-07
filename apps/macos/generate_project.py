@@ -73,15 +73,12 @@ safari = {
     },
 }
 for folder, value in [('Doompile', app), ('Safari', safari)]:
-    # Unsigned local builds use the normal login Keychain. Signed Release builds
-    # opt into the shared group. An empty access-group string is not valid.
     plist(folder + '/Info.plist', value)
-    plist(folder + '/Info-Release.plist', {**value, 'DoompileKeychainGroup': '$(AppIdentifierPrefix)app.doompile.shared'})
+    plist(folder + '/Info-Release.plist', value)
     entitlements = {
         'com.apple.security.app-sandbox': True,
         'com.apple.security.network.client': True,
         'com.apple.security.application-groups': ['group.app.doompile'],
-        'keychain-access-groups': ['$(AppIdentifierPrefix)app.doompile.shared'],
     }
     if folder == 'Doompile':
         entitlements.update({**link_entitlements, 'com.apple.security.files.user-selected.read-write': True, 'com.apple.security.device.audio-input': True})

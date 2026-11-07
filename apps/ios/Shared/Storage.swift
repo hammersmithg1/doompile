@@ -1,5 +1,7 @@
 import Foundation
+#if !os(macOS)
 import Security
+#endif
 import Darwin
 import CryptoKit
 
@@ -30,21 +32,36 @@ enum Connection {
     }
     static var scope: String { account?.scope ?? "signed-out" }
     static var signedIn: Bool { account != nil && !token.isEmpty }
+    static var directory: URL {
+        FileManager.default.containerURL(forSecurityApplicationGroupIdentifier: group)
+            ?? FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0].appendingPathComponent("Doompile")
+    }
+    #if os(macOS)
+    private static var sessions: MacSessionTokenStore { MacSessionTokenStore(directory: directory.appendingPathComponent("sessions")) }
+    #else
     private static func keychainQuery(scope: String) -> [String: Any] {
         var query: [String: Any] = [kSecClass as String: kSecClassGenericPassword, kSecAttrService as String: "app.doompile", kSecAttrAccount as String: "account-v1:" + scope]
         if let group = Bundle.main.object(forInfoDictionaryKey: "DoompileKeychainGroup") as? String, !group.isEmpty, !group.contains("$(") { query[kSecAttrAccessGroup as String] = group }
         return query
     }
+    #endif
     static var token: String {
         guard let account else { return "" }
+        #if os(macOS)
+        return sessions.read(account.scope)
+        #else
         var query = keychainQuery(scope:account.scope)
         query[kSecReturnData as String] = true; query[kSecMatchLimit as String] = kSecMatchLimitOne
         var result: CFTypeRef?
         guard SecItemCopyMatching(query as CFDictionary, &result) == errSecSuccess, let data = result as? Data else { return "" }
         return String(data:data,encoding:.utf8) ?? ""
+        #endif
     }
     static func install(_ account: NativeAccount, token: String) throws {
         guard UUID(uuidString:account.id) != nil, validEndpoint(account.endpoint), !token.isEmpty else { throw DoompileError.authentication }
+        #if os(macOS)
+        try sessions.save(token, scope: account.scope)
+        #else
         let query = keychainQuery(scope:account.scope)
         SecItemDelete(query as CFDictionary)
         var values = query
@@ -52,11 +69,16 @@ enum Connection {
         values[kSecAttrAccessible as String] = kSecAttrAccessibleAfterFirstUnlockThisDeviceOnly
         let status = SecItemAdd(values as CFDictionary,nil)
         guard status == errSecSuccess else { throw DoompileError.message("Не удалось сохранить вход в Keychain (\(status)).") }
+        #endif
         defaults.set(try JSONEncoder().encode(account),forKey:"account-v1")
         endpoint = account.endpoint
     }
     static func logout() {
+        #if os(macOS)
+        if let account { try? sessions.remove(account.scope) }
+        #else
         if let account { SecItemDelete(keychainQuery(scope:account.scope) as CFDictionary) }
+        #endif
         defaults.removeObject(forKey:"account-v1")
     }
     static func validEndpoint(_ value: String) -> Bool {
@@ -82,8 +104,7 @@ final class Storage: @unchecked Sendable {
     private let observes: Bool
     init(directory: URL? = nil) {
         observes = directory == nil
-        let root = FileManager.default.containerURL(forSecurityApplicationGroupIdentifier: Connection.group)
-            ?? FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0].appendingPathComponent("Doompile")
+        let root = Connection.directory
         self.directory = directory ?? root.appendingPathComponent("accounts").appendingPathComponent(Connection.scope)
         try? FileManager.default.createDirectory(at: self.directory.appendingPathComponent("files"), withIntermediateDirectories: true)
         try? FileManager.default.setAttributes([.posixPermissions: 0o700], ofItemAtPath: self.directory.path)

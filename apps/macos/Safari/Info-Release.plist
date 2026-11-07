@@ -36,7 +36,5 @@
 		<key>NSExtensionPrincipalClass</key>
 		<string>$(PRODUCT_MODULE_NAME).SafariWebExtensionHandler</string>
 	</dict>
-	<key>DoompileKeychainGroup</key>
-	<string>$(AppIdentifierPrefix)app.doompile.shared</string>
 </dict>
 </plist>

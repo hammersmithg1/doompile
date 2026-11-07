@@ -36,7 +36,7 @@ python3 apps/macos/generate_project.py
 - Sidebar tags can be created without creating an empty note. Pinning, urgency and edits never change the note's position within its creation-date group. The editor has a draggable width divider and animates opening, closing and expansion; Reduce Motion is respected.
 - The main window is intentionally single-instance: it avoids two stale local editors overwriting the same offline note. Settings is a separate native window.
 
-On the sign-in screen, enter the HTTPS server URL and choose browser sign-in through Yandex/Google. The local dev server can be `http://localhost:3000`; start it separately with the setec wrapper described in [OAuth setup](../../docs/authentication.md). The personal device token is saved only to Keychain. The Settings window displays the actual local data directory; shared App Group storage is used when available, with Application Support fallback in a local developer build.
+On the sign-in screen, enter the HTTPS server URL and choose browser sign-in through Yandex/Google. The local dev server can be `http://localhost:3000`; start it separately with the setec wrapper described in [OAuth setup](../../docs/authentication.md). The device token lives in a private app directory excluded from backups. Mac upgrades from legacy Keychain storage require browser sign-in once. Account notes and drafts remain in their existing storage. The Settings window displays the actual local data directory; shared App Group storage is used when available, with Application Support fallback in a local developer build.
 
 ## Global quick capture
 
@@ -56,7 +56,7 @@ Doompile keeps running after its main window closes, including the global shortc
 
 The app contains `DoompileSafari.appex`. After opening the app, enable Doompile Clipper in **Safari → Settings → Extensions**. The unsigned developer extension requires Safari's developer setting to allow unsigned extensions. The build does not enable this on the user's behalf. Do not enable both the temporary extension and the app's extension at the same time, or Safari may show duplicate menu entries.
 
-The packaged Mac popup offers **Use Doompile app connection**. Signed Release builds use App Group and shared Keychain entitlements for native connection pairing. In an unsigned/ad-hoc Debug build, app and extension may not share the default Keychain item's ACL; if native pairing is unavailable, enter the same endpoint/token directly in the extension popup. Alternatively, use the popup’s browser sign-in. Blank or placeholder tokens do not enable an authorization bypass.
+The packaged Mac popup offers **Use Doompile app connection**. App and extension use the same private App Group storage. In a developer build without App Group sharing, enter the endpoint and token in the extension popup. Alternatively, use the popup’s browser sign-in. Blank or placeholder tokens do not enable an authorization bypass.
 
 Mac resources have their own native host identifier (`app.doompile.macos`) and label; the common extension sources and the user's temporary extension are not modified during packaging.
 
@@ -70,7 +70,7 @@ CI compile-checks the app for Apple Silicon and Intel. Global invocation over ot
 
 **Doompile → Проверить обновления…**, the optional Doompile menu in the menu bar, and **Settings → Обновления** use the same updater, including before sign-in. The settings show the installed version/build, last check, and persistent preferences for daily background checks and automatic download/installation. Background checks are enabled by default; automatic download/installation requires opt-in. Sparkle displays update availability, progress, network/signature errors, and the install/relaunch action. Normal termination still saves open notes and the quick-capture draft. The Safari extension is replaced with the containing app.
 
-Set DOOMPILE_MACOS_UPDATE_FEED_URL and DOOMPILE_MACOS_UPDATE_PUBLIC_KEY when building for your update channel. Both the feed and archive must be signed, and archives are verified before extraction. The signed Release configuration enables Sparkle's Installer XPC service and the two required Mach lookup exceptions; its sandboxed network downloads use the outgoing-network entitlement. The personal Debug configuration retains the existing local-build Keychain and extension-pairing behavior described above.
+Set DOOMPILE_MACOS_UPDATE_FEED_URL and DOOMPILE_MACOS_UPDATE_PUBLIC_KEY when building for your update channel. Both the feed and archive must be signed, and archives are verified before extraction. The signed Release configuration enables Sparkle's Installer XPC service and the two required Mach lookup exceptions; its sandboxed network downloads use the outgoing-network entitlement. Both Mac configurations use the private app session storage.
 
 The private signing key is in setec `devices/doompile-ci/DOOMPILE_MACOS_UPDATE_PRIVATE_KEY`, in Sparkle's base64 32-byte seed format. It is passed to Sparkle over stdin, never written to a private-key file or included in the app. Run scripts/setup-update-key.py with the existing seed and feed URL to emit the public settings for your build environment.
 
@@ -104,4 +104,4 @@ After the initial `npm run macos:build`, use `bash apps/macos/scripts/update-cli
 
 ## Персональные аккаунты
 
-На первом экране укажи сервер и нажми «Войти через браузер». Войди через Яндекс/Google, разреши подключение и вернись в приложение. В настройках отображаются имя, email и выход. SQLite, файлы, черновики и записи разделены по серверу и аккаунту; токен хранится в Keychain. Safari Clipper может взять персональное подключение из приложения. [OAuth и S3](../../docs/authentication.md).
+На первом экране укажи сервер и нажми «Войти через браузер». Войди через Яндекс/Google, разреши подключение и вернись в приложение. В настройках отображаются имя, email и выход. SQLite, файлы, черновики и записи разделены по серверу и аккаунту; ключ входа хранится в закрытом каталоге приложения. Safari Clipper может взять персональное подключение из приложения. [OAuth и S3](../../docs/authentication.md).
