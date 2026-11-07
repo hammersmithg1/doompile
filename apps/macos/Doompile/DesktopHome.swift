@@ -203,8 +203,7 @@ struct DesktopHome: View {
         }.buttonStyle(.plain).accessibilityLabel("\(title), \(count)").accessibilityValue(collapsed.contains(id) ? "Свёрнуто" : "Развёрнуто")
     }
     private var composer: some View {
-        let compactAttachments = quick.richMounted ? quick.note.attachments.filter { $0.mimeType.hasPrefix("audio/") } : quick.note.attachments
-        return VStack(spacing: 7) {
+        VStack(spacing: 7) {
             if quickExpanded {
                 HStack {
                     DoompileWordmark(height: 16)
@@ -218,26 +217,44 @@ struct DesktopHome: View {
             if quick.startingVoice || (quick.voice.recording && !quickExpanded) {
                 MacRecordingSnippet(starting: quick.startingVoice, seconds: quick.voice.seconds, onStop: quick.stopRecording)
             }
-            if !quickExpanded && !compactAttachments.isEmpty {
-                MacComposerAttachmentStrip(attachments: compactAttachments, onRemove: quick.richMounted ? nil : quick.removeFile)
-                    .frame(height: quick.richMounted ? 52 : nil).frame(maxHeight: 165)
-            }
-            HStack(alignment: .bottom, spacing: 5) {
-                if quick.richMounted {
-                    MacRichEditorView(document: $quick.note.body, plainText: $quick.note.plainText, height: $quickEditorHeight, attachments: $quick.note.attachments, noteID: quick.note.id, notes: library.notes, focusOnLoad: true, captureCompact: !quickExpanded, bridge: quick.bridge, onReference: { id in
-                        if let note = library.notes.first(where: { $0.id == id }) { open(note) }
-                    }, onRequestLink: { quickLinkValue = $0; quickLink = true }, onAction: composerAction)
-                    .id(quick.note.id)
-                    .frame(maxWidth: .infinity, minHeight: quickExpanded ? 180 : 43, maxHeight: quickExpanded ? .infinity : 43)
-                    .onReceive(quick.bridge.$ready) { ready in if ready { quick.editorReady() } }
-                } else {
-                    MacQuickInput(text: Binding(get: { quick.note.plainText }, set: quick.updateText), height: $quickHeight, focused: $quickFocused, onSubmit: saveQuick).frame(height: quickHeight).padding(.leading, 8)
-                }
-                if !quickExpanded { composerButtons }
-            }.padding(6).background(MacPalette.surface, in: RoundedRectangle(cornerRadius: 15)).overlay(RoundedRectangle(cornerRadius: 15).stroke(quickFocused ? MacPalette.adaptive(0xC9C5C0, 0x69646F) : MacPalette.line)).shadow(color: .black.opacity(0.025), radius: 6, y: 2)
+            if !quickExpanded { composerAttachments }
+            composerInput
             if quickExpanded { HStack(spacing: 5) { Spacer(); composerButtons }.padding(.vertical, 5) }
         }.padding(.horizontal, 14).padding(.top, 8).padding(.bottom, 12)
-        .onChange(of: quick.voice.seconds) { _, seconds in if quick.voice.recording { quick.bridge.recordingState(id: quick.voice.id, seconds: seconds) } }
+        .onChange(of: quick.voice.seconds, updateRecordingTime)
+    }
+    private func updateRecordingTime(from _: Int, to seconds: Int) {
+        if quick.voice.recording { quick.bridge.recordingState(id: quick.voice.id, seconds: seconds) }
+    }
+    @ViewBuilder private var composerAttachments: some View {
+        if quick.richMounted {
+            let audio = quick.note.attachments.filter { $0.mimeType.hasPrefix("audio/") }
+            if !audio.isEmpty { MacComposerAttachmentStrip(attachments: audio, onRemove: nil).frame(height: 52) }
+        } else if !quick.note.attachments.isEmpty {
+            MacComposerAttachmentStrip(attachments: quick.note.attachments, onRemove: { quick.removeFile($0) }).frame(maxHeight: 165)
+        }
+    }
+    private var composerInput: some View {
+        HStack(alignment: .bottom, spacing: 5) {
+            if quick.richMounted { richComposerInput }
+            else {
+                MacQuickInput(text: Binding(get: { quick.note.plainText }, set: quick.updateText), height: $quickHeight, focused: $quickFocused, onSubmit: saveQuick)
+                    .frame(height: quickHeight).padding(.leading, 8)
+            }
+            if !quickExpanded { composerButtons }
+        }
+        .padding(6)
+        .background(MacPalette.surface, in: RoundedRectangle(cornerRadius: 15))
+        .overlay(RoundedRectangle(cornerRadius: 15).stroke(quickFocused ? MacPalette.adaptive(0xC9C5C0, 0x69646F) : MacPalette.line))
+        .shadow(color: .black.opacity(0.025), radius: 6, y: 2)
+    }
+    private var richComposerInput: some View {
+        MacRichEditorView(document: $quick.note.body, plainText: $quick.note.plainText, height: $quickEditorHeight, attachments: $quick.note.attachments, noteID: quick.note.id, notes: library.notes, focusOnLoad: true, captureCompact: !quickExpanded, bridge: quick.bridge, onReference: { id in
+            if let note = library.notes.first(where: { $0.id == id }) { open(note) }
+        }, onRequestLink: { quickLinkValue = $0; quickLink = true }, onAction: composerAction)
+        .id(quick.note.id)
+        .frame(maxWidth: .infinity, minHeight: quickExpanded ? 180 : 43, maxHeight: quickExpanded ? .infinity : 43)
+        .onReceive(quick.bridge.$ready) { ready in if ready { quick.editorReady() } }
     }
     @ViewBuilder private var composerButtons: some View {
         MacComposerButton(icon: "mic", label: "Записать голосовую заметку", disabled: quick.startingVoice || quick.voice.recording || quick.busy) { Task { await quick.startRecording() } }
