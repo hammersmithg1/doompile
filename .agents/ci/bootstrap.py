@@ -24,7 +24,7 @@ home = Path.home() / '.agents'
 shutil.copyfile(root/'agent_secrets.py', home/'common/scripts/agent_secrets.py')
 (home/'common/setec.json').write_text(json.dumps({'server':server})+'\n')
 (home/'local/setec.json').write_text(json.dumps({'role':'machine','device':device})+'\n')
-subprocess.run(['sudo','tailscale','set','--webclient'], check=True)
+subprocess.run(['sudo','tailscale','set','--webclient'], check=True, capture_output=True)
 prefs = json.loads(subprocess.check_output(['sudo','tailscale','debug','prefs'], text=True))
 if not prefs.get('RunWebClient'):
     raise SystemExit('Tailscale web client was not enabled')

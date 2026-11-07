@@ -130,6 +130,7 @@ jobs:
         if: inputs.publish_release || inputs.signed_release
         uses: tailscale/github-action@v4
         with:
+          log-mode: quiet
           oauth-client-id: ${{ secrets.DOOMPILE_TS_CLIENT_ID || vars.DOOMPILE_TS_CLIENT_ID }}
           audience: ${{ secrets.DOOMPILE_TS_AUDIENCE || vars.DOOMPILE_TS_AUDIENCE }}
           tags: ${{ vars.DOOMPILE_CI_TAILSCALE_TAG || 'tag:doompile-ci' }}
