@@ -110,3 +110,43 @@ struct MacComposerButton: View {
         }.buttonStyle(.plain).disabled(disabled).help(label).accessibilityLabel(label)
     }
 }
+
+struct MacRecordingSnippet: View {
+    let starting: Bool
+    let seconds: Int
+    let onStop: () -> Void
+
+    var body: some View {
+        HStack(spacing: 8) {
+            Circle().fill(MacPalette.orange).frame(width: 6, height: 6)
+            Text(starting ? "Включаем микрофон…" : "Запись \(Note.timeLabel(Double(seconds)))")
+            Spacer()
+            if !starting {
+                Button("■ Стоп", action: onStop).buttonStyle(.plain).accessibilityLabel("Остановить запись")
+            }
+        }
+        .font(.system(size: 11)).foregroundStyle(MacPalette.orange)
+        .padding(.horizontal, 10).frame(height: 30)
+    }
+}
+
+struct MacComposerAttachmentStrip: View {
+    let attachments: [Attachment]
+    var onRemove: ((String) -> Void)?
+
+    var body: some View {
+        ScrollView(.horizontal, showsIndicators: false) {
+            HStack(alignment: .top, spacing: 10) {
+                ForEach(attachments) { file in
+                    HStack(alignment: .top, spacing: 3) {
+                        MacAttachmentCard(attachment: file)
+                        if let onRemove {
+                            Button { onRemove(file.id) } label: { DoompileSymbol(systemName: "xmark.circle.fill", size: 12) }
+                                .buttonStyle(.plain).foregroundStyle(MacPalette.muted).help("Убрать вложение").accessibilityLabel("Убрать вложение")
+                        }
+                    }
+                }
+            }.padding(.horizontal, 4)
+        }
+    }
+}

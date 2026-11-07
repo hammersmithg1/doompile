@@ -214,9 +214,6 @@
   .send-button:disabled {
     display: none;
   }
-  .quick-composer:has(textarea:not(:placeholder-shown)) .quick-voice {
-    display: none;
-  }
   .composer-footnote {
     display: none;
   }

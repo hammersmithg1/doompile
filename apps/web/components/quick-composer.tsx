@@ -128,6 +128,7 @@ export default function QuickComposer({
           </button>
           <textarea
             ref={input}
+            readOnly={sending}
             onPaste={pasteQuick}
             value={text}
             onChange={(e) => setText(e.target.value)}
@@ -171,6 +172,7 @@ export default function QuickComposer({
               type="button"
               className="icon-button attachment-trigger"
               aria-label="Прикрепить файл"
+              disabled={sending}
               onClick={() => fileInput.current?.click()}
             >
               <Paperclip size={19} />
@@ -179,6 +181,7 @@ export default function QuickComposer({
               type="button"
               className="icon-button"
               aria-label="Развернуть редактор"
+              disabled={sending}
               onClick={() => openEditor()}
             >
               <Maximize2 size={17} />
@@ -193,7 +196,7 @@ export default function QuickComposer({
                   recording.draft?.target !== "quick") ||
                 sending ||
                 (recording.draft?.target === "quick" &&
-                  recording.status === "uploading") ||
+                  ["starting", "uploading"].includes(recording.status)) ||
                 !!uploading
               }
             >

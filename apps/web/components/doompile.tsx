@@ -90,6 +90,7 @@ import { brandCopy, uiCopy } from "../../../packages/design/copy";
 import { demoNotesCached } from "@/lib/client/demo-notes";
 import {
   documentMediaURLs,
+  compactDraftDocument,
   editableNote,
   noteForEditorSave,
   editorContentKey,
@@ -100,6 +101,7 @@ import MobileNoteRow from "./mobile-note-row";
 import { useMobileViewport } from "./mobile-viewport";
 import { useMobileSidebar } from "./mobile-sidebar";
 type Filter = "all" | "urgent" | "pinned" | "media" | "tag";
+const collapsedCaptureKey = "doompile-collapsed-capture";
 const typeLabel = {
   note: "Заметка",
   article: "Статья",
@@ -188,8 +190,10 @@ export default function Doompile({
     }
   }
   const [text, setText] = useState("");
+  const [collapsedCapture, setCollapsedCapture] = useState<Note | null>(null);
   const [draftReady, setDraftReady] = useState(false);
   const [sending, setSending] = useState(false);
+  const submitting = useRef(false);
   const [toast, setToast] = useState("");
   const [demo, setDemo] = useState(false);
   const [undoNote, setUndoNote] = useState<Note | null>(null);
@@ -208,6 +212,10 @@ export default function Doompile({
   if (!autosave.current)
     autosave.current = new Autosave(
       async (note) => {
+        if (
+          latestComposer.current?.id === note.id &&
+          recordingSession.getSnapshot().draft?.target === "quick"
+        ) return;
         setSaveStatus("Сохраняем…");
         const stored = store
           .getSnapshot()
@@ -290,7 +298,17 @@ export default function Doompile({
     if ("serviceWorker" in navigator && process.env.NODE_ENV === "production")
       void navigator.serviceWorker.register("/sw.js");
     const id = noteIDFromURL(location.href);
-    if (id) {
+    let capture: Note | null = null;
+    try {
+      capture = JSON.parse(localStorage.getItem(collapsedCaptureKey) || "null");
+      setCollapsedCapture(capture);
+    } catch {}
+    if (id && capture?.id === id) {
+      setText(capture.plainText);
+      setDraftAttachments(capture.attachments);
+      setSelectedState(null);
+      writeNoteLocation(null, true);
+    } else if (id) {
       setSelectedState(id);
       writeNoteLocation(id, true);
     }
@@ -306,7 +324,15 @@ export default function Doompile({
       void (async () => {
         try {
           const current = latestEditor.current;
-          if (current) await finishRecording(current.id);
+          if (
+            current && latestComposer.current?.id === current.id &&
+            recordingSession.getSnapshot().draft?.target === "quick"
+          ) {
+            if (!closing.current && !submitting.current) {
+              const stored = localStorage.getItem(collapsedCaptureKey);
+              keepCapture(stored ? JSON.parse(stored) : current);
+            }
+          } else if (current) await finishRecording(current.id);
           await autosave.current?.flush();
           if (request !== generation) return;
           const animation = !id ? await animateDetailClose() : undefined;
@@ -459,9 +485,13 @@ export default function Doompile({
     return animation;
   }
   async function closeEditor() {
-    if (closing.current || editorBusy || (composing && uploading > 0))
+    if (
+      closing.current || submitting.current || editorBusy || (composing && uploading > 0)
+    )
       return false;
     closing.current = true;
+    const keepDraft = composing &&
+      recordingSession.getSnapshot().draft?.target === "quick";
     try {
       if (
         editor &&
@@ -471,7 +501,7 @@ export default function Doompile({
         await finishRecording(editor.id);
       }
       const current = latestEditor.current;
-      if (current) {
+      if (current && !keepDraft) {
         const note = noteForEditorSave(current, editTags);
         const stored = store
           .getSnapshot()
@@ -498,8 +528,9 @@ export default function Doompile({
       closing.current = false;
       if (editorMode === "compose") {
         writeNoteLocation(null);
-        setText("");
-        setDraftAttachments([]);
+        const current = latestComposer.current;
+        if (keepDraft && current) keepCapture(noteForEditorSave(current, editTags));
+        else clearCapture();
       } else {
         setSelected(null);
         setDetailExpanded(false);
@@ -797,6 +828,7 @@ export default function Doompile({
     )
       return;
     const note = noteForEditorSave(editor, editTags);
+    const voiceCapture = composing && recording.draft?.target === "quick";
     try {
       localStorage.setItem(
         editorMode === "compose"
@@ -804,9 +836,13 @@ export default function Doompile({
           : `doompile-note-draft-${editor.id}`,
         JSON.stringify({ note, tags: editTags }),
       );
+      if (voiceCapture)
+        localStorage.setItem(collapsedCaptureKey, JSON.stringify(note));
     } catch {}
     if (
       !editorBusy &&
+      !voiceCapture &&
+      !submitting.current &&
       (shouldPersistNote(
         note,
         state.notes.some((n) => n.id === editor.id),
@@ -816,17 +852,13 @@ export default function Doompile({
       setSaveStatus("Сохраняем…");
       autosave.current?.schedule(note);
     }
-  }, [editor, editTags, editorBusy, editorMode]);
+  }, [editor, editTags, editorBusy, editorMode, recording.draft?.target]);
   useEffect(() => {
     if (recording.error && !recording.draft) notify(recording.error);
   }, [recording.error]);
   useEffect(() => {
     void recordingSession.restore();
   }, []);
-  useEffect(() => {
-    if (composing && editor && recording.draft?.target === "quick")
-      recordingSession.moveTo(editor.id);
-  }, [composing, editor?.id, recording.draft?.target]);
   function recordingNote(target: string): Note {
     if (latestEditor.current?.id === target) return latestEditor.current;
     let note = store.getSnapshot().notes.find((note) => note.id === target);
@@ -849,101 +881,66 @@ export default function Doompile({
   }
   async function persistRecording(draft: RecordingDraft) {
     await store.initStore();
-    if (
-      findFinishedRecording(
-        recordingNote(draft.target === "quick" ? draft.id : draft.target),
-        draft.id,
-      )
-    )
-      return;
-    const file = new window.File(
-      [draft.blob],
-      `Голосовая заметка.${draft.mimeType.includes("mp4") ? "m4a" : "webm"}`,
-      { type: draft.mimeType },
+    if (findFinishedRecording(recordingNote(draft.target), draft.id)) return;
+    const attachment = await uploadRecording(draft);
+    const target = draft.target;
+    await autosave.current?.flush();
+    const note = recordingNote(target);
+    const updated = {
+      ...note,
+      body: finishRecordingDocument(note.body, draft.id, attachment),
+      attachments: [
+        ...note.attachments.filter((item) => item.id !== attachment.id),
+        attachment,
+      ],
+      updatedAt: new Date().toISOString(),
+    };
+    await autosave.current?.flush();
+    localStorage.setItem(
+      `doompile-note-draft-${target}`,
+      JSON.stringify({ note: updated, tags: updated.tags.join(", ") }),
     );
-    const attachment = await upload(file);
-    const target =
-      recordingSession.getSnapshot().draft?.id === draft.id
-        ? recordingSession.getSnapshot().draft!.target
-        : draft.target;
-    if (target === "quick") {
-      await store.saveNote(
-        createNote({
-          id: draft.id,
-          title: "Голосовая заметка",
-          kind: "audio",
-          attachments: [attachment],
-          body: {
-            type: "doc",
-            content: [
-              {
-                type: "attachment",
-                attrs: { ...attachment, recordingId: draft.id },
-              },
-            ],
-          },
-          ...(filter === "tag" ? { tags: [selectedTag] } : {}),
-        }),
-      );
-      setDemo(false);
-      notify("Голосовая заметка отправлена");
-    } else {
-      await autosave.current?.flush();
-      const note = recordingNote(target);
-      const updated = {
-        ...note,
-        body: finishRecordingDocument(note.body, draft.id, attachment),
-        attachments: [
-          ...note.attachments.filter((item) => item.id !== attachment.id),
-          attachment,
-        ],
-        updatedAt: new Date().toISOString(),
-      };
-      await autosave.current?.flush();
-      localStorage.setItem(
-        `doompile-note-draft-${target}`,
-        JSON.stringify({ note: updated, tags: updated.tags.join(", ") }),
-      );
-      await store.saveNote(updated);
-      if (latestEditor.current?.id === updated.id && editorAPI.current) {
-        setEditor((current) =>
-          current?.id === updated.id
-            ? {
-                ...current,
-                attachments: [
-                  ...current.attachments.filter(
-                    (item) => item.id !== attachment.id,
-                  ),
-                  attachment,
-                ],
-              }
-            : current,
-        );
-        editorAPI.current.completeRecording(draft.id, attachment);
-      } else {
-        setEditor((current) =>
-          current?.id === updated.id
-            ? {
-                ...current,
-                attachments: [
-                  ...current.attachments.filter(
-                    (item) => item.id !== attachment.id,
-                  ),
-                  attachment,
-                ],
-                body: finishRecordingDocument(
-                  current.body,
-                  draft.id,
-                  attachment,
+    await store.saveNote(updated);
+    if (latestEditor.current?.id === updated.id && editorAPI.current) {
+      setEditor((current) =>
+        current?.id === updated.id
+          ? {
+              ...current,
+              attachments: [
+                ...current.attachments.filter(
+                  (item) => item.id !== attachment.id,
                 ),
-              }
-            : current,
-        );
-      }
+                attachment,
+              ],
+            }
+          : current,
+      );
+      editorAPI.current.completeRecording(draft.id, attachment);
+    } else {
+      setEditor((current) =>
+        current?.id === updated.id
+          ? {
+              ...current,
+              attachments: [
+                ...current.attachments.filter(
+                  (item) => item.id !== attachment.id,
+                ),
+                attachment,
+              ],
+              body: finishRecordingDocument(
+                current.body,
+                draft.id,
+                attachment,
+              ),
+            }
+          : current,
+      );
     }
   }
   useEffect(() => {
-    if (recording.status !== "ready" || recording.error) return;
+    if (
+      recording.status !== "ready" || recording.error || recording.draft?.target === "quick"
+    ) return;
     void recordingSession.deliver(persistRecording);
   }, [recording.status, recording.error]);
   async function finishRecording(target: string) {
@@ -955,6 +952,66 @@ export default function Doompile({
       throw new Error(
         result.error || "Не удалось завершить запись. Повтори сохранение.",
       );
+  }
+  function keepCapture(note: Note) {
+    setCollapsedCapture(note);
+    setText(note.plainText);
+    setDraftAttachments(note.attachments);
+    try {
+      localStorage.setItem(collapsedCaptureKey, JSON.stringify(note));
+    } catch {}
+  }
+  function clearCapture() {
+    setCollapsedCapture(null);
+    setText("");
+    setDraftAttachments([]);
+    try {
+      localStorage.removeItem(collapsedCaptureKey);
+    } catch {}
+  }
+  function uploadRecording(draft: RecordingDraft) {
+    return upload(
+      new window.File(
+        [draft.blob],
+        `Голосовая заметка.${draft.mimeType.includes("mp4") ? "m4a" : "webm"}`,
+        { type: draft.mimeType },
+      ),
+    );
+  }
+  function compactNote(id?: string) {
+    const plainText = text.trim();
+    const attachments = draftAttachments;
+    if (collapsedCapture) {
+      const note = editableNote({
+        ...collapsedCapture,
+        attachments,
+        plainText,
+        body: compactDraftDocument(collapsedCapture, plainText, attachments),
+      });
+      return noteForEditorSave(note, note.tags.join(", "));
+    }
+    return createNote({
+      ...(id ? { id } : {}),
+      plainText,
+      title: plainText.split("\n")[0].slice(0, NOTE_LIMITS.generatedTitle) ||
+        attachments[0]?.name || (id ? "Голосовая заметка" : ""),
+      attachments,
+      kind: attachments[0]
+        ? attachments[0].mimeType.startsWith("image/") ? "image"
+          : attachments[0].mimeType.startsWith("audio/") ? "audio"
+          : attachments[0].mimeType.startsWith("video/") ? "video" : "file"
+        : id ? "audio" : "note",
+      body: {
+        type: "doc",
+        content: [
+          ...(textToDocument(plainText).content || []),
+          ...attachments.map((a) => a.mimeType.startsWith("image/")
+            ? { type: "image", attrs: { src: a.url, alt: a.name } }
+            : { type: "attachment", attrs: { url: a.url, name: a.name, mimeType: a.mimeType } }),
+        ],
+      },
+      ...(filter === "tag" ? { tags: [selectedTag] } : {}),
+    });
   }
   function notify(message: string) {
     setUndoNote(null);
@@ -999,72 +1056,63 @@ export default function Doompile({
       notify("Не удалось сохранить. Текст остаётся в редакторе.");
     }
   }
-  async function send() {
+  async function send(expanded = false) {
     const recordingState = recordingSession.getSnapshot();
     const activeRecording = recordingState.draft;
     const ownsRecording = activeRecording?.target === "quick";
-    if (ownsRecording && recordingState.status === "uploading") return;
+    const expandedDraft = expanded && latestComposer.current;
+    if (ownsRecording && ["starting", "uploading"].includes(recordingState.status)) return;
     if (
-      (!text.trim() && !draftAttachments.length && !ownsRecording) ||
-      sending ||
+      (!expandedDraft && !text.trim() && !draftAttachments.length && !ownsRecording) ||
+      submitting.current || closing.current ||
       uploading
     )
       return;
+    submitting.current = true;
     setSending(true);
     try {
-      const note = createNote({
-        ...(ownsRecording ? { id: activeRecording.id } : {}),
-        plainText: text.trim(),
-        title:
-          text.trim().split("\n")[0].slice(0, NOTE_LIMITS.generatedTitle) ||
-          draftAttachments[0]?.name ||
-          (ownsRecording ? "Голосовая заметка" : ""),
-        attachments: draftAttachments,
-        kind: draftAttachments[0]
-          ? draftAttachments[0].mimeType.startsWith("image/")
-            ? "image"
-            : draftAttachments[0].mimeType.startsWith("audio/")
-              ? "audio"
-              : draftAttachments[0].mimeType.startsWith("video/")
-                ? "video"
-                : "file"
-          : ownsRecording
-            ? "audio"
-            : "note",
-        body: {
-          type: "doc",
-          content: [
-            ...(textToDocument(text.trim()).content || []),
-            ...draftAttachments.map((a) =>
-              a.mimeType.startsWith("image/")
-                ? { type: "image", attrs: { src: a.url, alt: a.name } }
-                : {
-                    type: "attachment",
-                    attrs: { url: a.url, name: a.name, mimeType: a.mimeType },
-                  },
-            ),
-          ],
-        },
-        ...(filter === "tag" ? { tags: [selectedTag] } : {}),
-      });
-      await store.saveNote(note);
-      setText("");
-      setDraftAttachments([]);
+      if (ownsRecording) {
+        await autosave.current?.flush();
+        await recordingSession.finish("quick");
+        const note = expandedDraft && latestComposer.current
+          ? noteForEditorSave(latestComposer.current, editTags)
+          : compactNote(activeRecording.id);
+        await recordingSession.deliver(async (draft) => {
+          const stored = store.getSnapshot().notes.find((saved) => saved.id === note.id);
+          const attachment = (stored && findFinishedRecording(stored, draft.id)) ||
+            await uploadRecording(draft);
+          await store.saveNote({
+            ...note,
+            title: note.title || "Голосовая заметка",
+            kind: !note.plainText.trim() && !note.attachments.length ? "audio" : note.kind,
+            body: finishRecordingDocument(note.body, draft.id, attachment),
+            attachments: [...note.attachments.filter((file) => file.id !== attachment.id), attachment],
+          });
+        });
+        const remaining = recordingSession.getSnapshot();
+        if (remaining.draft) throw new Error(remaining.error || "Не удалось завершить запись.");
+      } else {
+        await store.saveNote(expandedDraft ? noteForEditorSave(expandedDraft, editTags) : compactNote());
+      }
+      clearCapture();
+      if (expandedDraft) {
+        setEditor(null);
+        writeNoteLocation(null);
+        try { localStorage.removeItem("doompile-editor-draft"); } catch {}
+      }
       setDemo(false);
       setFilter("all");
-      if (ownsRecording) {
-        recordingSession.moveTo(note.id);
-        await finishRecording(note.id);
-      }
       notify(uiCopy.saved);
       input.current?.focus({ preventScroll: true });
-    } catch {
-      notify("Не удалось сохранить. Попробуй ещё раз.");
+    } catch (error) {
+      notify(ownsRecording && error instanceof Error ? error.message : "Не удалось сохранить. Попробуй ещё раз.");
     } finally {
+      submitting.current = false;
       setSending(false);
     }
   }
   function openEditor(note?: Note, kind?: "checklist") {
+    if (submitting.current || closing.current) return;
     if (note) {
       setSelected(note.id);
       setEditorMode("note");
@@ -1078,6 +1126,14 @@ export default function Doompile({
       ? bounds
       : new DOMRect(14, window.innerHeight - 64, window.innerWidth - 28, 52);
     setDetailExpanded(false);
+    if (collapsedCapture) {
+      const draft = compactNote();
+      setEditor(draft);
+      writeNoteLocation(draft.id);
+      setEditTags(draft.tags.join(", "));
+      setEditorBusy(false);
+      return;
+    }
     if (!note && !kind) {
       try {
         const draft = JSON.parse(
@@ -1297,13 +1353,17 @@ export default function Doompile({
         .map((tag) => tag.trim())
         .filter(Boolean)}
       availableTags={allTags}
-      status={composing && uploading > 0 ? "Загружаем вложения…" : saveStatus}
+      status={composing && uploading > 0 ? "Загружаем вложения…" :
+        composing && recording.draft?.target === "quick" ? "Черновик" : saveStatus}
       busy={editorBusy || (composing && uploading > 0)}
       existing={editorMode === "note"}
       expanded={detailExpanded}
       onClose={() => {
         void closeEditor();
       }}
+      onSendCapture={composing && recording.draft?.target === "quick"
+        ? () => void send(true) : undefined}
+      sendingCapture={composing && sending}
       onExpand={() => setDetailExpanded((value) => !value)}
       onDelete={() => {
         if (demo || editorBusy) return;

@@ -33,8 +33,13 @@ final class TouchUXTests: XCTestCase {
         app.buttons["Сохранить заметку"].tap()
         XCTAssertTrue(noteRow(text).waitForExistence(timeout: 5), app.debugDescription)
     }
-    private func openSidebar() {
-        app.coordinate(withNormalizedOffset: CGVector(dx: 0.015, dy: 0.4)).press(forDuration: 0.05, thenDragTo: app.coordinate(withNormalizedOffset: CGVector(dx: 0.8, dy: 0.4)))
+    private func openSidebar(over row: XCUIElement? = nil) {
+        let frame = app.frame
+        let x = row.map { ($0.frame.minX + 1 - frame.minX) / frame.width } ?? 0.015
+        let y = row.map { ($0.frame.midY - frame.minY) / frame.height } ?? 0.4
+        let start = app.coordinate(withNormalizedOffset: CGVector(dx: x, dy: y))
+        let end = app.coordinate(withNormalizedOffset: CGVector(dx: 0.8, dy: y))
+        start.press(forDuration: 0.05, thenDragTo: end)
         XCTAssertTrue(app.textFields["sidebar-search"].waitForExistence(timeout: 5))
     }
     func testQuickKeyboardDismissesWhenTappingFeed() {
@@ -110,7 +115,7 @@ final class TouchUXTests: XCTestCase {
         app.buttons["Сделать важной"].tap()
         XCTAssertTrue(app.buttons["feed-section-urgent"].waitForExistence(timeout: 3))
     }
-    func testQuickMicrophoneStartsInlineAndSavesAudio() {
+    private func startQuickRecording() {
         addUIInterruptionMonitor(withDescription: "Microphone permission") { alert in
             let allow = alert.buttons.matching(NSPredicate(format: "label IN %@", ["Allow", "Разрешить", "OK", "ОК"])).firstMatch
             if allow.exists { allow.tap(); return true }
@@ -124,11 +129,39 @@ final class TouchUXTests: XCTestCase {
             let allow = springboard.alerts.buttons.matching(NSPredicate(format: "label IN %@", ["Allow", "Разрешить", "OK", "ОК"])).firstMatch
             if allow.exists { allow.tap() } else { springboard.alerts.buttons["OK"].tap() }
         }
-        XCTAssertTrue(app.buttons["Остановить и сохранить запись"].waitForExistence(timeout: 5))
+        XCTAssertTrue(app.buttons["quick-stop-recording"].waitForExistence(timeout: 5))
+    }
+    func testQuickMicrophoneStartsInlineAndSendsAudio() {
+        startQuickRecording()
         XCTAssertFalse(app.buttons["close-editor"].exists, "Microphone must never open the editor")
         screenshot("quick-inline-recording")
-        app.buttons["quick-microphone"].tap()
+        app.buttons["Сохранить заметку"].tap()
         XCTAssertTrue(noteRow("Голосовая заметка").waitForExistence(timeout: 5))
+    }
+    func testVoiceCaptureSurvivesExpandAndCollapseAndStopsWithoutSending() {
+        startQuickRecording()
+        let input = app.textFields["quick-input"]
+        input.tap(); input.typeText("Voice draft")
+        app.buttons["expand-editor"].tap()
+        let editor = app.webViews.textViews.firstMatch
+        XCTAssertTrue(editor.waitForExistence(timeout: 8))
+        XCTAssertTrue(app.webViews.buttons["Остановить запись"].waitForExistence(timeout: 5))
+        XCTAssertTrue(app.keyboards.firstMatch.waitForExistence(timeout: 5))
+        XCTAssertTrue((editor.value as? String ?? "").contains("Voice draft"))
+        editor.typeText("\nExpanded edit")
+        app.buttons["close-editor"].tap()
+        let stop = app.buttons["quick-stop-recording"]
+        XCTAssertTrue(stop.waitForExistence(timeout: 5), app.debugDescription)
+        stop.tap()
+        XCTAssertTrue(stop.waitForNonExistence(timeout: 5))
+        XCTAssertTrue(app.staticTexts["Голосовая заметка.m4a"].firstMatch.exists)
+        XCTAssertFalse(noteRow("Voice draft").exists)
+        app.buttons["Сохранить заметку"].tap()
+        let row = noteRow("Voice draft")
+        XCTAssertTrue(row.waitForExistence(timeout: 5), app.debugDescription)
+        XCTAssertTrue(row.label.contains("Expanded edit"))
+        XCTAssertTrue(row.label.contains("Голосовая заметка.m4a"))
+        XCTAssertEqual(app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH 'note-'")).count, 1)
     }
     func testEntireShortEditorPageEntersEditingAndNoDuplicateSaveControl() {
         createNote("Short note")
@@ -376,6 +409,11 @@ final class TouchUXTests: XCTestCase {
             XCTAssertTrue(!row.exists || abs(row.frame.minY - before) > 40, "Vertical movement must scroll the feed even when it starts on a swipeable row or the drawer edge")
             XCTAssertFalse(app.buttons["close-editor"].exists)
         }
+        openSidebar(over: visibleRow())
+        XCTAssertFalse(app.buttons["close-editor"].exists)
+        app.buttons["nav-Все заметки"].tap()
+        let hiddenSearch = expectation(for: NSPredicate(format: "hittable == false"), evaluatedWith: app.textFields["sidebar-search"])
+        wait(for: [hiddenSearch], timeout: 3)
         for x in [CGFloat(0.3), CGFloat(0.7), CGFloat(0.015)] {
             dragVertically(x: x, up: true)
             let row = visibleRow()

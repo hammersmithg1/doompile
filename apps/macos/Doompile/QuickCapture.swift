@@ -16,6 +16,7 @@ import UniformTypeIdentifiers
     @Published var focused = true
     @Published var inputHeight: CGFloat = 39
     @Published var busy = false
+    @Published private(set) var startingVoice = false
     @Published var error: String?
     @Published var showFiles = false
     @Published var showDrawing = false
@@ -72,8 +73,9 @@ import UniformTypeIdentifiers
         accountScope = Connection.scope
         voice.cancel(); voice = MacVoiceRecorder()
         draftTask?.cancel(); panel?.orderOut(nil); panel = nil
+        bridge.reset()
         drafts = MacCaptureDraftStore(directory:Storage.shared.directory)
-        note = (try? drafts.load()) ?? Note(); error = nil; richMounted = false
+        note = (try? drafts.load()) ?? Note(); error = nil; richMounted = !note.body.isPlainParagraphDocument
     }
     func show() {
         Telemetry.shared.record(.screenViewed, ["screen": "capture"])
@@ -91,11 +93,15 @@ import UniformTypeIdentifiers
         panel.orderFrontRegardless(); panel.makeKey()
         DispatchQueue.main.async { [weak self] in self?.focused = true; if self?.richMounted == true { self?.bridge.focus() } }
     }
-    private var compactHeight: CGFloat { max(54, (richMounted ? 43 : inputHeight) + 12) + (error == nil ? 0 : 44) }
+    private var compactHeight: CGFloat {
+        max(54, (richMounted ? 43 : inputHeight) + 12) + (error == nil ? 0 : 44) + (startingVoice || voice.recording ? 30 : 0) + (showsCompactAttachments ? 52 : 0)
+    }
+    var compactAttachments: [Attachment] { richMounted ? note.attachments.filter { $0.mimeType.hasPrefix("audio/") } : note.attachments }
+    var showsCompactAttachments: Bool { !expanded && !compactAttachments.isEmpty }
     func resizeForContent() { if !expanded { resize(to: NSSize(width: panel?.frame.width ?? 680, height: compactHeight)) } }
     func setExpanded(_ value: Bool) {
         guard !busy else { return }
-        if value && !richMounted { if !MacPreview.hasContent(note) { note.createdAt = Note.now() }; note.body = note.editorDocument; richMounted = true }
+        if value && !richMounted { if !voice.recording, !MacPreview.hasContent(note) { note.createdAt = Note.now() }; note.body = note.editorDocument; richMounted = true }
         expanded = value
         let screen = panel?.screen?.visibleFrame ?? NSScreen.main?.visibleFrame ?? .zero
         resize(to: value ? NSSize(width: min(780, screen.width - 48), height: min(620, screen.height - 90)) : NSSize(width: min(680, screen.width - 40), height: compactHeight))
@@ -117,8 +123,8 @@ import UniformTypeIdentifiers
     }
     func updateText(_ text: String) {
         guard !richMounted else { return }
-        if !MacPreview.hasContent(note) { note.createdAt = Note.now() }
-        note.plainText = text; note.body = .document(text)
+        if !voice.recording, !MacPreview.hasContent(note) { note.createdAt = Note.now() }
+        note = MacQuickDocument.updating(note, text: text)
     }
     private func scheduleDraft() {
         draftTask?.cancel()
@@ -142,6 +148,7 @@ import UniformTypeIdentifiers
         guard !busy, !dismissing else { return }
         dismissing = true; defer { dismissing = false }
         do {
+            if startingVoice { voice.cancel() }
             if voice.recording { try finishRecording() }
             try await snapshot()
             draftTask?.cancel(); try drafts.save(note)
@@ -150,7 +157,7 @@ import UniformTypeIdentifiers
     }
     func submit() async {
         guard Connection.signedIn, Connection.scope == accountScope else { return }
-        guard !busy else { return }
+        guard !busy, !dismissing, !startingVoice else { return }
         guard !richMounted || bridge.ready else { error = "Редактор ещё открывается. Попробуй отправить через мгновение."; return }
         busy = true; defer { busy = false }
         do {
@@ -173,29 +180,44 @@ import UniformTypeIdentifiers
         case .expandCapture: setExpanded(true)
         case .file, .image: setExpanded(true); showFiles = true
         case .drawing: setExpanded(true); showDrawing = true
-        case .voice:
-            setExpanded(true)
-            Task {
-                do { if voice.recording { try finishRecording() } else { try await voice.start(noteID: note.id); bridge.insertRecording(voice.id); bridge.recordingState(id: voice.id, seconds: 0) } }
-                catch { Telemetry.shared.failure(.runtimeError, error); self.error = error.localizedDescription }
-            }
-        case .stopVoice: do { try finishRecording() } catch { Telemetry.shared.failure(.runtimeError, error); self.error = error.localizedDescription }
+        case .voice: Task { await startRecording() }
+        case .stopVoice:
+            guard voice.recording, !busy else { return }
+            do { try finishRecording(); error = nil } catch { Telemetry.shared.failure(.runtimeError, error); self.error = error.localizedDescription }
         case .retryVoice: editorReady()
         case .preferencesClosed, nil: break
         }
     }
+    private func startRecording() async {
+        guard Connection.signedIn, Connection.scope == accountScope, !startingVoice, !voice.recording, !busy, !dismissing else { return }
+        startingVoice = true; defer { startingVoice = false }
+        do {
+            guard note.attachments.count < NoteLimits.attachments else { throw DoompileError.message("В одной заметке может быть до 100 вложений.") }
+            try drafts.save(note)
+            try await voice.start(noteID: note.id)
+            error = nil
+            if bridge.ready { bridge.insertRecording(voice.id); bridge.recordingState(id: voice.id, seconds: 0) }
+        } catch is CancellationError {} catch { Telemetry.shared.failure(.runtimeError, error); self.error = error.localizedDescription }
+    }
     func addFile(_ data: Data, name: String, mime: String) throws {
         guard Connection.signedIn, Connection.scope == accountScope else { throw DoompileError.authentication }
-        guard data.count <= 30 * 1024 * 1024, note.attachments.count < NoteLimits.attachments else { throw DoompileError.message("До 100 вложений, не более 30 МБ каждое.") }
+        let reserved = voice.recording || startingVoice ? 1 : 0
+        guard data.count <= 30 * 1024 * 1024, note.attachments.count + reserved < NoteLimits.attachments else { throw DoompileError.message("До 100 вложений, не более 30 МБ каждое.") }
         let attachment = try Storage.shared.addFile(data, name: name, mimeType: mime)
         note.attachments.append(attachment); bridge.insertAttachment(attachment)
+    }
+    func removeCompactAttachment(_ id: String) {
+        guard !richMounted else { return }
+        note.attachments.removeAll { $0.id == id }
+        note = MacQuickDocument.updating(note, text: note.plainText)
     }
     private func finishRecording() throws {
         let id = voice.id
         let data = try voice.finish()
         let attachment = try Storage.shared.addFile(data, name: "Голосовая заметка.m4a", mimeType: "audio/mp4")
         note.attachments.append(attachment); note.body = note.body.finishingRecording(id, attachment: attachment)
-        bridge.completeRecording(id, attachment: attachment)
+        if richMounted { bridge.completeRecording(id, attachment: attachment) }
+        else { note = MacQuickDocument.updating(note, text: note.plainText) }
         try drafts.save(note); voice.acknowledge(id)
     }
     func editorReady() {
@@ -217,10 +239,10 @@ import UniformTypeIdentifiers
         panel?.appearance = mode == .system ? nil : NSAppearance(named: mode == .dark ? .darkAqua : .aqua)
     }
     func windowDidResignKey(_ notification: Notification) {
-        guard !expanded, !showFiles, !showDrawing, !showLink, !busy, !changingPresentation else { return }
+        guard !expanded, !showFiles, !showDrawing, !showLink, !busy, !changingPresentation, !startingVoice else { return }
         Task { @MainActor in
             try? await Task.sleep(for: .milliseconds(140))
-            guard panel?.isKeyWindow == false, !expanded, !busy else { return }
+            guard panel?.isKeyWindow == false, !expanded, !busy, !startingVoice else { return }
             await dismiss()
         }
     }
@@ -260,12 +282,12 @@ struct QuickCaptureRoot: View {
     @ObservedObject var bridge: MacRichEditorBridge
     @ObservedObject var voice: MacVoiceRecorder
     @State private var editorHeight: CGFloat = 300
+    private var sendDisabled: Bool { capture.busy || capture.startingVoice || (!voice.recording && !EditorLifecycle.shouldSave(capture.note, existing: false)) }
     var body: some View {
         VStack(spacing: 0) {
             if capture.expanded {
                 HStack(spacing: 5) {
                     DoompileWordmark(height: 16)
-                    if voice.recording { Text("● \(Note.timeLabel(Double(voice.seconds)))").font(.system(size: 10)).foregroundStyle(MacPalette.orange); Button("Стоп") { capture.action("stopVoice") }.font(.system(size: 10)) }
                     Spacer()
                     Button { capture.note.pinned.toggle() } label: { DoompileSymbol(systemName: capture.note.pinned ? "pin.fill" : "pin").frame(width: 28, height: 28) }.help(capture.note.pinned ? "Открепить" : "Закрепить")
                     Button { capture.note.urgent.toggle() } label: { DoompileSymbol(systemName: capture.note.urgent ? "flame.fill" : "flame").foregroundStyle(capture.note.urgent ? MacPalette.orange : MacPalette.muted).frame(width: 28, height: 28) }.help("Важное")
@@ -273,6 +295,13 @@ struct QuickCaptureRoot: View {
                     Button { Task { await capture.dismiss() } } label: { DoompileSymbol(systemName: "xmark").frame(width: 28, height: 28) }.help("Скрыть панель · Esc").accessibilityLabel("Скрыть панель")
                 }.buttonStyle(.plain).foregroundStyle(MacPalette.muted).padding(.horizontal, 18).frame(height: 50)
                 MacNoteTags(selected: $capture.note.tags, available: library.tags)
+            }
+            if capture.startingVoice || (voice.recording && !capture.expanded) {
+                MacRecordingSnippet(starting: capture.startingVoice, seconds: voice.seconds) { capture.action("stopVoice") }
+            }
+            if capture.showsCompactAttachments {
+                MacComposerAttachmentStrip(attachments: capture.compactAttachments, onRemove: capture.richMounted ? nil : capture.removeCompactAttachment)
+                    .padding(.horizontal, 6).frame(height: 52)
             }
             HStack(alignment: .bottom, spacing: 5) {
                 if capture.richMounted {
@@ -285,10 +314,10 @@ struct QuickCaptureRoot: View {
                     MacQuickInput(text: Binding(get: { capture.note.plainText }, set: capture.updateText), height: $capture.inputHeight, focused: $capture.focused, onSubmit: { Task { await capture.submit() } }).frame(height: capture.inputHeight).padding(.leading, 8)
                 }
                 if !capture.expanded {
-                    MacComposerButton(icon: "mic", label: "Записать голосовую заметку") { capture.action("voice") }
+                    MacComposerButton(icon: "mic", label: "Записать голосовую заметку", disabled: capture.startingVoice || voice.recording || capture.busy) { capture.action("voice") }
                     MacComposerButton(icon: "paperclip", label: "Прикрепить файл") { capture.action("file") }
                     MacComposerButton(icon: "arrow.up.left.and.arrow.down.right", label: "Развернуть редактор") { capture.setExpanded(true) }
-                    MacComposerButton(icon: "arrow.up", label: "Сохранить заметку · Enter", send: true, disabled: capture.busy || !EditorLifecycle.shouldSave(capture.note, existing: false)) { Task { await capture.submit() } }
+                    MacComposerButton(icon: "arrow.up", label: "Сохранить заметку · Enter", send: true, disabled: sendDisabled) { Task { await capture.submit() } }
                 }
             }.padding(capture.expanded ? 0 : 6).frame(maxHeight: capture.expanded ? .infinity : nil)
             if let error = capture.error { Text(error).font(.system(size: 11)).foregroundStyle(MacPalette.orange).lineLimit(3).padding(.horizontal, 14).padding(.vertical, 7).frame(maxWidth: .infinity, alignment: .leading) }
@@ -297,7 +326,7 @@ struct QuickCaptureRoot: View {
                     Text("Esc — скрыть · черновик останется на Mac").font(.system(size: 10)).foregroundStyle(MacPalette.muted)
                     Spacer()
                     Text("⌘ ↵").font(.system(size: 10)).foregroundStyle(MacPalette.muted)
-                    MacComposerButton(icon: "arrow.up", label: "Сохранить заметку", send: true, disabled: capture.busy || !EditorLifecycle.shouldSave(capture.note, existing: false)) { Task { await capture.submit() } }
+                    MacComposerButton(icon: "arrow.up", label: "Сохранить заметку", send: true, disabled: sendDisabled) { Task { await capture.submit() } }
                 }.padding(12)
             }
         }
@@ -308,6 +337,9 @@ struct QuickCaptureRoot: View {
         .onChange(of: appearance) { _, _ in capture.applyAppearance() }
         .onChange(of: capture.inputHeight) { _, _ in capture.resizeForContent() }
         .onChange(of: capture.error) { _, _ in capture.resizeForContent() }
+        .onChange(of: capture.startingVoice) { _, _ in capture.resizeForContent() }
+        .onChange(of: capture.showsCompactAttachments) { _, _ in capture.resizeForContent() }
+        .onChange(of: voice.recording) { _, _ in capture.resizeForContent() }
         .onChange(of: bridge.ready) { _, ready in if ready { capture.editorReady() } }
         .onChange(of: voice.seconds) { _, seconds in if voice.recording { bridge.recordingState(id: voice.id, seconds: seconds) } }
         .fileImporter(isPresented: $capture.showFiles, allowedContentTypes: [.item], allowsMultipleSelection: true) { result in

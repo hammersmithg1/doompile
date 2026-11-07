@@ -5,6 +5,7 @@ import { useRecording } from "./use-recording";
 import { recordingSession } from "@/lib/client/recording";
 import type { RichEditorAPI } from "./rich-editor";
 import {
+  ArrowUp,
   Flame,
   Link2,
   Maximize2,
@@ -41,6 +42,8 @@ export default function NoteEditorSurface({
   existing,
   expanded,
   onClose,
+  onSendCapture,
+  sendingCapture = false,
   onCopyLink,
   onExpand,
   onDelete,
@@ -62,6 +65,8 @@ export default function NoteEditorSurface({
   existing: boolean;
   expanded: boolean;
   onClose: () => void;
+  onSendCapture?: () => void;
+  sendingCapture?: boolean;
   onCopyLink: () => void;
   onExpand: () => void;
   onDelete: () => void;
@@ -78,7 +83,11 @@ export default function NoteEditorSurface({
   const [dragging, setDragging] = useState(false);
   const dragDepth = useRef(0);
   const recording = useRecording();
-  const live = ["starting", "recording", "stopping"].includes(recording.status);
+  const recordingTarget = existing ? note.id : "quick";
+  const ownsRecording = recording.draft?.target === recordingTarget;
+  const live =
+    ownsRecording && ["starting", "recording", "stopping"].includes(recording.status);
+  const closeLabel = onSendCapture ? "Свернуть редактор" : "Закрыть редактор";
   return (
     <section
       className={`note-editor-surface ${dragging ? "file-drop-active" : ""}`}
@@ -146,13 +155,15 @@ export default function NoteEditorSurface({
                   </>
                 )}
               </span>
-              <button
-                type="button"
-                aria-label="Остановить запись в шапке"
-                onClick={recordingSession.stop}
-              >
-                ■ Стоп
-              </button>
+              {existing && (
+                <button
+                  type="button"
+                  aria-label="Остановить запись в шапке"
+                  onClick={recordingSession.stop}
+                >
+                  ■ Стоп
+                </button>
+              )}
             </div>
           )}
           <div className="note-editor-actions">
@@ -245,13 +256,26 @@ export default function NoteEditorSurface({
             <button
               type="button"
               className="editor-action"
-              aria-label="Закрыть редактор"
-              title={busy ? "Загружаем вложения…" : "Закрыть"}
-              disabled={busy}
+              aria-label={closeLabel}
+              title={busy ? "Загружаем вложения…" : closeLabel}
+              disabled={busy || sendingCapture}
               onClick={onClose}
             >
-              <X size={18} />
+              {onSendCapture ? <Minimize2 size={18} /> : <X size={18} />}
             </button>
+            {onSendCapture && (
+              <button
+                type="button"
+                className="send-button"
+                aria-label="Сохранить заметку"
+                disabled={
+                  busy || sendingCapture || recording.status === "starting"
+                }
+                onClick={onSendCapture}
+              >
+                <ArrowUp size={20} />
+              </button>
+            )}
           </div>
         </div>
       </header>
@@ -281,6 +305,8 @@ export default function NoteEditorSurface({
             }
             key={`${note.id}:${documentVersion}`}
             noteId={note.id}
+            recordingTarget={recordingTarget}
+            readOnly={sendingCapture}
             attachments={note.attachments}
             apiRef={editorAPI}
             value={note.body}
@@ -324,6 +350,9 @@ export default function NoteEditorSurface({
                 key={command as string}
                 type="button"
                 aria-label={label as string}
+                disabled={
+                  command === "voice" && recording.status !== "idle" && !existing
+                }
                 onMouseDown={(e) => e.preventDefault()}
                 onClick={() =>
                   editorAPI.current?.touchCommand(command as string)

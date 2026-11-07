@@ -44,6 +44,22 @@ final class CoreTests: XCTestCase {
         guard case .object(let doc) = completed, case .array(let lists) = doc["content"], case .object(let list) = lists[0], case .array(let items) = list["content"], case .object(let item) = items[0], case .array(let children) = item["content"], case .object(let media) = children[1], case .object(let attrs) = media["attrs"] else { return XCTFail("Recording must remain in its list item") }
         XCTAssertEqual(lists.count, 1); XCTAssertEqual(media["type"], .string("attachment")); XCTAssertEqual(attrs["size"], .number(400)); XCTAssertEqual(attrs["recordingId"], .string("rec"))
     }
+    func testRecordingCompletionWithoutPlaceholderAppendsInlineAudioAndPreservesText() {
+        let attachment = Attachment(id: UUID().uuidString.lowercased(), name: "Voice.m4a", mimeType: "audio/mp4", url: "local:voice", size: 400)
+        let body = JSONValue.document("Draft text")
+        let completed = body.finishingRecording("rec", attachment: attachment)
+        guard case .object(let original) = body, case .array(let originalContent) = original["content"],
+              case .object(let document) = completed, case .array(let content) = document["content"],
+              case .object(let paragraph) = content.last, case .array(let children) = paragraph["content"],
+              case .object(let media) = children.first, case .object(let attrs) = media["attrs"] else {
+            return XCTFail("An inline recording attachment must be nested in a paragraph")
+        }
+        XCTAssertEqual(content.dropLast(), originalContent[...])
+        XCTAssertEqual(paragraph["type"], .string("paragraph"))
+        XCTAssertEqual(media["type"], .string("attachment"))
+        XCTAssertEqual(attrs["id"], .string(attachment.id))
+        XCTAssertTrue(completed.hasFinishedRecording("rec"))
+    }
     func testYouTubeTimecodes() {
         XCTAssertEqual(Note.timestamp(from: URL(string: "https://youtu.be/abc?t=1h2m3s")!), 3723)
         XCTAssertEqual(Note.timestamp(from: URL(string: "https://youtube.com/watch?v=abc&t=754")!), 754)

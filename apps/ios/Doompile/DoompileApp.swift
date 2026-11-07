@@ -119,6 +119,7 @@ private enum FeedItem: Identifiable {
             AccountSession.shared.refresh()
             UserDefaults.standard.removeObject(forKey: "quickDraft")
             UserDefaults.standard.removeObject(forKey: "quickDraft:" + Connection.scope)
+            UserDefaults.standard.removeObject(forKey: "quickComposer:" + Connection.scope)
             let testAppearance = ProcessInfo.processInfo.environment["DOOMPILE_TEST_APPEARANCE"] ?? "light"
             if testAppearance != "preserve" { Connection.defaults.set(testAppearance, forKey: AppearanceMode.storageKey) }
             if ProcessInfo.processInfo.environment["DOOMPILE_UI_KEEP_TAGS"] != "1" { Connection.defaults.removeObject(forKey: TagCatalog.key) }
@@ -178,9 +179,19 @@ struct Home: View {
     @Environment(\.scenePhase) var phase
     @AppStorage private var draft: String
     @AppStorage private var collapsedSectionsJSON: String
+    @State private var quickNote: Note?
+    @State private var quickUsesRichEditor: Bool
+    @State private var quickTransitioning = false
+    @StateObject private var quickBridge = RichEditorBridge()
+    private let quickComposerKey: String
     init() {
         _draft = AppStorage(wrappedValue: "", "quickDraft:" + Connection.scope)
         _collapsedSectionsJSON = AppStorage(wrappedValue: "[]", "collapsedFeedSections:" + Connection.scope)
+        let key = "quickComposer:" + Connection.scope
+        quickComposerKey = key
+        let restored = UserDefaults.standard.data(forKey: key).flatMap { try? JSONDecoder().decode(Note.self, from: $0) }
+        _quickNote = State(initialValue: restored)
+        _quickUsesRichEditor = State(initialValue: restored != nil)
     }
     private var collapsedSections: Set<String> {
         guard let data = collapsedSectionsJSON.data(using: .utf8), let ids = try? JSONDecoder().decode([String].self, from: data) else { return [] }
@@ -205,13 +216,12 @@ struct Home: View {
     @State private var revealedNoteID: String?
     @State private var editorFocusID: String?
     @State private var editor: Note?
+    @State private var quickEditorID: String?
     @State private var pendingNoteID: String?
     @State private var noteLinkRequest = UUID()
     @State private var noteLinkError: String?
     @State private var settings = false
     @State private var voiceError: String?
-    @State private var capturedVoice: Attachment?
-    @State private var pendingVoiceURL: URL?
     @StateObject private var recorder = VoiceRecorder()
     @FocusState private var focused: Bool
     @FocusState private var searchFocused: Bool
@@ -244,11 +254,11 @@ struct Home: View {
     var body: some View {
         navigationContent
         .onChange(of: phase) { _, value in
-            if value != .active && recorder.recording { finishQuickRecording() }
+            if value != .active && !quickEditorOpen && recorder.recording { finishQuickRecording() }
             if value == .active { library.reload(); Task { await library.sync() } }
         }
         .onReceive(NotificationCenter.default.publisher(for: AVAudioSession.interruptionNotification)) { _ in
-            if recorder.recording { finishQuickRecording() }
+            if !quickEditorOpen && recorder.recording { finishQuickRecording() }
         }
         .task {
             if let recovered = EditorDrafts.last() { editorFocusID = recovered.id; editor = recovered }
@@ -262,11 +272,15 @@ struct Home: View {
     }
     private var captureContent: some View {
         homeContent
-        .sheet(item: $editor, onDismiss: { editorFocusID = nil }) { note in
-            NoteEditor(note: note, focusOnOpen: editorFocusID == note.id || !library.notes.contains { $0.id == note.id }) { updated in
+        .sheet(item: $editor, onDismiss: { editorFocusID = nil; quickEditorID = nil }) { note in
+            let capture = quickEditorID == note.id
+                ? QuickCaptureEditor(recorder: recorder, saveDraft: saveQuickDraft)
+                : nil
+            NoteEditor(note: note, focusOnOpen: editorFocusID == note.id || !library.notes.contains { $0.id == note.id }, capture: capture) { updated in
+                if capture != nil { return saveQuickNote(updated) }
                 let isNew = !library.notes.contains { $0.id == updated.id }
                 let saved = library.save(updated, feedback: false)
-                if saved && isNew { draft = "" }
+                if saved && isNew && quickNote == nil && recorder.recordingID == nil { draft = "" }
                 return saved
             }.id(note.id).presentationDragIndicator(.hidden).presentationCornerRadius(24)
         }
@@ -283,7 +297,8 @@ struct Home: View {
             Task { @MainActor in
                 guard await NoteLinkEditors.prepare() else { return }
                 closeDrawer(); settings = false; focused = false
-                openComposer(draft)
+                if recorder.recordingID != nil || quickNote != nil { expandQuickComposer() }
+                else { openComposer(draft) }
             }
         }
         .alert("Голосовая заметка", isPresented: Binding(get: { voiceError != nil }, set: { if !$0 { voiceError = nil } })) {
@@ -296,7 +311,7 @@ struct Home: View {
             ZStack(alignment: .leading) {
                 Palette.ink.ignoresSafeArea()
                 feed
-                    .modifier(HorizontalDragModifier(enabled: !drawer, leadingEdgeWidth: 22,
+                    .modifier(HorizontalDragModifier(enabled: !drawer, target: .openDrawer,
                         onChanged: { translation, _ in changeDrawer(translation: translation, width: width, opening: true) },
                         onEnded: { _, predicted in finishDrawer(predicted: predicted, width: width) }))
                     .safeAreaInset(edge: .bottom, spacing: 0) { composer }
@@ -312,7 +327,7 @@ struct Home: View {
                         .offset(x: (drawerProgress - 1) * width)
                         .shadow(color: .black.opacity(0.08 * drawerProgress), radius: 16, x: 4)
                 }.frame(width: width).contentShape(Rectangle())
-                    .modifier(HorizontalDragModifier(enabled: drawer,
+                    .modifier(HorizontalDragModifier(enabled: drawer, target: .closeDrawer,
                         onChanged: { translation, _ in changeDrawer(translation: translation, width: width, opening: false) },
                         onEnded: { _, predicted in finishDrawer(predicted: predicted, width: width) }))
                     .allowsHitTesting(drawer)
@@ -335,6 +350,28 @@ struct Home: View {
         let note = Note.text(text)
         editorFocusID = note.id
         editor = note
+    }
+    private var quickEditorOpen: Bool { quickEditorID != nil && editor?.id == quickEditorID }
+    private var quickDraft: Note { quickNote ?? Note.text(draft) }
+    private func compactQuickNote(_ original: Note) -> Binding<Note> {
+        Binding(get: { quickNote ?? original }, set: { note in
+            guard !quickEditorOpen, quickNote?.id == original.id else { return }
+            do { try saveQuickDraft(note) } catch { voiceError = error.localizedDescription }
+        })
+    }
+    private func expandQuickComposer() {
+        guard !quickTransitioning else { return }
+        quickTransitioning = true
+        Task {
+            defer { quickTransitioning = false }
+            do { try await refreshCompactQuickNote() } catch { voiceError = error.localizedDescription; return }
+            focused = false
+            let note = quickDraft
+            quickUsesRichEditor = true
+            quickEditorID = note.id
+            editorFocusID = note.id
+            editor = note
+        }
     }
     private func handleNoteLink(_ url: URL) {
         if url.scheme == "doompile", url.host == "quick-note" { quickCapture.request(); return }
@@ -399,7 +436,7 @@ struct Home: View {
         .accessibilityIdentifier("note-feed")
         .scrollIndicators(.hidden)
         .scrollDismissesKeyboard(.interactively)
-        .simultaneousGesture(TapGesture().onEnded { focused = false })
+        .simultaneousGesture(TapGesture().onEnded { focused = false; quickBridge.blur() })
         .refreshable { await library.sync() }
 
     }
@@ -440,43 +477,59 @@ struct Home: View {
                     Circle().fill(Palette.orange).frame(width: 7, height: 7)
                     Text(recorder.starting ? "Включаем микрофон…" : "Запись  " + Note.timeLabel(recorder.seconds)).font(.system(size: 13, weight: .medium, design: .monospaced))
                     Spacer()
-                    Button { recorder.cancel() } label: { DoompileSymbol(systemName: "xmark").frame(width: 32, height: 32) }.accessibilityLabel("Отменить запись")
+                    if recorder.recording {
+                        Button { finishQuickRecording() } label: { DoompileSymbol(systemName: "stop.fill").frame(width: 44, height: 44) }
+                            .accessibilityLabel("Остановить запись").accessibilityIdentifier("quick-stop-recording")
+                    } else {
+                        Button { recorder.cancel() } label: { DoompileSymbol(systemName: "xmark").frame(width: 44, height: 44) }
+                            .accessibilityLabel("Отменить запись")
+                    }
                 }.foregroundStyle(Palette.orange).padding(.horizontal, 14).accessibilityIdentifier("quick-recording")
             }
-            if pendingVoiceURL != nil && capturedVoice == nil {
+            if recorder.hasPendingRecording {
                 Button("Повторить сохранение записи") { finishQuickRecording() }.font(.system(size: 12))
             }
-            if let capturedVoice {
-                HStack { DoompileSymbol(systemName: "waveform"); Text(capturedVoice.name); Spacer(); Button("Повторить сохранение") { saveQuickVoice() } }
-                    .font(.system(size: 12)).padding(.horizontal, 12)
+            if let quickNote, !quickNote.attachments.isEmpty {
+                ScrollView(.horizontal, showsIndicators: false) {
+                    HStack(spacing: 12) {
+                        ForEach(quickNote.attachments) { file in
+                            DoompileLabel(file.name, systemImage: file.mimeType.hasPrefix("audio/") ? "waveform" : "paperclip")
+                                .lineLimit(1).accessibilityIdentifier("quick-attachment")
+                        }
+                    }.font(.system(size: 12)).padding(.horizontal, 12)
+                }
             }
             HStack(alignment: .bottom, spacing: 4) {
-                Button {
-                    focused = false
-                    openComposer(draft)
-                } label: {
-                    DoompileSymbol(systemName: draft.isEmpty ? "plus" : "arrow.up.left.and.arrow.down.right", size: 19).font(.system(size: 19, weight: .medium)).frame(width: 40, height: 44).contentShape(Rectangle()).foregroundStyle(Palette.muted)
-                }.disabled(recorder.recording || recorder.starting || capturedVoice != nil || pendingVoiceURL != nil)
+                Button(action: expandQuickComposer) {
+                    DoompileSymbol(systemName: draft.isEmpty && quickNote == nil && !recorder.recording ? "plus" : "arrow.up.left.and.arrow.down.right", size: 19)
+                        .font(.system(size: 19, weight: .medium)).frame(width: 40, height: 44).contentShape(Rectangle()).foregroundStyle(Palette.muted)
+                }
                     .accessibilityLabel("Развернуть редактор").accessibilityIdentifier("expand-editor")
-                TextField(UICopy.capturePlaceholder, text: $draft, axis: .vertical)
-                    .lineLimit(1...6).focused($focused).onTapGesture { focused = true }.font(.system(size: 16)).padding(.vertical, 12)
-                    .foregroundStyle(Palette.text).accessibilityIdentifier("quick-input")
-                Button {
-                    focused = false
-                    if recorder.recording { finishQuickRecording() }
-                    else { Task { do { try await recorder.start() } catch { voiceError = error.localizedDescription } } }
-                } label: {
-                    DoompileSymbol(systemName: recorder.recording ? "stop.fill" : "mic", size: 18).font(.system(size: 18, weight: .medium))
-                        .frame(width: 40, height: 44).contentShape(Rectangle()).foregroundStyle(recorder.recording ? Palette.orange : Palette.muted)
-                }.disabled(recorder.starting || capturedVoice != nil || pendingVoiceURL != nil)
-                    .accessibilityLabel(recorder.recording ? "Остановить и сохранить запись" : "Записать голосовую заметку").accessibilityIdentifier("quick-microphone")
-                if !draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-                    Button {
-                        if recorder.recording { finishQuickRecording() }
-                        if library.save(Note.text(draft.trimmingCharacters(in: .whitespacesAndNewlines))) { draft = ""; focused = false }
-                    } label: {
+                if quickUsesRichEditor, !quickEditorOpen, let quickNote {
+                    let binding = compactQuickNote(quickNote)
+                    RichEditorView(document: binding.body, plainText: binding.plainText, height: .constant(0),
+                        attachments: binding.attachments, notes: library.notes, bridge: quickBridge,
+                        onReference: { id in
+                            if let note = library.notes.first(where: { $0.id == id }) { editor = note }
+                        }, onRequestLink: { _ in expandQuickComposer() }, onAction: handleCompactCaptureAction, captureCompact: true)
+                        .id(quickNote.id).frame(height: 55).accessibilityIdentifier("quick-rich-input")
+                } else {
+                    TextField(UICopy.capturePlaceholder, text: Binding(get: { draft }, set: updateQuickText), axis: .vertical)
+                        .lineLimit(1...6).focused($focused).onTapGesture { focused = true }.font(.system(size: 16)).padding(.vertical, 12)
+                        .foregroundStyle(Palette.text).accessibilityIdentifier("quick-input")
+                }
+                if !recorder.recording && !recorder.hasPendingRecording {
+                    Button(action: startQuickRecording) {
+                        DoompileSymbol(systemName: "mic", size: 18).font(.system(size: 18, weight: .medium))
+                            .frame(width: 40, height: 44).contentShape(Rectangle()).foregroundStyle(Palette.muted)
+                    }.disabled(recorder.starting || quickTransitioning)
+                        .accessibilityLabel("Записать голосовую заметку").accessibilityIdentifier("quick-microphone")
+                }
+                if recorder.recording || recorder.hasPendingRecording || !draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+                    || quickNote.map({ EditorLifecycle.shouldSave($0, existing: false) }) == true {
+                    Button(action: sendQuickDraft) {
                         DoompileSymbol(systemName: "arrow.up", size: 18).font(.system(size: 18, weight: .semibold)).frame(width: 40, height: 40).background(Palette.lime, in: RoundedRectangle(cornerRadius: 14)).foregroundStyle(Palette.onLime)
-                    }.disabled(recorder.starting).accessibilityLabel("Сохранить заметку").padding(.trailing, 4).padding(.bottom, 2)
+                    }.disabled(recorder.starting || quickTransitioning).accessibilityLabel("Сохранить заметку").padding(.trailing, 4).padding(.bottom, 2)
                 }
             }.padding(4).background(Palette.card, in: RoundedRectangle(cornerRadius: 21))
                 .overlay(RoundedRectangle(cornerRadius: 21).stroke(Palette.line))
@@ -536,7 +589,7 @@ struct Home: View {
         if drawerDragOrigin == nil {
             guard opening ? translation.width > 0 : translation.width < 0 else { return }
             drawerDragOrigin = drawerProgress * width
-            focused = false; searchFocused = false
+            focused = false; searchFocused = false; quickBridge.blur()
         }
         guard let origin = drawerDragOrigin else { return }
         var transaction = Transaction(); transaction.disablesAnimations = true
@@ -548,7 +601,7 @@ struct Home: View {
         setDrawer((origin + predicted.width) / width > 0.5)
     }
     private func setDrawer(_ open: Bool) {
-        focused = false; searchFocused = false
+        focused = false; searchFocused = false; quickBridge.blur()
         drawerDragOrigin = nil
         withAnimation(TouchMotion.quick) { drawer = open; drawerProgress = open ? 1 : 0 }
     }
@@ -565,27 +618,85 @@ struct Home: View {
         Button { togglePinned(note) } label: { DoompileLabel(note.pinned ? "Открепить" : "Закрепить", systemImage: "pin") }
         Button(role: .destructive) { library.remove(note) } label: { DoompileLabel("Удалить", systemImage: "trash") }
     }
+    private func startQuickRecording() {
+        guard !quickTransitioning else { return }
+        guard (quickNote?.attachments.count ?? 0) < NoteLimits.attachments else {
+            voiceError = "В заметке уже \(NoteLimits.attachments) вложений."
+            return
+        }
+        Task { do { try await recorder.start() } catch { voiceError = error.localizedDescription } }
+    }
     private func finishQuickRecording() {
         do {
-            let url: URL
-            if let pendingVoiceURL { url = pendingVoiceURL }
-            else { url = try recorder.stop(); pendingVoiceURL = url }
-            capturedVoice = try Storage.shared.addFile(Data(contentsOf: url), name: "Голосовая заметка.m4a", mimeType: "audio/mp4")
-            try? FileManager.default.removeItem(at: url)
-            pendingVoiceURL = nil
-            saveQuickVoice()
+            guard library.isCurrentAccount else { throw DoompileError.authentication }
+            var note = quickDraft
+            let (id, attachment) = try recorder.attachRecording(to: &note)
+            try saveQuickDraft(note)
+            quickBridge.completeRecording(id, attachment: attachment)
         } catch { voiceError = error.localizedDescription }
     }
-    private func saveQuickVoice() {
-        guard let attachment = capturedVoice else { return }
-        var note = Note()
-        note.kind = "audio"; note.title = "Голосовая заметка"; note.attachments = [attachment]
-        note.body = .object(["type": .string("doc"), "attrs": .object(["editorVersion": .number(1)]), "content": .array([
-            .object(["type": .string("attachment"), "attrs": .object(["url": .string(attachment.url), "name": .string(attachment.name), "mimeType": .string(attachment.mimeType)])]),
-            .object(["type": .string("paragraph")])
-        ])])
-        if library.save(note) { capturedVoice = nil }
-        else { voiceError = "Не удалось сохранить запись. Она осталась в поле ввода — можно повторить." }
+    private func updateQuickText(_ text: String) {
+        draft = text
+        guard var note = quickNote, note.plainText != text else { return }
+        note.plainText = text
+        note.body = JSONValue.document(text).includingAttachments(note.attachments)
+        do { try saveQuickDraft(note) } catch { voiceError = error.localizedDescription }
+    }
+    private func saveQuickDraft(_ note: Note) throws {
+        quickNote = note
+        draft = note.plainText
+        var durable = note
+        if let id = recorder.recordingID { durable.body = durable.body.removingRecording(id) }
+        UserDefaults.standard.set(try JSONEncoder().encode(durable), forKey: quickComposerKey)
+    }
+    private func refreshCompactQuickNote() async throws {
+        guard quickBridge.ready, var note = quickNote else { return }
+        let snapshot = try await quickBridge.snapshot()
+        guard quickNote == note else { return }
+        note.body = snapshot.body
+        note.plainText = snapshot.plainText
+        try saveQuickDraft(note)
+    }
+    private func handleCompactCaptureAction(_ action: String) {
+        switch EditorAction(rawValue: action) {
+        case .sendCapture: sendQuickDraft()
+        case .expandCapture, .file, .image, .drawing: expandQuickComposer()
+        case .voice: startQuickRecording()
+        case .stopVoice, .retryVoice: if recorder.recording || recorder.hasPendingRecording { finishQuickRecording() }
+        case .preferencesClosed, nil: break
+        }
+    }
+    private func sendQuickDraft() {
+        guard !quickTransitioning, !recorder.starting else { return }
+        quickTransitioning = true
+        Task {
+            defer { quickTransitioning = false }
+            do { try await refreshCompactQuickNote() } catch { voiceError = error.localizedDescription; return }
+            if recorder.recording || recorder.hasPendingRecording {
+                finishQuickRecording()
+                guard !recorder.recording, !recorder.hasPendingRecording else { return }
+            }
+            _ = saveQuickNote(quickNote ?? Note.text(draft.trimmingCharacters(in: .whitespacesAndNewlines)))
+        }
+    }
+    private func saveQuickNote(_ original: Note) -> Bool {
+        var note = EditorLifecycle.prepared(original)
+        if note.plainText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
+           note.title == "Голосовая заметка.m4a" { note.title = "Голосовая заметка" }
+        if !note.attachments.isEmpty, case .object(var document) = note.body {
+            var attrs: [String: JSONValue] = [:]
+            if case .object(let existing) = document["attrs"] { attrs = existing }
+            attrs["editorVersion"] = .number(1)
+            document["attrs"] = .object(attrs)
+            note.body = .object(document)
+        }
+        if EditorLifecycle.shouldSave(note, existing: false), !library.save(note) { return false }
+        quickNote = nil
+        quickUsesRichEditor = false
+        draft = ""
+        focused = false
+        UserDefaults.standard.removeObject(forKey: quickComposerKey)
+        return true
     }
 }
 
@@ -674,12 +785,18 @@ struct AttachmentImage: View {
     }
 }
 
+struct QuickCaptureEditor {
+    let recorder: VoiceRecorder
+    let saveDraft: (Note) throws -> Void
+}
+
 struct NoteEditor: View {
     @Environment(\.dismiss) private var dismiss
     @Environment(\.scenePhase) private var phase
     @EnvironmentObject private var library: Library
     @State var note: Note
     var focusOnOpen = false
+    let capture: QuickCaptureEditor?
     let onSave: (Note) -> Bool
     @State private var text: String
     @State private var photo: PhotosPickerItem?
@@ -687,9 +804,7 @@ struct NoteEditor: View {
     @State private var drawing = false
     @State private var editingTags = false
     @State private var error: String?
-    @StateObject private var recorder = VoiceRecorder()
-    @State private var recordingID: String?
-    @State private var pendingRecordingURL: URL?
+    @StateObject private var recorder: VoiceRecorder
     @State private var preview: URL?
     @State private var editorHeight: CGFloat = 280
     @StateObject private var editorBridge = RichEditorBridge()
@@ -697,17 +812,20 @@ struct NoteEditor: View {
     @State private var linkPrompt = false
     @State private var linkURL = ""
     @State private var saving = false
+    @State private var captureSent = false
     @State private var autosaveTask: Task<Void, Never>?
     @State private var lastSaved: Note?
     @State private var linkEditorToken = UUID()
 
-    init(note: Note, focusOnOpen: Bool = false, onSave: @escaping (Note) -> Bool) {
-        var document = EditorDrafts.load(note)
-        document.body = document.editorDocument
+    init(note: Note, focusOnOpen: Bool = false, capture: QuickCaptureEditor? = nil, onSave: @escaping (Note) -> Bool) {
+        var document = capture == nil ? EditorDrafts.load(note) : note
+        if capture == nil { document.body = document.editorDocument }
         _note = State(initialValue: document)
         _text = State(initialValue: document.plainText)
         _lastSaved = State(initialValue: focusOnOpen ? nil : EditorLifecycle.prepared(document))
+        _recorder = StateObject(wrappedValue: capture?.recorder ?? VoiceRecorder())
         self.focusOnOpen = focusOnOpen
+        self.capture = capture
         self.onSave = onSave
     }
     var body: some View {
@@ -740,9 +858,10 @@ struct NoteEditor: View {
                 } catch { self.error = error.localizedDescription }
             }
         }
-        .onChange(of: recorder.seconds) { _, seconds in
-            if let recordingID { editorBridge.recordingState(id: recordingID, seconds: Int(seconds)) }
-        }
+        .onChange(of: editorBridge.ready) { _, _ in syncRecordingSnippet() }
+        .onChange(of: recorder.recordingID) { _, _ in syncRecordingSnippet() }
+        .onChange(of: recorder.hasPendingRecording) { _, _ in syncRecordingSnippet() }
+        .onChange(of: recorder.seconds) { _, _ in updateRecordingSnippet() }
         .onChange(of: phase) { _, value in
             if value != .active && recorder.recording { finishRecording() }
         }
@@ -761,7 +880,12 @@ struct NoteEditor: View {
         }
         .sheet(isPresented: $drawing) { DrawingView { data in do { try addFile(data, name: "Рисунок.png", mime: "image/png") } catch { self.error = error.localizedDescription } } }
         .sheet(isPresented: $editingTags) { NoteTagsSheet(tags: $note.tags, available: library.tags) }
-        .sheet(item: $referencedNote) { other in AnyView(NoteEditor(note: other, onSave: onSave)) }
+        .sheet(item: $referencedNote) { other in
+            AnyView(NoteEditor(note: other) { updated in
+                if capture == nil { return onSave(updated) }
+                return library.save(updated, feedback: false)
+            })
+        }
         .alert("Ссылка", isPresented: $linkPrompt) {
             TextField("https://…", text: $linkURL).textInputAutocapitalization(.never).keyboardType(.URL)
             Button("Применить") { editorBridge.setLink(linkURL) }
@@ -769,14 +893,17 @@ struct NoteEditor: View {
         } message: { Text("Введи адрес или оставь поле пустым, чтобы убрать ссылку.") }
         .quickLookPreview($preview)
         .onAppear {
-            NoteLinkEditors.register(linkEditorToken) { await persistForLink() }
+            NoteLinkEditors.register(linkEditorToken) {
+                if capture != nil { return await preserveCapture() }
+                return await persistForLink()
+            }
             if library.notes.contains(where: { $0.id == note.id }) { Telemetry.shared.record(.noteOpened, ["note_id": note.id, "kind": note.kind]) }
             // Persist the incoming quick draft even if its WebKit surface hasn't opened yet.
             saveKnownState()
         }
         .onReceive(library.$notes) { notes in
             guard let saved = lastSaved, let server = notes.first(where: { $0.id == note.id }),
-                  !recorder.recording, pendingRecordingURL == nil else { return }
+                  capture == nil, !recorder.recording, !recorder.hasPendingRecording else { return }
             guard let acknowledgement = Note.acknowledging(saved: saved, server: server, current: note) else {
                 if EditorLifecycle.prepared(note, plainText: text) == saved, server != saved {
                     autosaveTask?.cancel()
@@ -792,7 +919,15 @@ struct NoteEditor: View {
         .onChange(of: note) { _, _ in scheduleAutosave() }
         .onChange(of: text) { _, _ in scheduleAutosave() }
         .onChange(of: phase) { _, value in if value != .active { saveKnownState() } }
-        .onDisappear { NoteLinkEditors.unregister(linkEditorToken); autosaveTask?.cancel(); saveKnownState(); recorder.cancel() }
+        .onDisappear {
+            NoteLinkEditors.unregister(linkEditorToken)
+            autosaveTask?.cancel()
+            saveKnownState()
+            if capture == nil { recorder.cancel() }
+        }
+    }
+    private var voiceCapture: Bool {
+        capture != nil && (recorder.starting || recorder.recordingID != nil || note.attachments.contains { $0.mimeType.hasPrefix("audio/") })
     }
     private var metadata: some View {
         HStack(spacing: 2) {
@@ -806,21 +941,33 @@ struct NoteEditor: View {
             Button {
                 Task { if await persistForLink(), let url = NoteLinks.shareURL(id: note.id) { UIPasteboard.general.url = url } }
             } label: { DoompileSymbol(systemName: "link").foregroundStyle(Palette.muted).frame(width: 44, height: 44).contentShape(Rectangle()) }
-                .accessibilityLabel("Скопировать ссылку на заметку").disabled(saving || !editorBridge.ready)
+                .accessibilityLabel("Скопировать ссылку на заметку").disabled(saving || !editorBridge.ready || capture != nil)
             Button { withAnimation(TouchMotion.quick) { note.pinned.toggle() } } label: {
                 DoompileSymbol(systemName: note.pinned ? "pin.fill" : "pin").foregroundStyle(note.pinned ? Palette.accent : Palette.muted).frame(width: 44, height: 44).contentShape(Rectangle())
             }.accessibilityLabel(note.pinned ? "Открепить" : "Закрепить").accessibilityValue(note.pinned ? "Да" : "Нет")
             Button { withAnimation(TouchMotion.quick) { note.urgent.toggle() } } label: {
                 DoompileSymbol(systemName: note.urgent ? "flame.fill" : "flame").foregroundStyle(note.urgent ? Palette.orange : Palette.muted).frame(width: 44, height: 44).contentShape(Rectangle())
             }.accessibilityLabel(note.urgent ? "Убрать из важного" : "Сделать важной").accessibilityValue(note.urgent ? "Да" : "Нет")
-            Button { save() } label: { DoompileSymbol(systemName: "xmark").foregroundStyle(Palette.muted).frame(width: 44, height: 44).contentShape(Rectangle()) }
-                .disabled(saving || recorder.starting)
-                .accessibilityLabel("Сохранить и закрыть").accessibilityIdentifier("close-editor")
+            Button {
+                if voiceCapture {
+                    Task { if await preserveCapture() { dismiss() } }
+                } else {
+                    save()
+                }
+            } label: { DoompileSymbol(systemName: "xmark").foregroundStyle(Palette.muted).frame(width: 44, height: 44).contentShape(Rectangle()) }
+                .disabled(saving || (capture == nil && recorder.starting))
+                .accessibilityLabel(voiceCapture ? "Свернуть редактор" : "Сохранить и закрыть").accessibilityIdentifier("close-editor")
+            if voiceCapture {
+                Button { save() } label: {
+                    DoompileSymbol(systemName: "arrow.up", size: 18).font(.system(size: 18, weight: .semibold))
+                        .frame(width: 40, height: 40).background(Palette.lime, in: RoundedRectangle(cornerRadius: 14)).foregroundStyle(Palette.onLime)
+                }.disabled(saving || recorder.starting).accessibilityLabel("Сохранить заметку").accessibilityIdentifier("send-expanded-capture")
+            }
         }.font(.system(size: 17)).buttonStyle(.plain).padding(.leading, 14).padding(.trailing, 8).padding(.top, 14)
     }
     private var touchToolbar: some View {
         VStack(spacing: 0) {
-            if recorder.recording || recorder.starting {
+            if recorder.starting || (capture == nil && recorder.recording) {
                 HStack(spacing: 8) {
                     Circle().fill(Palette.orange).frame(width: 6, height: 6)
                     Text(recorder.starting ? "Включаем микрофон…" : "Запись " + Note.timeLabel(recorder.seconds)).font(.system(size: 12, design: .monospaced))
@@ -840,8 +987,10 @@ struct NoteEditor: View {
                             DoompileSymbol(systemName: "photo").frame(width: 44, height: 46).contentShape(Rectangle())
                         }.accessibilityLabel("Добавить фото")
                         toolButton("paperclip", "Прикрепить файл") { editorBridge.blur(); importer = true }
-                        toolButton(recorder.recording ? "stop.circle.fill" : "mic", recorder.recording ? "Остановить запись" : "Записать голос") { toggleRecording() }
-                            .foregroundStyle(recorder.recording ? Palette.orange : Palette.muted).disabled(recorder.starting)
+                        if capture == nil || recorder.recordingID == nil {
+                            toolButton(recorder.recording ? "stop.circle.fill" : "mic", recorder.recording ? "Остановить запись" : "Записать голос") { toggleRecording() }
+                                .foregroundStyle(recorder.recording ? Palette.orange : Palette.muted).disabled(recorder.starting)
+                        }
                         Divider().frame(height: 20).padding(.horizontal, 5)
                         tool("bold", "Жирный", command: "bold")
                         tool("italic", "Курсив", command: "italic")
@@ -890,7 +1039,7 @@ struct NoteEditor: View {
         case .drawing: editorBridge.blur(); drawing = true
         case .voice: toggleRecording()
         case .stopVoice, .retryVoice:
-            if recorder.recording || pendingRecordingURL != nil { finishRecording() }
+            if recorder.recording || recorder.hasPendingRecording { finishRecording() }
         case .preferencesClosed, .expandCapture, .sendCapture: break
         case nil:
             if action.hasPrefix("openAttachment:"), let attachment = note.attachments.first(where: { $0.url == String(action.dropFirst("openAttachment:".count)) }) {
@@ -912,46 +1061,73 @@ struct NoteEditor: View {
         return attachment
     }
     private func toggleRecording() {
-        if recorder.recording || pendingRecordingURL != nil { finishRecording(); return }
-        Task {
-            do {
-                try await recorder.start()
-                guard recorder.recording else { return }
-                let id = UUID().uuidString.lowercased()
-                recordingID = id
-                editorBridge.insertRecording(id)
-                editorBridge.recordingState(id: id, seconds: 0)
-            } catch { self.error = error.localizedDescription }
+        if recorder.recording || recorder.hasPendingRecording {
+            if capture == nil { finishRecording() }
+            return
         }
+        guard note.attachments.count < NoteLimits.attachments else {
+            error = "В заметке уже \(NoteLimits.attachments) вложений."
+            return
+        }
+        Task {
+            do { try await recorder.start() } catch { self.error = error.localizedDescription }
+        }
+    }
+    private func syncRecordingSnippet() {
+        guard editorBridge.ready, let id = recorder.recordingID else { return }
+        editorBridge.insertRecording(id)
+        updateRecordingSnippet()
+    }
+    private func updateRecordingSnippet() {
+        guard editorBridge.ready, let id = recorder.recordingID else { return }
+        editorBridge.recordingState(id: id, seconds: Int(recorder.seconds), retry: recorder.hasPendingRecording)
     }
     private func finishRecording() {
         do {
-            let url: URL
-            if let pendingRecordingURL { url = pendingRecordingURL }
-            else { url = try recorder.stop(); pendingRecordingURL = url }
-            let attachment = try storeFile(Data(contentsOf: url), name: "Голосовая заметка.m4a", mime: "audio/mp4")
-            if let recordingID { editorBridge.completeRecording(recordingID, attachment: attachment) }
-            else { editorBridge.insertAttachment(attachment) }
-            recordingID = nil
-            pendingRecordingURL = nil
-            try? FileManager.default.removeItem(at: url)
+            guard library.isCurrentAccount else { throw DoompileError.authentication }
+            let (id, attachment) = try recorder.attachRecording(to: &note)
+            editorBridge.completeRecording(id, attachment: attachment)
+            if let capture { try capture.saveDraft(EditorLifecycle.prepared(note, plainText: text)) }
         } catch { self.error = error.localizedDescription }
+    }
+    private func refreshEditorState() async throws {
+        guard editorBridge.ready else { return }
+        let before = note.body
+        let snapshot = try await editorBridge.snapshot()
+        if note.body == before { note.body = snapshot.body; text = snapshot.plainText }
+    }
+    private func preserveCapture() async -> Bool {
+        guard let capture, library.isCurrentAccount, !saving else { return false }
+        saving = true
+        defer { saving = false }
+        do {
+            try await refreshEditorState()
+            try capture.saveDraft(EditorLifecycle.prepared(note, plainText: text))
+            return true
+        } catch { self.error = error.localizedDescription; return false }
     }
     private func persistForLink() async -> Bool {
         guard library.isCurrentAccount else { return false }
         guard !saving, !recorder.starting else { return false }
-        if recorder.recording || pendingRecordingURL != nil { finishRecording(); if recorder.recording || pendingRecordingURL != nil { return false } }
         saving = true
         defer { saving = false }
         do {
             autosaveTask?.cancel()
-            if editorBridge.ready {
-                let before = note.body
-                let snapshot = try await editorBridge.snapshot()
-                if note.body == before { note.body = snapshot.body; text = snapshot.plainText }
+            try await refreshEditorState()
+            if recorder.recording || recorder.hasPendingRecording {
+                finishRecording()
+                if recorder.recording || recorder.hasPendingRecording { return false }
             }
             guard library.isCurrentAccount else { return false }
             note = EditorLifecycle.prepared(note, plainText: text)
+            if capture != nil {
+                guard onSave(note) else {
+                    error = "Не удалось сохранить на устройстве. Редактор остаётся открыт — попробуй ещё раз."
+                    return false
+                }
+                captureSent = true
+                return true
+            }
             let existing = library.notes.contains { $0.id == note.id }
             if !EditorLifecycle.shouldSave(note, existing: existing) { EditorDrafts.clear(note.id); return true }
             try EditorDrafts.save(note)
@@ -978,8 +1154,14 @@ struct NoteEditor: View {
     }
     private func saveKnownState() {
         guard library.isCurrentAccount else { return }
-        guard !saving, !recorder.recording, !recorder.starting, pendingRecordingURL == nil else { return }
+        guard !saving, !captureSent else { return }
         let value = EditorLifecycle.prepared(note, plainText: text)
+        if let capture {
+            guard value != lastSaved, recorder.recordingID != nil || EditorLifecycle.shouldSave(value, existing: false) || lastSaved != nil else { return }
+            do { try capture.saveDraft(value); lastSaved = value } catch { self.error = error.localizedDescription }
+            return
+        }
+        guard !recorder.recording, !recorder.starting, !recorder.hasPendingRecording else { return }
         guard value != lastSaved, EditorLifecycle.shouldSave(value, existing: library.notes.contains { $0.id == note.id }) else { return }
         do {
             try EditorDrafts.save(value)
@@ -1079,12 +1261,15 @@ struct NoteTagsSheet: View {
     @Published private(set) var recording = false
     @Published private(set) var starting = false
     @Published private(set) var seconds: Double = 0
+    @Published private(set) var recordingID: String?
+    @Published private var pendingURL: URL?
+    var hasPendingRecording: Bool { pendingURL != nil }
     private var recorder: AVAudioRecorder?
     private var ticker: Task<Void, Never>?
     private var attempt = UUID()
 
     func start() async throws {
-        guard !recording && !starting else { return }
+        guard !recording && !starting && !hasPendingRecording else { return }
         let request = UUID()
         attempt = request
         starting = true
@@ -1102,6 +1287,7 @@ struct NoteTagsSheet: View {
             guard audio.record() else { throw DoompileError.message("Не удалось начать запись.") }
             recorder = audio
             seconds = 0
+            recordingID = UUID().uuidString.lowercased()
             recording = true
             Telemetry.shared.record(.recordingStarted)
             ticker = Task { [weak self] in
@@ -1117,7 +1303,26 @@ struct NoteTagsSheet: View {
             throw error
         }
     }
-    func stop() throws -> URL {
+    func attachRecording(to note: inout Note) throws -> (String, Attachment) {
+        guard let id = recordingID else { throw DoompileError.message("Запись ещё не началась.") }
+        let url: URL
+        if let pendingURL { url = pendingURL }
+        else { url = try stop(); pendingURL = url }
+        guard note.attachments.count < NoteLimits.attachments else {
+            throw DoompileError.message("В заметке уже \(NoteLimits.attachments) вложений.")
+        }
+        let data = try Data(contentsOf: url)
+        guard data.count <= 30 * 1024 * 1024 else { throw DoompileError.message("Максимальный размер вложения — 30 МБ.") }
+        let attachment = try Storage.shared.addFile(data, name: "Голосовая заметка.m4a", mimeType: "audio/mp4")
+        note.attachments.append(attachment)
+        note.body = note.body.finishingRecording(id, attachment: attachment)
+        if note.kind == "note" { note.kind = "audio" }
+        recordingID = nil
+        pendingURL = nil
+        try? FileManager.default.removeItem(at: url)
+        return (id, attachment)
+    }
+    private func stop() throws -> URL {
         guard let recorder, recording else { throw DoompileError.message("Запись ещё не началась.") }
         seconds = recorder.currentTime
         recorder.stop()
@@ -1135,6 +1340,9 @@ struct NoteTagsSheet: View {
             recorder.stop()
             try? FileManager.default.removeItem(at: recorder.url)
         }
+        if let pendingURL { try? FileManager.default.removeItem(at: pendingURL) }
+        pendingURL = nil
+        recordingID = nil
         recorder = nil
         if recording { try? AVAudioSession.sharedInstance().setActive(false, options: .notifyOthersOnDeactivation) }
         recording = false; seconds = 0

@@ -48,6 +48,40 @@ test("expanding and collapsing preserves rich blocks, selection and undo", async
   expect(await page.evaluate(() => (window as any).doompileEditor.getState().body)).toEqual(before);
 });
 
+test("capture mode preserves an active recording and its text until explicit stop", async ({ page }) => {
+  const recordingId = "00000000-0000-0000-0000-000000000001";
+  const input = page.getByRole("textbox");
+  await input.fill("Текст до записи");
+  await page.evaluate(id => {
+    window.doompileEditor.insertRecording(id);
+    window.doompileEditor.setRecordingState({ id, seconds: 3, status: "recording" });
+    window.doompileEditor.setCaptureMode(true);
+  }, recordingId);
+  const snippet = page.locator(".recording-block");
+  await expect(snippet).toHaveCount(1);
+  await expect(snippet).toBeHidden();
+  await page.evaluate(() => window.doompileEditor.setCaptureMode(false));
+  await expect(snippet).toBeVisible();
+  await page.keyboard.type(" Продолжение");
+  await page.evaluate(() => window.doompileEditor.setCaptureMode(true));
+  await expect(snippet).toBeHidden();
+  await page.evaluate(() => window.doompileEditor.setCaptureMode(false));
+  await snippet.locator("button.recording-stop").click();
+  expect(await page.evaluate(() => (window as any).nativeMessages.filter((m: any) => ["stopVoice", "sendCapture"].includes(m.action)).map((m: any) => m.action))).toEqual(["stopVoice"]);
+  await page.evaluate(id => window.doompileEditor.completeRecording(id, {
+    id, url: `local:${id}`, name: "Голосовая заметка.m4a", mimeType: "audio/mp4", size: 512,
+  }), recordingId);
+  await expect(snippet).toHaveCount(0);
+  const audio = page.locator("[data-attachment] .attachment-audio");
+  await expect(audio).toBeVisible();
+  await page.evaluate(() => window.doompileEditor.setCaptureMode(true));
+  await expect(audio).toBeHidden();
+  const state = await page.evaluate(() => window.doompileEditor.getState());
+  expect(state.plainText).toContain("Текст до записи");
+  expect(state.plainText).toContain("Продолжение");
+  expect(JSON.stringify(state.body)).toContain(`"recordingId":"${recordingId}"`);
+});
+
 test("expanded Enter edits rather than submitting and composition never submits", async ({ page }) => {
   await page.evaluate(() => (window as any).doompileEditor.setCaptureMode(false));
   const input = page.getByRole("textbox");

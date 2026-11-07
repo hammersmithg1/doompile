@@ -418,9 +418,14 @@ struct NoteWorkspace: View {
     private var timer: Timer?
     private var startedAt = Date()
     private var url: URL?
+    private var startRequest = UUID()
     private let directory = Storage.shared.directory.appendingPathComponent("voice-drafts", isDirectory: true)
     func start(noteID: String) async throws {
+        guard !recording else { return }
+        let request = UUID(); startRequest = request
         let permitted = await AVCaptureDevice.requestAccess(for: .audio)
+        try Task.checkCancellation()
+        guard startRequest == request else { throw CancellationError() }
         guard permitted else { throw DoompileError.message("Разреши доступ к микрофону в настройках macOS.") }
         try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
         let id = UUID().uuidString.lowercased(), url = directory.appendingPathComponent(id + ".m4a")
@@ -448,7 +453,7 @@ struct NoteWorkspace: View {
         }
         return result
     }
-    func cancel() { recorder?.stop(); recorder = nil; recording = false; timer?.invalidate(); timer = nil }
+    func cancel() { startRequest = UUID(); recorder?.stop(); recorder = nil; recording = false; timer?.invalidate(); timer = nil }
 }
 
 struct MacDrawing: View {

@@ -5,8 +5,17 @@ import AppKit
 @MainActor final class MacRichEditorBridge: ObservableObject {
     weak var webView: WKWebView?
     @Published var ready = false
+    var hasFocus: Bool {
+        guard let webView, let view = webView.window?.firstResponder as? NSView else { return false }
+        return view.isDescendant(of: webView)
+    }
     private var pending: [Attachment] = []
+    private var pendingRecordings: [(String, Attachment)] = []
     private var pendingDocument: JSONValue?
+    func reset() {
+        ready = false; webView = nil
+        pending = []; pendingRecordings = []; pendingDocument = nil
+    }
     func insertAttachment(_ attachment: Attachment) {
         guard ready else { pending.append(attachment); return }
         let payload = ["id": attachment.id, "url": attachment.url, "name": attachment.name, "mimeType": attachment.mimeType, "size": attachment.size] as [String: Any]
@@ -20,6 +29,7 @@ import AppKit
         if let data = try? JSONSerialization.data(withJSONObject: payload), let json = String(data: data, encoding: .utf8) { webView?.evaluateJavaScript("window.doompileEditor.setRecordingState(\(json))") }
     }
     func completeRecording(_ id: String, attachment: Attachment) {
+        guard ready else { pendingRecordings.append((id, attachment)); return }
         let payload: [String: Any] = ["id": attachment.id, "url": attachment.url, "name": attachment.name, "mimeType": attachment.mimeType, "size": attachment.size]
         if let data = try? JSONSerialization.data(withJSONObject: payload), let json = String(data: data, encoding: .utf8), let idData = try? JSONEncoder().encode(id), let idJSON = String(data: idData, encoding: .utf8) { webView?.evaluateJavaScript("window.doompileEditor.completeRecording(\(idJSON), \(json))") }
     }
@@ -28,6 +38,8 @@ import AppKit
         if let value = pendingDocument { pendingDocument = nil; replaceDocument(value) }
         let attachments = pending; pending = []
         for attachment in attachments { insertAttachment(attachment) }
+        let recordings = pendingRecordings; pendingRecordings = []
+        for (id, attachment) in recordings { completeRecording(id, attachment: attachment) }
     }
     func reconcileAttachments(_ replacements: [(from: String, to: String)]) {
         let payload = replacements.map { ["from": $0.from, "to": $0.to] }
@@ -102,8 +114,8 @@ struct MacRichEditorView: NSViewRepresentable {
     }
     static func dismantleNSView(_ webView: WKWebView, coordinator: Coordinator) {
         webView.configuration.userContentController.removeScriptMessageHandler(forName: "doompile")
-        coordinator.parent.bridge.ready = false
-        coordinator.parent.bridge.webView = nil
+        let bridge = coordinator.parent.bridge
+        if bridge.webView === webView { bridge.ready = false; bridge.webView = nil }
     }
     final class Coordinator: NSObject, WKScriptMessageHandler, WKNavigationDelegate {
         var parent: MacRichEditorView

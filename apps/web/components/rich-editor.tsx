@@ -25,6 +25,8 @@ export type RichEditorAPI = {
 export default function RichEditor(props: {
   value: unknown;
   noteId: string;
+  recordingTarget: string;
+  readOnly?: boolean;
   attachments: Attachment[];
   apiRef?: { current: RichEditorAPI | null };
   autoFocus?: boolean;
@@ -106,7 +108,7 @@ export default function RichEditor(props: {
             setDraw(true);
             break;
           case "voice":
-            void recordingSession.start(current.current.noteId);
+            void recordingSession.start(current.current.recordingTarget);
             break;
           case "stopVoice":
             recordingSession.stop();
@@ -159,7 +161,7 @@ export default function RichEditor(props: {
           else if (command === "voice") {
             if (recordingSession.getSnapshot().status === "recording")
               recordingSession.stop();
-            else void recordingSession.start(props.noteId);
+            else void recordingSession.start(current.current.recordingTarget);
           } else {
             fileInput.current!.accept = command === "image" ? "image/*" : "*/*";
             fileInput.current?.click();
@@ -195,6 +197,9 @@ export default function RichEditor(props: {
   useEffect(() => {
     controller.current?.setNotes(props.notes);
   }, [props.notes]);
+  useEffect(() => {
+    controller.current?.editor.setEditable(!props.readOnly, false);
+  }, [props.readOnly]);
   useEffect(() => {
     if (!error) return;
     const timer = setTimeout(() => setError(""), 8000);
@@ -258,7 +263,7 @@ export default function RichEditor(props: {
     const draft = recording.draft,
       instance = controller.current;
     if (!draft || !instance) return;
-    if (draft.target === props.noteId && recording.status !== "starting")
+    if (draft.target === props.recordingTarget && recording.status !== "starting")
       instance.insertRecording(draft.id);
     instance.setRecordingState({
       id: draft.id,
@@ -270,7 +275,7 @@ export default function RichEditor(props: {
       recovered: recording.recovered,
       analyser: recording.analyser,
     });
-  }, [recording, props.noteId]);
+  }, [recording, props.recordingTarget]);
   return (
     <div className="rich-editor">
       <div ref={host} />

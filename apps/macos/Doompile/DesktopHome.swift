@@ -13,16 +13,20 @@ struct DesktopHome: View {
     @State private var query = ""
     @State private var selected: Note?
     @State private var noteExpanded = false
+    @State private var quickExpanded = false
     @State private var quickFocused = true
     @State private var quickHeight: CGFloat = 39
+    @State private var quickEditorHeight: CGFloat = 300
     @State private var quickFiles = false
+    @State private var quickDrawing = false
+    @State private var quickLink = false
+    @State private var quickLinkValue = ""
     @State private var composerToken = UUID()
     @State private var dragWidth: CGFloat?
     @State private var collapsed: Set<String> = []
     @State private var newTag = ""
     @State private var tagPopover = false
     @State private var navigationError: String?
-    @State private var initialAction: String?
     @State private var navigationRequest = UUID()
     @FocusState private var searchFocused: Bool
 
@@ -38,29 +42,36 @@ struct DesktopHome: View {
 
     var body: some View {
         GeometryReader { geometry in
+            let showFullNote = noteExpanded && !quickExpanded
             let inspectorWidth = noteExpanded ? geometry.size.width : min(CGFloat(detailWidth), max(280, geometry.size.width - 558))
             HStack(spacing: 0) {
                 HStack(spacing: 0) {
-                    sidebar.frame(width: 250)
-                    Rectangle().fill(MacPalette.line).frame(width: 1)
-                    feed.frame(maxWidth: .infinity)
+                    sidebar.frame(width: quickExpanded ? 0 : 250).clipped().opacity(quickExpanded ? 0 : 1).accessibilityHidden(quickExpanded)
+                    Rectangle().fill(MacPalette.line).frame(width: quickExpanded ? 0 : 1)
+                    VStack(spacing: 0) {
+                        feed.frame(height: quickExpanded ? 0 : nil).clipped().opacity(quickExpanded ? 0 : 1).accessibilityHidden(quickExpanded)
+                        composer.frame(maxHeight: quickExpanded ? .infinity : nil)
+                    }.frame(maxWidth: .infinity)
                 }
-                .frame(width: noteExpanded ? 0 : geometry.size.width - (selected == nil ? 0 : inspectorWidth), height: geometry.size.height)
-                .clipped().opacity(noteExpanded ? 0 : 1).allowsHitTesting(!noteExpanded).accessibilityHidden(noteExpanded)
+                .frame(width: showFullNote ? 0 : geometry.size.width - (selected == nil || quickExpanded ? 0 : inspectorWidth), height: geometry.size.height)
+                .clipped().opacity(showFullNote ? 0 : 1).allowsHitTesting(!showFullNote).accessibilityHidden(showFullNote)
                 if let selected {
-                    NoteWorkspace(initial: selected, existing: library.notes.contains { $0.id == selected.id }, expanded: noteExpanded, onExpand: { withAnimation(motion) { noteExpanded.toggle() } }, onSelect: { open($0) }, onClose: close, initialAction: initialAction)
+                    NoteWorkspace(initial: selected, existing: library.notes.contains { $0.id == selected.id }, expanded: noteExpanded, onExpand: { withAnimation(motion) { noteExpanded.toggle() } }, onSelect: { open($0) }, onClose: close)
                         .id(selected.id)
-                        .frame(width: inspectorWidth, height: geometry.size.height)
+                        .frame(width: quickExpanded ? 0 : inspectorWidth, height: geometry.size.height)
                         .overlay(alignment: .leading) { if !noteExpanded { resizeHandle(total: geometry.size.width) } }
+                        .clipped().opacity(quickExpanded ? 0 : 1).allowsHitTesting(!quickExpanded).accessibilityHidden(quickExpanded)
                         .transition(.move(edge: noteExpanded ? .bottom : .trailing).combined(with: .opacity))
                 }
             }.frame(width: geometry.size.width, height: geometry.size.height)
         }
         .background(MacPalette.background).foregroundStyle(MacPalette.text)
         .onReceive(NotificationCenter.default.publisher(for: .doompileNewNote)) { _ in if activeState == .key { compose() } }
-        .onReceive(NotificationCenter.default.publisher(for: .doompileSearch)) { _ in if activeState == .key { withAnimation(motion) { noteExpanded = false }; searchFocused = true } }
+        .onReceive(NotificationCenter.default.publisher(for: .doompileSearch)) { _ in
+            if activeState == .key { withAnimation(motion) { noteExpanded = false; quickExpanded = false }; searchFocused = true }
+        }
         .onReceive(NotificationCenter.default.publisher(for: .doompileSave)) { _ in
-            if activeState == .key { if quickFocused || selected == nil { saveQuick() } else { NotificationCenter.default.post(name: .doompileSaveWorkspace, object: nil) } }
+            if activeState == .key { if quickExpanded || quickFocused || quick.bridge.hasFocus || selected == nil { saveQuick() } else { NotificationCenter.default.post(name: .doompileSaveWorkspace, object: nil) } }
         }
         .onChange(of: phase) { _, value in if value == .active { library.reload(); Task { await library.sync() } } }
         .onChange(of: selected?.id) { _, id in if let id, library.notes.contains(where: { $0.id == id }) { Telemetry.shared.record(.noteOpened, ["note_id": id]) } }
@@ -76,6 +87,8 @@ struct DesktopHome: View {
         .fileImporter(isPresented: $quickFiles, allowedContentTypes: [.item], allowsMultipleSelection: true) { result in
             do { for url in try result.get() { try quick.addFile(url) } } catch { quick.error = error.localizedDescription }
         }
+        .sheet(isPresented: $quickDrawing) { MacDrawing { data in do { try quick.addFile(data, name: "Рисунок.png", mime: "image/png"); quickDrawing = false } catch { quick.error = error.localizedDescription } } }
+        .alert("Адрес ссылки", isPresented: $quickLink) { TextField("https://…", text: $quickLinkValue); Button("Добавить") { quick.bridge.setLink(quickLinkValue) }; Button("Отмена", role: .cancel) {} }
         .onOpenURL(perform: handleLink)
         .onContinueUserActivity(NSUserActivityTypeBrowsingWeb) { if let url = $0.webpageURL { handleLink(url) } }
         .alert("Не удалось открыть заметку", isPresented: Binding(get: { navigationError != nil }, set: { if !$0 { navigationError = nil } })) { Button("Понятно", role: .cancel) {} } message: { Text(navigationError ?? "") }
@@ -176,7 +189,6 @@ struct DesktopHome: View {
                     if filtered.isEmpty { emptyState }
                 }.padding(.horizontal, 26).padding(.top, 23).padding(.bottom, 18)
             }.accessibilityLabel("Лента заметок")
-            composer
         }
     }
     private func sectionHeading(_ id: String, title: String, count: Int, icon: String?) -> some View {
@@ -191,28 +203,58 @@ struct DesktopHome: View {
         }.buttonStyle(.plain).accessibilityLabel("\(title), \(count)").accessibilityValue(collapsed.contains(id) ? "Свёрнуто" : "Развёрнуто")
     }
     private var composer: some View {
-        VStack(spacing: 7) {
-            if let error = quick.error { Text(error).font(.system(size: 11)).foregroundStyle(MacPalette.orange).textSelection(.enabled) }
-            if quick.voice.recording || quick.startingVoice {
-                HStack(spacing: 8) { Circle().fill(MacPalette.orange).frame(width: 6, height: 6); Text(quick.startingVoice ? "Включаем микрофон…" : "Запись \(Note.timeLabel(Double(quick.voice.seconds)))").font(.system(size: 11)); Spacer(); if quick.voice.recording { Button("■ Стоп") { Task { await quick.toggleVoice() } }.buttonStyle(.plain).font(.system(size: 11)) } }.foregroundStyle(MacPalette.orange).padding(.horizontal, 10).padding(.vertical, 7)
+        let compactAttachments = quick.richMounted ? quick.note.attachments.filter { $0.mimeType.hasPrefix("audio/") } : quick.note.attachments
+        return VStack(spacing: 7) {
+            if quickExpanded {
+                HStack {
+                    DoompileWordmark(height: 16)
+                    Spacer()
+                    Button { setComposerExpanded(false) } label: { DoompileSymbol(systemName: "arrow.down.right.and.arrow.up.left").frame(width: 28, height: 28) }
+                        .buttonStyle(.plain).help("Свернуть редактор").accessibilityLabel("Свернуть редактор")
+                }.padding(.horizontal, 12).frame(height: 42)
+                MacNoteTags(selected: $quick.note.tags, available: library.tags)
             }
-            if !quick.note.attachments.isEmpty {
-                ScrollView(.horizontal, showsIndicators: false) {
-                    HStack(alignment: .top, spacing: 10) {
-                        ForEach(quick.note.attachments) { file in
-                            HStack(alignment: .top, spacing: 3) { MacAttachmentCard(attachment: file); Button { quick.removeFile(file.id) } label: { DoompileSymbol(systemName: "xmark.circle.fill", size: 12).font(.system(size: 12)).foregroundStyle(MacPalette.muted) }.buttonStyle(.plain).help("Убрать вложение") }
-                        }
-                    }
-                }.frame(maxHeight: 165)
+            if let error = quick.error { Text(error).font(.system(size: 11)).foregroundStyle(MacPalette.orange).textSelection(.enabled) }
+            if quick.startingVoice || (quick.voice.recording && !quickExpanded) {
+                MacRecordingSnippet(starting: quick.startingVoice, seconds: quick.voice.seconds, onStop: quick.stopRecording)
+            }
+            if !quickExpanded && !compactAttachments.isEmpty {
+                MacComposerAttachmentStrip(attachments: compactAttachments, onRemove: quick.richMounted ? nil : quick.removeFile)
+                    .frame(height: quick.richMounted ? 52 : nil).frame(maxHeight: 165)
             }
             HStack(alignment: .bottom, spacing: 5) {
-                MacQuickInput(text: Binding(get: { quick.note.plainText }, set: quick.updateText), height: $quickHeight, focused: $quickFocused, onSubmit: saveQuick).frame(height: quickHeight).padding(.leading, 8)
-                MacComposerButton(icon: quick.voice.recording ? "stop.fill" : "mic", label: quick.voice.recording ? "Остановить запись" : "Записать голосовую заметку", disabled: quick.startingVoice) { Task { await quick.toggleVoice() } }
-                MacComposerButton(icon: "paperclip", label: "Прикрепить файл") { quickFiles = true }
-                MacComposerButton(icon: "arrow.up.left.and.arrow.down.right", label: "Развернуть редактор") { compose() }
-                MacComposerButton(icon: "arrow.up", label: "Сохранить заметку", send: true, disabled: quick.startingVoice || (!quick.voice.recording && !MacPreview.hasContent(quick.note)), action: saveQuick)
+                if quick.richMounted {
+                    MacRichEditorView(document: $quick.note.body, plainText: $quick.note.plainText, height: $quickEditorHeight, attachments: $quick.note.attachments, noteID: quick.note.id, notes: library.notes, focusOnLoad: true, captureCompact: !quickExpanded, bridge: quick.bridge, onReference: { id in
+                        if let note = library.notes.first(where: { $0.id == id }) { open(note) }
+                    }, onRequestLink: { quickLinkValue = $0; quickLink = true }, onAction: composerAction)
+                    .id(quick.note.id)
+                    .frame(maxWidth: .infinity, minHeight: quickExpanded ? 180 : 43, maxHeight: quickExpanded ? .infinity : 43)
+                    .onReceive(quick.bridge.$ready) { ready in if ready { quick.editorReady() } }
+                } else {
+                    MacQuickInput(text: Binding(get: { quick.note.plainText }, set: quick.updateText), height: $quickHeight, focused: $quickFocused, onSubmit: saveQuick).frame(height: quickHeight).padding(.leading, 8)
+                }
+                if !quickExpanded { composerButtons }
             }.padding(6).background(MacPalette.surface, in: RoundedRectangle(cornerRadius: 15)).overlay(RoundedRectangle(cornerRadius: 15).stroke(quickFocused ? MacPalette.adaptive(0xC9C5C0, 0x69646F) : MacPalette.line)).shadow(color: .black.opacity(0.025), radius: 6, y: 2)
+            if quickExpanded { HStack(spacing: 5) { Spacer(); composerButtons }.padding(.vertical, 5) }
         }.padding(.horizontal, 14).padding(.top, 8).padding(.bottom, 12)
+        .onChange(of: quick.voice.seconds) { _, seconds in if quick.voice.recording { quick.bridge.recordingState(id: quick.voice.id, seconds: seconds) } }
+    }
+    @ViewBuilder private var composerButtons: some View {
+        MacComposerButton(icon: "mic", label: "Записать голосовую заметку", disabled: quick.startingVoice || quick.voice.recording || quick.busy) { Task { await quick.startRecording() } }
+        MacComposerButton(icon: "paperclip", label: "Прикрепить файл") { quickFiles = true }
+        if !quickExpanded { MacComposerButton(icon: "arrow.up.left.and.arrow.down.right", label: "Развернуть редактор") { compose() } }
+        MacComposerButton(icon: "arrow.up", label: "Сохранить заметку", send: true, disabled: quick.startingVoice || quick.busy || (!quick.voice.recording && !MacPreview.hasContent(quick.note)), action: saveQuick)
+    }
+    private func composerAction(_ action: String) {
+        switch EditorAction(rawValue: action) {
+        case .sendCapture: saveQuick()
+        case .expandCapture: compose()
+        case .file, .image: quickFiles = true
+        case .drawing: quickDrawing = true
+        case .voice: Task { await quick.startRecording() }
+        case .stopVoice: quick.stopRecording()
+        case .retryVoice, .preferencesClosed, nil: break
+        }
     }
     private var emptyState: some View {
         VStack(alignment: .leading, spacing: 17) {
@@ -253,38 +295,37 @@ struct DesktopHome: View {
         return true
     }
     private func open(_ note: Note) {
-        guard selected?.id != note.id else { return }
+        if selected?.id == note.id {
+            if quickExpanded { setComposerExpanded(false) }
+            return
+        }
         let request = UUID(); navigationRequest = request
         Task { @MainActor in
             guard await prepareNavigation(), navigationRequest == request else { return }
             let latest = library.notes.first { $0.id == note.id } ?? note
-            initialAction = nil; quickFocused = false
-            withAnimation(motion) { selected = EditorDrafts.load(latest) }
+            quickFocused = false
+            withAnimation(motion) { quickExpanded = false; selected = EditorDrafts.load(latest) }
         }
     }
-    private func compose(action: String? = nil) {
-        let request = UUID(); navigationRequest = request
-        Task { @MainActor in
-            guard await prepareNavigation(), navigationRequest == request else { return }
-            var note: Note
-            do { note = try quick.takeNote() } catch { quick.error = error.localizedDescription; return }
-            if !MacPreview.hasContent(note) { note.createdAt = Note.now() }
-            if filter.hasPrefix("tag:") { note.tags = [String(filter.dropFirst(4))] }
-            do { if MacPreview.hasContent(note) { try EditorDrafts.save(note) } }
-            catch { navigationError = error.localizedDescription; return }
-            do { try quick.clear() } catch { quick.error = error.localizedDescription; return }
-            initialAction = action; quickFocused = false
-            withAnimation(motion) { selected = note; noteExpanded = true }
-        }
+    private func compose() {
+        navigationRequest = UUID()
+        setComposerExpanded(true)
+    }
+    private func setComposerExpanded(_ expanded: Bool) {
+        guard !quick.busy else { return }
+        if expanded { quick.mountEditor() }
+        withAnimation(motion) { quickExpanded = expanded }
+        if expanded || !noteExpanded { quick.bridge.focus() }
     }
     private func close() { withAnimation(motion) { selected = nil; noteExpanded = false }; quickFocused = true }
     private func saveQuick() {
-        do {
-            var note = try quick.takeNote()
-            guard MacPreview.hasContent(note) else { return }
-            if filter.hasPrefix("tag:") { note.tags = [String(filter.dropFirst(4))] }
-            if library.save(note) != nil { try quick.clear(); quickHeight = 39; quickFocused = true }
-        } catch { quick.error = error.localizedDescription }
+        let tag = filter.hasPrefix("tag:") ? String(filter.dropFirst(4)) : nil
+        Task { @MainActor in
+            if await quick.submit(in: library, tag: tag) {
+                withAnimation(motion) { quickExpanded = false }
+                quickHeight = 39; quickFocused = !noteExpanded
+            }
+        }
     }
     private func createTag() {
         let tag = newTag.trimmingCharacters(in: .whitespacesAndNewlines)

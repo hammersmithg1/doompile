@@ -89,6 +89,10 @@ async function mockMicrophone(page: Page) {
   await page.addInitScript(() => {
     const metrics = { starts: 0, stops: 0, tracksStopped: 0 };
     (window as any).microphoneMetrics = metrics;
+    Object.defineProperty(window, "AudioContext", {
+      configurable: true,
+      value: undefined,
+    });
     // A valid PCM WAV chunk makes local recovery/playback exercise real media elements.
     function wav() {
       const bytes = new ArrayBuffer(844),
@@ -439,46 +443,96 @@ test("slash menu scrolling in a sidebar does not move the surrounding note", asy
   expect(await note.evaluate((element) => element.scrollTop)).toBe(before);
 });
 
-test("quick voice survives expansion and stops from the sticky header into the same note", async ({
+test("quick voice survives expansion and collapse, and stopping only stages the audio", async ({
   page,
-}, info) => {
+}) => {
+  await page.emulateMedia({ reducedMotion: "reduce" });
+  await mockMicrophone(page);
+  const app = await setup(page);
+  const quick = page.locator(".quick-composer");
+  const compactText = quick.getByRole("textbox", {
+    name: "Быстрая заметка",
+  });
+  await page
+    .getByRole("button", { name: "Записать голосовую заметку", exact: true })
+    .click();
+  await expect(page.locator(".quick-recording .recording-live")).toBeVisible();
+  await compactText.fill("Текст в инпуте");
+  const id = await page
+    .locator(".quick-recording [data-recording-id]")
+    .getAttribute("data-recording-id");
+  await expand(page);
+  const inline = page.locator(`.recording-block [data-recording-id="${id}"]`);
+  await expect(
+    inline.getByRole("button", { name: "Остановить запись", exact: true }),
+  ).toBeVisible();
+  await expect(page.locator(".header-recording")).toContainText("Запись");
+  await expect(
+    page.getByRole("button", { name: "Остановить запись в шапке" }),
+  ).toHaveCount(0);
+  const editorText = page.getByRole("textbox", { name: "Текст заметки" });
+  await expect(editorText).toContainText("Текст в инпуте");
+  await editorText.press("ControlOrMeta+End");
+  await page.keyboard.insertText(" + текст в редакторе");
+  await page.getByRole("button", { name: "Свернуть редактор" }).click();
+  const snippet = quick.locator(`[data-recording-id="${id}"]`);
+  const stop = snippet.getByRole("button", {
+    name: "Остановить запись",
+    exact: true,
+  });
+  await expect(stop).toBeVisible();
+  await expect(compactText).toHaveValue("Текст в инпуте + текст в редакторе");
+  await compactText.fill(
+    "Текст в инпуте + текст в редакторе\nТекст после сворачивания",
+  );
+  expect(
+    await page.evaluate(() => (window as any).microphoneMetrics),
+  ).toMatchObject({ starts: 1, stops: 0 });
+  await stop.click();
+  await expect(snippet.locator("audio")).toHaveAttribute("src", /^blob:/);
+  const send = quick.getByRole("button", { name: "Сохранить заметку" });
+  await expect(send).toBeEnabled();
+  expect(app.uploads).toHaveLength(0);
+  expect(app.writes).toHaveLength(0);
+  await send.click();
+  await expect(page.locator(".note-main .attachment-audio")).toBeVisible();
+  await expect.poll(() => app.writes.at(-1)?.attachments.length).toBe(1);
+  expect(app.writes.at(-1).plainText).toContain(
+    "Текст в инпуте + текст в редакторе",
+  );
+  expect(app.writes.at(-1).plainText).toContain("Текст после сворачивания");
+  expect(app.notes).toHaveLength(1);
+  expect(app.uploads).toHaveLength(1);
+  expect(JSON.stringify(app.writes.at(-1).body)).not.toContain(
+    '"type":"recording"',
+  );
+});
+test("quick send stops and saves a voice-only message", async ({ page }) => {
   await mockMicrophone(page);
   const app = await setup(page);
   await page
     .getByRole("button", { name: "Записать голосовую заметку", exact: true })
     .click();
   await expect(page.locator(".quick-recording .recording-live")).toBeVisible();
-  const id = await page
-    .locator(".quick-recording [data-recording-id]")
-    .getAttribute("data-recording-id");
-  await expand(page);
-  await expect(
-    page.locator(`.recording-block [data-recording-id="${id}"]`),
-  ).toBeVisible();
-  await expect(page.locator(".header-recording")).toContainText("Запись");
-  await page.screenshot({ path: info.outputPath("recording-inline.png") });
+  await page
+    .getByRole("button", { name: "Сохранить заметку", exact: true })
+    .click();
+  await expect(page.locator(".note-main .attachment-audio")).toBeVisible();
+  await expect.poll(() => app.notes.length).toBe(1);
+  expect(app.notes[0]).toMatchObject({ kind: "audio", plainText: "" });
+  expect(app.notes[0].attachments).toHaveLength(1);
   expect(
-    await page.evaluate(() => (window as any).microphoneMetrics.starts),
-  ).toBe(1);
-  expect(
-    await page.evaluate(() => (window as any).microphoneMetrics.stops),
-  ).toBe(0);
-  await page.getByRole("button", { name: "Остановить запись в шапке" }).click();
-  await expect(page.locator(".header-recording")).toHaveCount(0);
-  await expect(page.locator(".tiptap .attachment-audio")).toBeVisible();
-  await expect.poll(() => app.writes.at(-1)?.attachments.length).toBe(1);
-  expect(app.notes).toHaveLength(1);
-  expect(JSON.stringify(app.writes.at(-1).body)).not.toContain(
-    '"type":"recording"',
-  );
+    await page.evaluate(() => (window as any).microphoneMetrics),
+  ).toMatchObject({ starts: 1, stops: 1 });
 });
-test("slash voice shows an inline snippet and both stop buttons stop the same session", async ({
+test("stopping an inline recording on an existing note attaches it to the same note", async ({
   page,
 }) => {
   await mockMicrophone(page);
-  const app = await setup(page);
-  await expand(page);
+  const app = await setup(page, [paragraph("Медиа")]);
   await page.getByRole("textbox", { name: "Текст заметки" }).click();
+  await page.keyboard.press("End");
+  await page.keyboard.press("Enter");
   await page.keyboard.type("/voice");
   await page.keyboard.press("Enter");
   await expect(page.locator(".recording-block")).toBeVisible();
@@ -489,11 +543,14 @@ test("slash voice shows an inline snippet and both stop buttons stop the same se
     .getByRole("button", { name: "Остановить запись", exact: true })
     .click();
   await expect.poll(() => app.writes.at(-1)?.attachments.length).toBe(1);
+  expect(app.notes).toHaveLength(1);
+  expect(app.notes[0].id).toBe(firstID);
+  expect(app.notes[0].plainText).toContain("Медиа");
   expect(
     await page.evaluate(() => (window as any).microphoneMetrics.stops),
   ).toBe(1);
 });
-test("a reload restores checkpointed audio and a failed upload remains retryable", async ({
+test("reload restores checkpointed audio without sending and the send arrow retries a failed upload", async ({
   page,
 }) => {
   await mockMicrophone(page);
@@ -502,37 +559,57 @@ test("a reload restores checkpointed audio and a failed upload remains retryable
   await page
     .getByRole("button", { name: "Записать голосовую заметку", exact: true })
     .click();
+  await expect(page.locator(".quick-recording .recording-live")).toBeVisible();
   await expect
     .poll(() =>
       page.evaluate(async () => {
-        const request = indexedDB.open("doompile-recordings:user:11111111-1111-4111-8111-111111111111");
+        const request = indexedDB.open(
+          "doompile-recordings:user:11111111-1111-4111-8111-111111111111",
+        );
         const db = await new Promise<IDBDatabase>((resolve, reject) => {
           request.onsuccess = () => resolve(request.result);
           request.onerror = () => reject(request.error);
         });
-        const read = db
-          .transaction("drafts")
-          .objectStore("drafts")
-          .get("active");
-        return new Promise<number>((resolve) => {
-          read.onsuccess = () =>
-            resolve(read.result?.blob?.size || read.result?.byteLength || 0);
-        });
+        try {
+          const read = db.transaction("drafts").objectStore("drafts").get("active");
+          return await new Promise<number>((resolve, reject) => {
+            read.onsuccess = () => resolve(read.result?.byteLength || 0);
+            read.onerror = () => reject(read.error);
+          });
+        } finally {
+          db.close();
+        }
       }),
+      { timeout: 15_000 },
     )
     .toBeGreaterThan(0);
   await page.reload();
+  await expect(page.locator(".quick-recording audio")).toHaveAttribute(
+    "src",
+    /^blob:/,
+  );
+  expect(app.uploads).toHaveLength(0);
+  expect(app.writes).toHaveLength(0);
+  const send = page.getByRole("button", {
+    name: "Сохранить заметку",
+    exact: true,
+  });
+  await send.click();
   await expect(
     page.getByRole("button", { name: "Повторить сохранение" }),
   ).toBeVisible();
+  expect(app.uploads).toHaveLength(1);
+  expect(app.writes).toHaveLength(0);
   await expect(page.locator(".quick-recording audio")).toHaveAttribute(
     "src",
     /^blob:/,
   );
   app.fail(false);
-  await page.getByRole("button", { name: "Повторить сохранение" }).click();
+  await send.click();
   await expect(page.locator(".note-main .attachment-audio")).toBeVisible();
   await expect(page.locator(".quick-recording")).toHaveCount(0);
+  expect(app.uploads).toHaveLength(2);
+  await expect.poll(() => app.notes.length).toBe(1);
 });
 test("audio and files use the same controls and styles in the feed and editor", async ({
   page,
@@ -670,7 +747,7 @@ test("a quick attachment finishing upload after expansion stays in the expanded 
   await expect.poll(() => app.writes.at(-1)?.attachments.length).toBe(1);
 });
 
-test("a pending file and active voice both survive expansion into the same document", async ({
+test("expanded send saves text, a pending file and active voice in one note", async ({
   page,
 }) => {
   await mockMicrophone(page);
@@ -714,13 +791,25 @@ test("a pending file and active voice both survive expansion into the same docum
     page.locator(".note-editor-surface .attachment-card"),
   ).toContainText("pending.pdf");
   await expect(page.locator(".recording-block")).toBeVisible();
-  await page.getByRole("button", { name: "Остановить запись в шапке" }).click();
-  await expect(page.locator(".tiptap .attachment-audio")).toBeVisible();
+  await page
+    .getByRole("textbox", { name: "Текст заметки" })
+    .press("ControlOrMeta+End");
+  await page.keyboard.insertText("Текст при записи");
+  expect(app.writes).toHaveLength(0);
+  expect(
+    await page.evaluate(() => (window as any).microphoneMetrics.stops),
+  ).toBe(0);
+  await page
+    .locator(".note-editor-surface")
+    .getByRole("button", { name: "Сохранить заметку", exact: true })
+    .click();
+  await expect(page.locator(".note-main .attachment-audio")).toBeVisible();
   await expect.poll(() => app.writes.at(-1)?.attachments.length).toBe(2);
   const body = JSON.stringify(app.writes.at(-1).body);
   expect(body).toContain("pending.pdf");
   expect(body).toContain("Голосовая заметка.wav");
   expect(body).not.toContain('"type":"recording"');
+  expect(app.writes.at(-1).plainText).toContain("Текст при записи");
   expect(app.notes).toHaveLength(1);
 });
 
@@ -808,7 +897,6 @@ for (const interrupted of [false, true])
     test.skip(browserName === "webkit" && process.platform === "linux" && !recorderAvailable,
       "This Linux WebKit build omits MediaRecorder; macOS CI requires and tests the real codec.");
     expect(recorderAvailable, "The native-codec test requires a real MediaRecorder").toBe(true);
-    app.fail(true);
     await page
       .getByRole("button", { name: "Записать голосовую заметку", exact: true })
       .click();
@@ -832,11 +920,14 @@ for (const interrupted of [false, true])
     if (interrupted) await page.reload();
     else
       await page
-        .getByRole("button", { name: "Завершить запись голосовой заметки" })
+        .getByRole("button", { name: "Остановить запись", exact: true })
         .click();
-    await expect(
-      page.getByRole("button", { name: "Повторить сохранение" }),
-    ).toBeVisible();
+    await expect(page.locator(".quick-recording audio")).toHaveAttribute(
+      "src",
+      /^blob:/,
+    );
+    expect(app.uploads).toHaveLength(0);
+    expect(app.writes).toHaveLength(0);
     await page.locator(".quick-recording .audio-play").click();
     await expect
       .poll(() =>

@@ -52,7 +52,7 @@ button {
 :root[data-native-capture="compact"] .block-editor .tiptap {
   min-height: 23px;
 }
-:root[data-native-capture="compact"] :is(.block-handle, .editor-outline, .selection-toolbar) {
+:root[data-native-capture="compact"] :is(.block-handle, .editor-outline, .selection-toolbar, .recording-block, [data-attachment]:has(.attachment-audio)) {
   display: none !important;
 }
 

@@ -89,7 +89,7 @@ enum JSONValue: Codable, Equatable {
             if node["type"] == .string("attachment"), case .object(let attrs) = node["attrs"], attrs["recordingId"] == .string(id) { found = true; return value }
             if node["type"] == .string("recording"), case .object(let attrs) = node["attrs"], attrs["id"] == .string(id) {
                 found = true
-                return .object(["type": .string("attachment"), "attrs": .object(["url": .string(attachment.url), "name": .string(attachment.name), "mimeType": .string(attachment.mimeType), "size": .number(Double(attachment.size)), "recordingId": .string(id)])])
+                return .object(["type": .string("attachment"), "attrs": .object(["id": .string(attachment.id), "url": .string(attachment.url), "name": .string(attachment.name), "mimeType": .string(attachment.mimeType), "size": .number(Double(attachment.size)), "recordingId": .string(id)])])
             }
             if case .array(let content) = node["content"] { node["content"] = .array(content.map(replace)) }
             return .object(node)
@@ -98,10 +98,21 @@ enum JSONValue: Codable, Equatable {
         if !found, case .object(var doc) = result {
             let placeholder: JSONValue = .object(["type": .string("recording"), "attrs": .object(["id": .string(id)])])
             var content: [JSONValue] = []; if case .array(let existing) = doc["content"] { content = existing }
-            content.append(replace(placeholder)); content.append(.object(["type": .string("paragraph")]))
+            content.append(.object(["type": .string("paragraph"), "content": .array([replace(placeholder)])]))
             doc["content"] = .array(content); result = .object(doc)
         }
         return result
+    }
+    func removingRecording(_ id: String) -> JSONValue {
+        guard case .object(var node) = self, case .array(let content) = node["content"] else { return self }
+        node["content"] = .array(content.compactMap { child in
+            guard case .object(let value) = child, value["type"] == .string("recording"),
+                  case .object(let attrs) = value["attrs"], attrs["id"] == .string(id) else {
+                return child.removingRecording(id)
+            }
+            return nil
+        })
+        return .object(node)
     }
     func replacingString(_ source: String, with replacement: String) -> JSONValue {
         switch self {

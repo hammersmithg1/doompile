@@ -49,7 +49,7 @@ struct NoteSwipeRow<Content: View>: View {
         }
         .clipShape(RoundedRectangle(cornerRadius: 14))
         .contentShape(Rectangle())
-        .modifier(HorizontalDragModifier(onChanged: { translation, predicted in
+        .modifier(HorizontalDragModifier(target: .noteRow, onChanged: { translation, predicted in
             if horizontal == nil {
                 // The modifier has already rejected vertical movement before recognition.
                 // UIKit may report zero translation at .began; it is still a horizontal pan.
@@ -90,10 +90,29 @@ struct NoteSwipeRow<Content: View>: View {
     }
 }
 
+enum HorizontalDragTarget {
+    case noteRow, openDrawer, closeDrawer
+
+    func acceptsTouch(at x: CGFloat) -> Bool {
+        self != .openDrawer || Self.isDrawerEdge(x)
+    }
+
+    func acceptsPan(startX: CGFloat, motion: CGPoint) -> Bool {
+        guard abs(motion.x) > abs(motion.y) * 1.15 else { return false }
+        switch self {
+        case .noteRow: return motion.x < 0 || !Self.isDrawerEdge(startX)
+        case .openDrawer: return motion.x > 0 && Self.isDrawerEdge(startX)
+        case .closeDrawer: return motion.x < 0
+        }
+    }
+
+    private static func isDrawerEdge(_ x: CGFloat) -> Bool { (0...22).contains(x) }
+}
+
 /// Reject vertical movement before recognition, so a row cannot steal the ScrollView pan.
 struct HorizontalDragModifier: ViewModifier {
     var enabled = true
-    var leadingEdgeWidth: CGFloat? = nil
+    let target: HorizontalDragTarget
     let onChanged: (CGSize, CGSize) -> Void
     let onEnded: (CGSize, CGSize) -> Void
     @GestureState private var dragging = false
@@ -101,13 +120,15 @@ struct HorizontalDragModifier: ViewModifier {
     @State private var horizontal: Bool?
     @ViewBuilder func body(content: Content) -> some View {
         if #available(iOS 18.0, *) {
-            content.gesture(HorizontalPanGesture(enabled: enabled, leadingEdgeWidth: leadingEdgeWidth, onChanged: onChanged, onEnded: onEnded))
+            content.gesture(HorizontalPanGesture(enabled: enabled, target: target, onChanged: onChanged, onEnded: onEnded))
         } else {
             content.simultaneousGesture(DragGesture(minimumDistance: 20, coordinateSpace: .global)
                 .updating($dragging) { _, active, _ in active = true }
                 .onChanged { value in
-                    if let edge = leadingEdgeWidth, value.startLocation.x > edge { return }
-                    if horizontal == nil { horizontal = abs(value.translation.width) > abs(value.translation.height) * 1.15 }
+                    if horizontal == nil {
+                        horizontal = target.acceptsPan(startX: value.startLocation.x,
+                            motion: CGPoint(x: value.translation.width, y: value.translation.height))
+                    }
                     guard horizontal == true else { return }
                     lastSample = (value.translation, value.predictedEndTranslation)
                     onChanged(value.translation, value.predictedEndTranslation)
@@ -131,10 +152,10 @@ struct HorizontalDragModifier: ViewModifier {
 @available(iOS 18.0, *)
 private struct HorizontalPanGesture: UIGestureRecognizerRepresentable {
     var enabled: Bool
-    var leadingEdgeWidth: CGFloat?
+    let target: HorizontalDragTarget
     let onChanged: (CGSize, CGSize) -> Void
     let onEnded: (CGSize, CGSize) -> Void
-    func makeCoordinator(converter: CoordinateSpaceConverter) -> Coordinator { Coordinator() }
+    func makeCoordinator(converter: CoordinateSpaceConverter) -> Coordinator { Coordinator(target: target) }
     func makeUIGestureRecognizer(context: Context) -> UIPanGestureRecognizer {
         let pan = UIPanGestureRecognizer()
         pan.maximumNumberOfTouches = 1
@@ -144,7 +165,6 @@ private struct HorizontalPanGesture: UIGestureRecognizerRepresentable {
     }
     func updateUIGestureRecognizer(_ recognizer: UIPanGestureRecognizer, context: Context) {
         if recognizer.isEnabled != enabled { recognizer.isEnabled = enabled }
-        context.coordinator.leadingEdgeWidth = leadingEdgeWidth
     }
     func handleUIGestureRecognizerAction(_ recognizer: UIPanGestureRecognizer, context: Context) {
         let delta = recognizer.translation(in: nil), velocity = recognizer.velocity(in: nil)
@@ -158,19 +178,23 @@ private struct HorizontalPanGesture: UIGestureRecognizerRepresentable {
         }
     }
     final class Coordinator: NSObject, UIGestureRecognizerDelegate {
-        var leadingEdgeWidth: CGFloat?
+        let target: HorizontalDragTarget
+        private var startX: CGFloat = 0
+
+        init(target: HorizontalDragTarget) { self.target = target }
+
+        func gestureRecognizer(_ gestureRecognizer: UIGestureRecognizer, shouldReceive touch: UITouch) -> Bool {
+            startX = touch.location(in: nil).x
+            return target.acceptsTouch(at: startX)
+        }
+
         func gestureRecognizerShouldBegin(_ gestureRecognizer: UIGestureRecognizer) -> Bool {
             guard let pan = gestureRecognizer as? UIPanGestureRecognizer else { return false }
-            let velocity = pan.velocity(in: nil)
-            guard abs(velocity.x) > abs(velocity.y) * 1.15 else { return false }
-            if let edge = leadingEdgeWidth {
-                let startX = pan.location(in: nil).x - pan.translation(in: nil).x
-                guard startX >= 0, startX <= edge else { return false }
-            }
-            return true
+            return target.acceptsPan(startX: startX, motion: pan.velocity(in: nil))
         }
         func gestureRecognizer(_ gestureRecognizer: UIGestureRecognizer, shouldRecognizeSimultaneouslyWith otherGestureRecognizer: UIGestureRecognizer) -> Bool {
-            otherGestureRecognizer.view is UIScrollView
+            // The opening pan can begin over a card, where UIKit also tracks the row and its context menu.
+            target == .openDrawer || otherGestureRecognizer.view is UIScrollView
         }
     }
 }

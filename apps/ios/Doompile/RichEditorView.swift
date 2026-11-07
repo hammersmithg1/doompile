@@ -4,9 +4,11 @@ import WebKit
 /// The editor code is bundled locally. Only authenticated media fetching uses the network.
 @MainActor final class RichEditorBridge: ObservableObject {
     weak var webView: WKWebView?
-    @Published var ready = false
+    @Published private var readyViewID: ObjectIdentifier?
+    var ready: Bool { webView.map(ObjectIdentifier.init) == readyViewID && readyViewID != nil }
     @Published var activeFormats: Set<String> = []
     private var pending: [Attachment] = []
+    private var pendingRecordingCompletions: [(String, Attachment)] = []
 
     func insertAttachment(_ attachment: Attachment) {
         guard ready else { pending.append(attachment); return }
@@ -34,20 +36,33 @@ import WebKit
     func insertRecording(_ id: String) {
         if let data = try? JSONEncoder().encode(id), let json = String(data: data, encoding: .utf8) { webView?.evaluateJavaScript("window.doompileEditor.insertRecording(\(json))") }
     }
-    func recordingState(id: String, seconds: Int) {
-        let payload: [String: Any] = ["id": id, "seconds": seconds, "status": "recording"]
+    func recordingState(id: String, seconds: Int, retry: Bool) {
+        var payload: [String: Any] = ["id": id, "seconds": seconds, "status": retry ? "ready" : "recording"]
+        if retry { payload["error"] = "Не удалось сохранить запись." }
         if let data = try? JSONSerialization.data(withJSONObject: payload), let json = String(data: data, encoding: .utf8) { webView?.evaluateJavaScript("window.doompileEditor.setRecordingState(\(json))") }
     }
     func completeRecording(_ id: String, attachment: Attachment) {
+        guard webView != nil else { return }
+        guard ready else { pendingRecordingCompletions.append((id, attachment)); return }
         let payload: [String: Any] = ["id": attachment.id, "url": attachment.url, "name": attachment.name, "mimeType": attachment.mimeType, "size": attachment.size]
         if let data = try? JSONSerialization.data(withJSONObject: payload), let json = String(data: data, encoding: .utf8), let idData = try? JSONEncoder().encode(id), let idJSON = String(data: idData, encoding: .utf8) { webView?.evaluateJavaScript("window.doompileEditor.completeRecording(\(idJSON), \(json))") }
     }
-    func markReady() {
-        ready = true
+    func markReady(_ webView: WKWebView) {
+        guard self.webView === webView else { return }
+        readyViewID = ObjectIdentifier(webView)
         let attachments = pending
         pending = []
         for attachment in attachments { insertAttachment(attachment) }
+        let completions = pendingRecordingCompletions
+        pendingRecordingCompletions = []
+        for (id, attachment) in completions { completeRecording(id, attachment: attachment) }
     }
+    func detach(_ webView: WKWebView) {
+        guard self.webView === webView else { return }
+        self.webView = nil
+        pendingRecordingCompletions = []
+    }
+    func clearReadiness() { if webView == nil { readyViewID = nil } }
     func checklist() { webView?.evaluateJavaScript("window.doompileEditor.toggleTaskList?.(); window.doompileEditor.focus?.()") }
     func setLink(_ value: String) {
         if let data = try? JSONEncoder().encode(value), let json = String(data: data, encoding: .utf8) { webView?.evaluateJavaScript("window.doompileEditor.setLink(\(json))") }
@@ -88,6 +103,7 @@ struct RichEditorView: UIViewRepresentable {
     var onRequestLink: (String) -> Void
     var onAction: (String) -> Void
     var openPreferencesOnLoad = false
+    var captureCompact = false
 
     func makeCoordinator() -> Coordinator { Coordinator(parent: self) }
     func makeUIView(context: Context) -> WKWebView {
@@ -110,7 +126,7 @@ struct RichEditorView: UIViewRepresentable {
         webView.scrollView.alwaysBounceVertical = true
         webView.scrollView.showsHorizontalScrollIndicator = false
         webView.scrollView.contentInsetAdjustmentBehavior = .never
-        webView.accessibilityLabel = "Редактор заметки"
+        webView.accessibilityLabel = captureCompact ? UICopy.capturePlaceholder : "Редактор заметки"
         bridge.webView = webView
         if let folder = Bundle.main.resourceURL?.appendingPathComponent("EditorResources"),
            FileManager.default.fileExists(atPath: folder.appendingPathComponent("editor.html").path) {
@@ -127,10 +143,10 @@ struct RichEditorView: UIViewRepresentable {
     static func dismantleUIView(_ uiView: WKWebView, coordinator: Coordinator) {
         uiView.configuration.userContentController.removeScriptMessageHandler(forName: "doompile")
         let bridge = coordinator.parent.bridge
-        bridge.webView = nil
+        bridge.detach(uiView)
         // SwiftUI is dismantling its graph here. Publishing synchronously can
         // re-enter that mutation and trip Swift's exclusivity check on dismissal.
-        Task { @MainActor in bridge.ready = false }
+        Task { @MainActor in bridge.clearReadiness() }
     }
     final class Coordinator: NSObject, WKScriptMessageHandler, WKNavigationDelegate {
         var parent: RichEditorView
@@ -173,7 +189,9 @@ struct RichEditorView: UIViewRepresentable {
                     Telemetry.shared.record(event, payload["properties"] as? [String: Any] ?? [:])
                 }
             case "ready":
-                guard let data = try? JSONEncoder().encode(parent.document.includingAttachments(parent.attachments)), let json = String(data: data, encoding: .utf8) else { return }
+                guard let webView = parent.bridge.webView, message.webView === webView,
+                      let data = try? JSONEncoder().encode(parent.document.includingAttachments(parent.attachments)),
+                      let json = String(data: data, encoding: .utf8) else { return }
                 let references = parent.notes.filter { $0.deletedAt == nil }.map { ["id": $0.id, "title": $0.displayTitle] }
                 let attachmentsJSON = (try? JSONEncoder().encode(parent.attachments)).flatMap { String(data: $0, encoding: .utf8) } ?? "[]"
                 let referencesJSON = (try? JSONSerialization.data(withJSONObject: references)).flatMap { String(data: $0, encoding: .utf8) } ?? "[]"
@@ -183,11 +201,13 @@ struct RichEditorView: UIViewRepresentable {
                 let preferences = parent.openPreferencesOnLoad
                     ? "; window.doompileEditor.setEditable(false); window.doompileEditor.openPreferences()"
                     : ""
-                parent.bridge.webView?.evaluateJavaScript("window.doompileEditor.setDocument(\(json)); window.doompileEditor.setAttachments?.(\(attachmentsJSON)); window.doompileEditor.setNoteURL?.(\(noteURLJSON)); window.doompileEditor.setNotes?.(\(referencesJSON)); window.doompileEditor.setTheme?.('\(theme)'); window.doompileEditor.setTouchMode?.(true)\(preferences)") { [weak self] _, error in
+                let presentation = parent.captureCompact ? "setCaptureMode?.(true)" : "setTouchMode?.(true)"
+                webView.evaluateJavaScript("window.doompileEditor.setDocument(\(json)); window.doompileEditor.setAttachments?.(\(attachmentsJSON)); window.doompileEditor.setNoteURL?.(\(noteURLJSON)); window.doompileEditor.setNotes?.(\(referencesJSON)); window.doompileEditor.setTheme?.('\(theme)'); window.doompileEditor.\(presentation)\(preferences)") { [weak self, weak webView] _, error in
                     guard error == nil else { if let error { Telemetry.shared.failure(.editorFailed, error) }; return }
-                    self?.appliedTheme = theme
-                    self?.parent.bridge.markReady()
-                    self?.focusAfterPresentation()
+                    guard let self, let webView else { return }
+                    appliedTheme = theme
+                    parent.bridge.markReady(webView)
+                    focusAfterPresentation()
                 }
             case "change":
                 guard let body = payload["body"], JSONSerialization.isValidJSONObject(body),
