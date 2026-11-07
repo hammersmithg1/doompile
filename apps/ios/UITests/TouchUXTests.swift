@@ -129,7 +129,7 @@ final class TouchUXTests: XCTestCase {
             let allow = springboard.alerts.buttons.matching(NSPredicate(format: "label IN %@", ["Allow", "Разрешить", "OK", "ОК"])).firstMatch
             if allow.exists { allow.tap() } else { springboard.alerts.buttons["OK"].tap() }
         }
-        XCTAssertTrue(app.buttons["quick-stop-recording"].waitForExistence(timeout: 5))
+        XCTAssertTrue(app.buttons["quick-stop-recording"].waitForExistence(timeout: 5), app.debugDescription)
     }
     func testQuickMicrophoneStartsInlineAndSendsAudio() {
         startQuickRecording()
@@ -154,7 +154,7 @@ final class TouchUXTests: XCTestCase {
         XCTAssertTrue(stop.waitForExistence(timeout: 5), app.debugDescription)
         stop.tap()
         XCTAssertTrue(stop.waitForNonExistence(timeout: 5))
-        XCTAssertTrue(app.staticTexts["Голосовая заметка.m4a"].firstMatch.exists)
+        XCTAssertTrue(app.descendants(matching: .any)["quick-attachment"].firstMatch.waitForExistence(timeout: 5), app.debugDescription)
         XCTAssertFalse(noteRow("Voice draft").exists)
         app.buttons["Сохранить заметку"].tap()
         let row = noteRow("Voice draft")

@@ -475,7 +475,9 @@ struct Home: View {
             if recorder.recording || recorder.starting {
                 HStack(spacing: 10) {
                     Circle().fill(Palette.orange).frame(width: 7, height: 7)
-                    Text(recorder.starting ? "Включаем микрофон…" : "Запись  " + Note.timeLabel(recorder.seconds)).font(.system(size: 13, weight: .medium, design: .monospaced))
+                    Text(recorder.starting ? "Включаем микрофон…" : "Запись  " + Note.timeLabel(recorder.seconds))
+                        .font(.system(size: 13, weight: .medium, design: .monospaced))
+                        .accessibilityIdentifier("quick-recording")
                     Spacer()
                     if recorder.recording {
                         Button { finishQuickRecording() } label: { DoompileSymbol(systemName: "stop.fill").frame(width: 44, height: 44) }
@@ -484,7 +486,7 @@ struct Home: View {
                         Button { recorder.cancel() } label: { DoompileSymbol(systemName: "xmark").frame(width: 44, height: 44) }
                             .accessibilityLabel("Отменить запись")
                     }
-                }.foregroundStyle(Palette.orange).padding(.horizontal, 14).accessibilityIdentifier("quick-recording")
+                }.foregroundStyle(Palette.orange).padding(.horizontal, 14)
             }
             if recorder.hasPendingRecording {
                 Button("Повторить сохранение записи") { finishQuickRecording() }.font(.system(size: 12))
