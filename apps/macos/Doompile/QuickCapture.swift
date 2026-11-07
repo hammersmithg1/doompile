@@ -93,7 +93,7 @@ import UniformTypeIdentifiers
         panel.orderFrontRegardless(); panel.makeKey()
         DispatchQueue.main.async { [weak self] in self?.focused = true; if self?.richMounted == true { self?.bridge.focus() } }
     }
-    private var compactHeight: CGFloat {
+    var compactHeight: CGFloat {
         max(54, (richMounted ? 43 : inputHeight) + 12) + (error == nil ? 0 : 44) + (startingVoice || voice.recording ? 30 : 0) + (showsCompactAttachments ? 52 : 0)
     }
     var compactAttachments: [Attachment] { richMounted ? note.attachments.filter { $0.mimeType.hasPrefix("audio/") } : note.attachments }
@@ -284,70 +284,113 @@ struct QuickCaptureRoot: View {
     @State private var editorHeight: CGFloat = 300
     private var sendDisabled: Bool { capture.busy || capture.startingVoice || (!voice.recording && !EditorLifecycle.shouldSave(capture.note, existing: false)) }
     var body: some View {
+        panel
+            .fileImporter(isPresented: $capture.showFiles, allowedContentTypes: [.item], allowsMultipleSelection: true, onCompletion: importFiles)
+            .sheet(isPresented: $capture.showDrawing) { MacDrawing(onSave: saveDrawing) }
+            .alert("Адрес ссылки", isPresented: $capture.showLink) {
+                TextField("https://…", text: $capture.link)
+                Button("Добавить") { bridge.setLink(capture.link) }
+                Button("Отмена", role: .cancel) {}
+            }
+    }
+    private var panel: some View {
+        panelContent
+            .background(capture.expanded ? MacPalette.background : MacPalette.surface)
+            .clipShape(RoundedRectangle(cornerRadius: 14))
+            .overlay(RoundedRectangle(cornerRadius: 14).stroke(MacPalette.line))
+            .foregroundStyle(MacPalette.text)
+            .preferredColorScheme(appearance.colorScheme)
+            .onChange(of: appearance) { capture.applyAppearance() }
+            .onChange(of: capture.compactHeight) { capture.resizeForContent() }
+            .onChange(of: bridge.ready, editorReadinessChanged)
+            .onChange(of: voice.seconds, updateRecordingTime)
+    }
+    private var panelContent: some View {
         VStack(spacing: 0) {
             if capture.expanded {
-                HStack(spacing: 5) {
-                    DoompileWordmark(height: 16)
-                    Spacer()
-                    Button { capture.note.pinned.toggle() } label: { DoompileSymbol(systemName: capture.note.pinned ? "pin.fill" : "pin").frame(width: 28, height: 28) }.help(capture.note.pinned ? "Открепить" : "Закрепить")
-                    Button { capture.note.urgent.toggle() } label: { DoompileSymbol(systemName: capture.note.urgent ? "flame.fill" : "flame").foregroundStyle(capture.note.urgent ? MacPalette.orange : MacPalette.muted).frame(width: 28, height: 28) }.help("Важное")
-                    Button { capture.setExpanded(false) } label: { DoompileSymbol(systemName: "arrow.down.right.and.arrow.up.left").frame(width: 28, height: 28) }.help("Свернуть панель").accessibilityLabel("Свернуть панель")
-                    Button { Task { await capture.dismiss() } } label: { DoompileSymbol(systemName: "xmark").frame(width: 28, height: 28) }.help("Скрыть панель · Esc").accessibilityLabel("Скрыть панель")
-                }.buttonStyle(.plain).foregroundStyle(MacPalette.muted).padding(.horizontal, 18).frame(height: 50)
+                header
                 MacNoteTags(selected: $capture.note.tags, available: library.tags)
             }
             if capture.startingVoice || (voice.recording && !capture.expanded) {
                 MacRecordingSnippet(starting: capture.startingVoice, seconds: voice.seconds) { capture.action("stopVoice") }
             }
-            if capture.showsCompactAttachments {
-                MacComposerAttachmentStrip(attachments: capture.compactAttachments, onRemove: capture.richMounted ? nil : capture.removeCompactAttachment)
-                    .padding(.horizontal, 6).frame(height: 52)
-            }
-            HStack(alignment: .bottom, spacing: 5) {
-                if capture.richMounted {
-                    MacRichEditorView(document: $capture.note.body, plainText: $capture.note.plainText, height: $editorHeight, attachments: $capture.note.attachments, noteID: capture.note.id, notes: library.notes, focusOnLoad: true, captureCompact: !capture.expanded, bridge: bridge, onReference: { id in
-                        Task { await capture.dismiss(); if let url = NoteLinks.appURL(id: id) { NSWorkspace.shared.open(url) } }
-                    }, onRequestLink: { capture.link = $0; capture.showLink = true }, onAction: capture.action)
-                    .id(capture.note.id)
-                    .frame(maxWidth: .infinity, minHeight: capture.expanded ? 240 : 43, maxHeight: capture.expanded ? .infinity : 43)
-                } else {
-                    MacQuickInput(text: Binding(get: { capture.note.plainText }, set: capture.updateText), height: $capture.inputHeight, focused: $capture.focused, onSubmit: { Task { await capture.submit() } }).frame(height: capture.inputHeight).padding(.leading, 8)
-                }
-                if !capture.expanded {
-                    MacComposerButton(icon: "mic", label: "Записать голосовую заметку", disabled: capture.startingVoice || voice.recording || capture.busy) { capture.action("voice") }
-                    MacComposerButton(icon: "paperclip", label: "Прикрепить файл") { capture.action("file") }
-                    MacComposerButton(icon: "arrow.up.left.and.arrow.down.right", label: "Развернуть редактор") { capture.setExpanded(true) }
-                    MacComposerButton(icon: "arrow.up", label: "Сохранить заметку · Enter", send: true, disabled: sendDisabled) { Task { await capture.submit() } }
-                }
-            }.padding(capture.expanded ? 0 : 6).frame(maxHeight: capture.expanded ? .infinity : nil)
+            if capture.showsCompactAttachments { attachments }
+            composerInput
             if let error = capture.error { Text(error).font(.system(size: 11)).foregroundStyle(MacPalette.orange).lineLimit(3).padding(.horizontal, 14).padding(.vertical, 7).frame(maxWidth: .infinity, alignment: .leading) }
-            if capture.expanded {
-                HStack {
-                    Text("Esc — скрыть · черновик останется на Mac").font(.system(size: 10)).foregroundStyle(MacPalette.muted)
-                    Spacer()
-                    Text("⌘ ↵").font(.system(size: 10)).foregroundStyle(MacPalette.muted)
-                    MacComposerButton(icon: "arrow.up", label: "Сохранить заметку", send: true, disabled: sendDisabled) { Task { await capture.submit() } }
-                }.padding(12)
+            if capture.expanded { footer }
+        }
+    }
+    private var header: some View {
+        HStack(spacing: 5) {
+            DoompileWordmark(height: 16)
+            Spacer()
+            Button { capture.note.pinned.toggle() } label: { DoompileSymbol(systemName: capture.note.pinned ? "pin.fill" : "pin").frame(width: 28, height: 28) }.help(capture.note.pinned ? "Открепить" : "Закрепить")
+            Button { capture.note.urgent.toggle() } label: { DoompileSymbol(systemName: capture.note.urgent ? "flame.fill" : "flame").foregroundStyle(capture.note.urgent ? MacPalette.orange : MacPalette.muted).frame(width: 28, height: 28) }.help("Важное")
+            Button { capture.setExpanded(false) } label: { DoompileSymbol(systemName: "arrow.down.right.and.arrow.up.left").frame(width: 28, height: 28) }.help("Свернуть панель").accessibilityLabel("Свернуть панель")
+            Button { Task { await capture.dismiss() } } label: { DoompileSymbol(systemName: "xmark").frame(width: 28, height: 28) }.help("Скрыть панель · Esc").accessibilityLabel("Скрыть панель")
+        }.buttonStyle(.plain).foregroundStyle(MacPalette.muted).padding(.horizontal, 18).frame(height: 50)
+    }
+    private var attachments: some View {
+        let onRemove: ((String) -> Void)? = capture.richMounted ? nil : { id in capture.removeCompactAttachment(id) }
+        return MacComposerAttachmentStrip(attachments: capture.compactAttachments, onRemove: onRemove)
+            .padding(.horizontal, 6).frame(height: 52)
+    }
+    private var composerInput: some View {
+        HStack(alignment: .bottom, spacing: 5) {
+            if capture.richMounted { richInput }
+            else { nativeInput }
+            if !capture.expanded { compactButtons }
+        }.padding(capture.expanded ? 0 : 6).frame(maxHeight: capture.expanded ? .infinity : nil)
+    }
+    private var richInput: some View {
+        MacRichEditorView(document: $capture.note.body, plainText: $capture.note.plainText, height: $editorHeight, attachments: $capture.note.attachments, noteID: capture.note.id, notes: library.notes, focusOnLoad: true, captureCompact: !capture.expanded, bridge: bridge, onReference: { id in
+            Task { await capture.dismiss(); if let url = NoteLinks.appURL(id: id) { NSWorkspace.shared.open(url) } }
+        }, onRequestLink: { capture.link = $0; capture.showLink = true }, onAction: capture.action)
+        .id(capture.note.id)
+        .frame(maxWidth: .infinity, minHeight: capture.expanded ? 240 : 43, maxHeight: capture.expanded ? .infinity : 43)
+    }
+    private var nativeInput: some View {
+        MacQuickInput(text: Binding(get: { capture.note.plainText }, set: capture.updateText), height: $capture.inputHeight, focused: $capture.focused, onSubmit: submit)
+            .frame(height: capture.inputHeight).padding(.leading, 8)
+    }
+    @ViewBuilder private var compactButtons: some View {
+        MacComposerButton(icon: "mic", label: "Записать голосовую заметку", disabled: capture.startingVoice || voice.recording || capture.busy) { capture.action("voice") }
+        MacComposerButton(icon: "paperclip", label: "Прикрепить файл") { capture.action("file") }
+        MacComposerButton(icon: "arrow.up.left.and.arrow.down.right", label: "Развернуть редактор") { capture.setExpanded(true) }
+        MacComposerButton(icon: "arrow.up", label: "Сохранить заметку · Enter", send: true, disabled: sendDisabled, action: submit)
+    }
+    private var footer: some View {
+        HStack {
+            Text("Esc — скрыть · черновик останется на Mac").font(.system(size: 10)).foregroundStyle(MacPalette.muted)
+            Spacer()
+            Text("⌘ ↵").font(.system(size: 10)).foregroundStyle(MacPalette.muted)
+            MacComposerButton(icon: "arrow.up", label: "Сохранить заметку", send: true, disabled: sendDisabled, action: submit)
+        }.padding(12)
+    }
+    private func submit() { Task { await capture.submit() } }
+    private func editorReadinessChanged(from _: Bool, to ready: Bool) {
+        if ready { capture.editorReady() }
+    }
+    private func updateRecordingTime(from _: Int, to seconds: Int) {
+        if voice.recording { bridge.recordingState(id: voice.id, seconds: seconds) }
+    }
+    private func importFiles(_ result: Result<[URL], Error>) {
+        do {
+            for url in try result.get() {
+                let access = url.startAccessingSecurityScopedResource()
+                defer { if access { url.stopAccessingSecurityScopedResource() } }
+                guard (try url.resourceValues(forKeys: [.fileSizeKey]).fileSize ?? 0) <= 30 * 1024 * 1024 else { throw DoompileError.message("Максимальный размер вложения — 30 МБ.") }
+                try capture.addFile(Data(contentsOf: url), name: url.lastPathComponent, mime: UTType(filenameExtension: url.pathExtension)?.preferredMIMEType ?? "application/octet-stream")
             }
+        } catch { capture.error = error.localizedDescription }
+    }
+    private func saveDrawing(_ data: Data) {
+        do {
+            try capture.addFile(data, name: "Рисунок.png", mime: "image/png")
+            capture.showDrawing = false
+        } catch {
+            capture.error = error.localizedDescription
         }
-        .background(capture.expanded ? MacPalette.background : MacPalette.surface)
-        .clipShape(RoundedRectangle(cornerRadius: 14))
-        .overlay(RoundedRectangle(cornerRadius: 14).stroke(MacPalette.line))
-        .foregroundStyle(MacPalette.text).preferredColorScheme(appearance.colorScheme)
-        .onChange(of: appearance) { _, _ in capture.applyAppearance() }
-        .onChange(of: capture.inputHeight) { _, _ in capture.resizeForContent() }
-        .onChange(of: capture.error) { _, _ in capture.resizeForContent() }
-        .onChange(of: capture.startingVoice) { _, _ in capture.resizeForContent() }
-        .onChange(of: capture.showsCompactAttachments) { _, _ in capture.resizeForContent() }
-        .onChange(of: voice.recording) { _, _ in capture.resizeForContent() }
-        .onChange(of: bridge.ready) { _, ready in if ready { capture.editorReady() } }
-        .onChange(of: voice.seconds) { _, seconds in if voice.recording { bridge.recordingState(id: voice.id, seconds: seconds) } }
-        .fileImporter(isPresented: $capture.showFiles, allowedContentTypes: [.item], allowsMultipleSelection: true) { result in
-            do { for url in try result.get() { let access = url.startAccessingSecurityScopedResource(); defer { if access { url.stopAccessingSecurityScopedResource() } }; guard (try url.resourceValues(forKeys: [.fileSizeKey]).fileSize ?? 0) <= 30 * 1024 * 1024 else { throw DoompileError.message("Максимальный размер вложения — 30 МБ.") }; try capture.addFile(Data(contentsOf: url), name: url.lastPathComponent, mime: UTType(filenameExtension: url.pathExtension)?.preferredMIMEType ?? "application/octet-stream") } }
-            catch { capture.error = error.localizedDescription }
-        }
-        .sheet(isPresented: $capture.showDrawing) { MacDrawing { data in do { try capture.addFile(data, name: "Рисунок.png", mime: "image/png"); capture.showDrawing = false } catch { capture.error = error.localizedDescription } } }
-        .alert("Адрес ссылки", isPresented: $capture.showLink) { TextField("https://…", text: $capture.link); Button("Добавить") { bridge.setLink(capture.link) }; Button("Отмена", role: .cancel) {} }
     }
 }
 
