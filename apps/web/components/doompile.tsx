@@ -98,6 +98,7 @@ import "../../../packages/editor/src/blocks.css";
 import NoteEditorSurface from "./note-editor-surface";
 import MobileNoteRow from "./mobile-note-row";
 import { useMobileViewport } from "./mobile-viewport";
+import { useMobileSidebar } from "./mobile-sidebar";
 type Filter = "all" | "urgent" | "pinned" | "media" | "tag";
 const typeLabel = {
   note: "Заметка",
@@ -245,7 +246,13 @@ export default function Doompile({
   const fileInput = useRef<HTMLInputElement>(null);
   const isMobile = useMobileViewport();
   const [openSwipe, setOpenSwipe] = useState<string | null>(null);
-  const touch = useRef<{ x: number; y: number } | null>(null);
+  const mobileSidebar = useMobileSidebar({
+    mobile: isMobile,
+    open: sidebar,
+    canOpen: !selected && !composing,
+    onChange: setSidebar,
+    onDragStart: () => setOpenSwipe(null),
+  });
   useEffect(() => {
     void store.initStore();
     try {
@@ -1050,7 +1057,7 @@ export default function Doompile({
         await finishRecording(note.id);
       }
       notify(uiCopy.saved);
-      input.current?.focus();
+      input.current?.focus({ preventScroll: true });
     } catch {
       notify("Не удалось сохранить. Попробуй ещё раз.");
     } finally {
@@ -1363,33 +1370,20 @@ export default function Doompile({
   );
   return (
     <div
+      ref={mobileSidebar.shell}
       className={`app-shell ${activeNote ? "has-detail" : ""} ${detailExpanded && activeNote ? "detail-expanded" : ""} ${composing ? "composing" : ""} ${resizing ? "is-resizing" : ""}`}
       style={{ "--detail-width": `${detailWidth}px` } as CSSProperties}
-      onTouchStart={(e) => {
-        touch.current = { x: e.touches[0].clientX, y: e.touches[0].clientY };
-      }}
-      onTouchEnd={(e) => {
-        if (!touch.current) return;
-        const dx = e.changedTouches[0].clientX - touch.current.x;
-        const dy = e.changedTouches[0].clientY - touch.current.y;
-        if (Math.abs(dy) < 70 && Math.abs(dx) > 90) {
-          if (dx > 0 && touch.current.x < 28 && !activeNote && !composing) {
-            setSidebar(true);
-            setOpenSwipe(null);
-          }
-          if (dx < 0 && sidebar) setSidebar(false);
-        }
-        touch.current = null;
-      }}
+      data-sidebar-open={sidebar}
     >
-      {sidebar && (
-        <button
-          className="sidebar-scrim"
-          aria-label="Закрыть навигацию"
-          onClick={() => setSidebar(false)}
-        />
-      )}
+      <button
+        className="sidebar-scrim"
+        aria-label="Закрыть навигацию"
+        aria-hidden={!sidebar}
+        tabIndex={sidebar ? 0 : -1}
+        onClick={() => setSidebar(false)}
+      />
       <aside
+        ref={mobileSidebar.panel}
         className={`sidebar ${sidebar ? "open" : ""}`}
         aria-label="Навигация"
         inert={composing || editorBusy || (isMobile && !sidebar)}
@@ -1690,7 +1684,7 @@ export default function Doompile({
               <div className="welcome-actions">
                 <button
                   className="lime-button"
-                  onClick={() => input.current?.focus()}
+                  onClick={() => input.current?.focus({ preventScroll: true })}
                 >
                   <Plus size={17} />
                   Сохранить первую находку

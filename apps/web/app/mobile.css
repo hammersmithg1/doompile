@@ -24,21 +24,37 @@
   .desktop-tag-label {
     display: none;
   }
-  html,
-  body {
+  html[data-mobile-app="true"],
+  html[data-mobile-app="true"] body {
     height: 100%;
     overflow: hidden;
+    overscroll-behavior: none;
+  }
+  html[data-mobile-app="true"] body {
+    /* Keep Safari's focus scroll out of the document. Only the feed/editor scroll. */
+    position: fixed;
+    inset: 0;
+    width: 100%;
   }
   .app-shell {
-    position: fixed;
+    /* Use one layout coordinate system while Safari pans its visual viewport. */
+    position: absolute;
     inset-inline: 0;
     top: var(--mobile-top, 0px);
     height: var(--mobile-height, 100dvh);
     min-height: 0;
+    --mobile-bottom-inset: env(safe-area-inset-bottom, 0px);
+    /* Browser chrome already occupies part of the bottom safe area. */
+    --mobile-bottom-inset: max(
+      0px,
+      calc(env(safe-area-inset-bottom, 0px) - (100lvh - 100dvh))
+    );
   }
   .main-scroll,
   .has-detail .main-scroll {
-    padding: max(20px, env(safe-area-inset-top)) 16px 16px;
+    padding: max(20px, env(safe-area-inset-top))
+      max(16px, env(safe-area-inset-right)) 16px
+      max(16px, env(safe-area-inset-left));
     overscroll-behavior-y: contain;
   }
   .main-column {
@@ -58,11 +74,37 @@
     clip-path: none;
   }
   .sidebar {
-    top: var(--mobile-top, 0px);
+    position: absolute;
+    top: 0;
     bottom: auto;
-    height: var(--mobile-height, 100dvh);
+    height: 100%;
     padding-top: max(24px, env(safe-area-inset-top));
     width: min(310px, 86vw) !important;
+    transform: translate3d(var(--sidebar-offset, -100%), 0, 0);
+    transition: none;
+    box-shadow: none;
+  }
+  .app-shell[data-sidebar-open="true"] .sidebar,
+  .app-shell[data-sidebar-moving="true"] .sidebar {
+    box-shadow: 15px 0 50px #00000020;
+  }
+  .sidebar.open {
+    transform: translate3d(var(--sidebar-offset, 0px), 0, 0);
+  }
+  .sidebar-scrim {
+    position: absolute;
+    opacity: var(--sidebar-progress, 0);
+    visibility: hidden;
+    pointer-events: none;
+    animation: none;
+  }
+  .app-shell[data-sidebar-open="true"] .sidebar-scrim,
+  .app-shell[data-sidebar-moving="true"] .sidebar-scrim {
+    visibility: visible;
+    pointer-events: auto;
+  }
+  .app-shell[data-sidebar-moving="true"] .sidebar {
+    will-change: transform;
   }
   .sidebar .nav-item {
     min-height: 46px;
@@ -118,7 +160,11 @@
   .composer-dock,
   .has-detail .composer-dock {
     flex-shrink: 0;
-    padding: 8px 12px max(10px, env(safe-area-inset-bottom));
+    padding: 8px max(12px, env(safe-area-inset-right))
+      max(6px, var(--mobile-bottom-inset)) max(12px, env(safe-area-inset-left));
+  }
+  html[data-keyboard="true"] .app-shell {
+    --mobile-bottom-inset: 0px;
   }
   .quick-composer {
     border-color: var(--line);
@@ -176,6 +222,8 @@
   }
   .note-row {
     padding: 15px 2px;
+    /* Desktop's negative margins get cropped by the swipe-action wrapper. */
+    margin-inline: 0;
   }
   .note-preview-text {
     font-size: 15px;
@@ -428,7 +476,7 @@
     align-items: center;
     border-top: 1px solid var(--line);
     background: var(--surface);
-    padding: 4px 6px max(4px, env(safe-area-inset-bottom));
+    padding: 4px 6px max(4px, var(--mobile-bottom-inset));
   }
   html[data-keyboard="true"] .mobile-editor-tools {
     padding-bottom: 4px;

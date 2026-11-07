@@ -1,5 +1,9 @@
 import { createNote } from "../../../packages/core/src/index";
-import { test, expect, type Page } from "../../../packages/editor/test/web-test";
+import {
+  test,
+  expect,
+  type Page,
+} from "../../../packages/editor/test/web-test";
 const id = "d3d0daa0-cc18-4bbf-b8c2-2837b3324ef3";
 async function setup(page: Page, populated = true) {
   const notes: any[] = populated
@@ -59,6 +63,229 @@ async function swipe(page: Page, selector: string, dx: number, dy = 0) {
     changedTouches: [{ clientX: 250 + dx, clientY: 250 + dy }],
   });
 }
+async function sidebarTouch(
+  page: Page,
+  type: "start" | "move" | "end" | "cancel",
+  x: number,
+  y = 300,
+) {
+  await page.locator(".app-shell").dispatchEvent(`touch${type}`, {
+    touches:
+      type === "end" || type === "cancel"
+        ? []
+        : [{ identifier: 1, clientX: x, clientY: y }],
+    changedTouches: [{ identifier: 1, clientX: x, clientY: y }],
+  });
+}
+
+test("mobile feed keeps text and timestamps inside swipe wrappers at narrow widths", async ({
+  page,
+}, info) => {
+  test.skip(info.project.name !== "iphone-webkit");
+  await setup(page);
+  await expect(page.locator(".mobile-note-row")).toHaveCount(1);
+  for (const width of [320, 390, 430, 740]) {
+    await page.setViewportSize({ width, height: 740 });
+    const bounds = await page.locator(".mobile-note-row").evaluate((row) => {
+      const clip = row.getBoundingClientRect();
+      return [
+        ...row.querySelectorAll(".note-row, .note-preview-text, .row-time"),
+      ].map((node) => {
+        const rect = node.getBoundingClientRect();
+        return { left: rect.left - clip.left, right: clip.right - rect.right };
+      });
+    });
+    expect(bounds).toHaveLength(3);
+    for (const bound of bounds) {
+      expect(bound.left).toBeGreaterThanOrEqual(0);
+      expect(bound.right).toBeGreaterThanOrEqual(0);
+    }
+  }
+  await page.setViewportSize({ width: 390, height: 844 });
+  await page.screenshot({
+    path: "test-results/mobile-web/iphone-feed-edges.png",
+  });
+});
+
+test("sidebar follows the finger, reverses, cancels and settles using release momentum", async ({
+  page,
+}, info) => {
+  test.skip(info.project.name !== "iphone-webkit");
+  await setup(page);
+  const panel = page.locator(".sidebar");
+  const right = () => panel.evaluate((e) => e.getBoundingClientRect().right);
+  await expect.poll(right).toBe(0);
+  await sidebarTouch(page, "start", 8);
+  await sidebarTouch(page, "move", 88);
+  expect(await right()).toBeCloseTo(80, 0);
+  const firstOpacity = await page
+    .locator(".sidebar-scrim")
+    .evaluate((e) => Number(getComputedStyle(e).opacity));
+  await sidebarTouch(page, "move", 138);
+  expect(await right()).toBeCloseTo(130, 0);
+  expect(
+    await page
+      .locator(".sidebar-scrim")
+      .evaluate((e) => Number(getComputedStyle(e).opacity)),
+  ).toBeGreaterThan(firstOpacity);
+  await sidebarTouch(page, "move", 58);
+  expect(await right()).toBeCloseTo(50, 0);
+  await sidebarTouch(page, "cancel", 58);
+  await expect.poll(right).toBe(0);
+  await expect(panel).not.toHaveClass(/open/);
+
+  // A vertical edge gesture stays a scroll, even with substantial horizontal drift.
+  await sidebarTouch(page, "start", 8);
+  await sidebarTouch(page, "move", 120, 470);
+  expect(await right()).toBe(0);
+  await sidebarTouch(page, "end", 120, 470);
+  await expect(panel).not.toHaveClass(/open/);
+
+  // A short fast flick opens even before half the panel has been exposed.
+  await page.locator(".app-shell").evaluate((root) => {
+    for (const [type, x] of [
+      ["start", 8],
+      ["move", 108],
+      ["end", 108],
+    ] as const) {
+      const touch = { identifier: 1, clientX: x, clientY: 300 };
+      // Linux WebKit does not expose a constructible Touch class.
+      const event = new Event(`touch${type}`, { bubbles: true, cancelable: true });
+      Object.assign(event, {
+        touches: type === "end" ? [] : [touch],
+        changedTouches: [touch],
+      });
+      root.dispatchEvent(event);
+    }
+  });
+  await expect(panel).toHaveClass(/open/);
+  await expect.poll(right).toBe(310);
+  await expect(page.locator(".main-column")).toHaveAttribute("inert", "");
+  await sidebarTouch(page, "start", 250);
+  await sidebarTouch(page, "move", 190);
+  expect(await right()).toBeCloseTo(250, 0);
+  await sidebarTouch(page, "cancel", 190);
+  await expect.poll(right).toBe(310);
+
+  await sidebarTouch(page, "start", 250);
+  await sidebarTouch(page, "move", 50);
+  await sidebarTouch(page, "end", 50);
+  await expect.poll(right).toBe(0);
+  await expect(page.locator(".main-column")).not.toHaveAttribute("inert", "");
+  await expect(page.locator(".sidebar-scrim")).toBeHidden();
+
+  // Respect reduced motion while keeping direct manipulation available.
+  await page.emulateMedia({ reducedMotion: "reduce" });
+  await sidebarTouch(page, "start", 8);
+  await sidebarTouch(page, "move", 248);
+  expect(await right()).toBeCloseTo(240, 0);
+  await sidebarTouch(page, "end", 248);
+  expect(await right()).toBe(310);
+  await page
+    .getByRole("button", { name: "Закрыть навигацию" })
+    .click({ position: { x: 360, y: 300 } });
+  expect(await right()).toBe(0);
+});
+
+test("Safari keyboard geometry updates in the same frame and restores after dismissal", async ({
+  page,
+}, info) => {
+  test.skip(info.project.name !== "iphone-webkit");
+  await page.addInitScript(() => {
+    const viewport = window.visualViewport!;
+    const geometry = { height: innerHeight, offsetTop: 0, scale: 1 };
+    for (const key of ["height", "offsetTop", "scale"] as const)
+      Object.defineProperty(viewport, key, { get: () => geometry[key] });
+    (window as any).setTestViewport = (next: Partial<typeof geometry>) => {
+      Object.assign(geometry, next);
+      viewport.dispatchEvent(new Event("resize"));
+      viewport.dispatchEvent(new Event("scroll"));
+    };
+  });
+  await setup(page);
+  const input = page.getByRole("textbox", { name: "Быстрая заметка" });
+  await input.fill("Черновик остаётся на месте");
+  expect(
+    await page.locator("body").evaluate((e) => getComputedStyle(e).position),
+  ).toBe("fixed");
+  const fullHeight = await page.evaluate(() => innerHeight);
+  for (const [height, top] of [
+    [fullHeight - 180, 90],
+    [fullHeight - 260, 65],
+    [fullHeight - 320, 0],
+    [fullHeight - 260, 65],
+    [fullHeight - 180, 90],
+  ]) {
+    // Measure immediately after the event, before the next animation frame.
+    const bounds = await page.evaluate(
+      ({ height, top }) => {
+        (window as any).setTestViewport({ height, offsetTop: top });
+        const shell = document
+          .querySelector(".app-shell")!
+          .getBoundingClientRect();
+        const composer = document
+          .querySelector(".quick-composer")!
+          .getBoundingClientRect();
+        return {
+          top: shell.top,
+          bottom: shell.bottom,
+          gap: shell.bottom - composer.bottom,
+          keyboard: document.documentElement.dataset.keyboard,
+        };
+      },
+      { height, top },
+    );
+    expect(bounds.keyboard).toBe("true");
+    expect(bounds.top).toBe(top);
+    expect(bounds.bottom).toBe(height + top);
+    expect(bounds.gap).toBe(6);
+  }
+  await input.blur();
+  await page.evaluate(
+    (height) => (window as any).setTestViewport({ height, offsetTop: 85 }),
+    fullHeight,
+  );
+  await expect(page.locator("html")).toHaveAttribute("data-keyboard", "false");
+  expect(
+    await page
+      .locator(".app-shell")
+      .evaluate((e) => e.getBoundingClientRect().top),
+  ).toBe(0);
+  await expect(input).toHaveValue("Черновик остаётся на месте");
+  // Pinching must not resize the app or chase the zoomed viewport's offset.
+  await page.evaluate(() =>
+    (window as any).setTestViewport({ height: 200, offsetTop: 120, scale: 2 }),
+  );
+  expect(
+    await page
+      .locator(".app-shell")
+      .evaluate((e) => e.getBoundingClientRect().height),
+  ).toBe(fullHeight);
+  await page.evaluate(
+    (height) =>
+      (window as any).setTestViewport({ height, offsetTop: 0, scale: 1 }),
+    fullHeight,
+  );
+  await page
+    .getByRole("button", { name: "Новая заметка", exact: true })
+    .click();
+  await expect(
+    page.getByRole("textbox", { name: "Текст заметки" }),
+  ).toBeFocused();
+  await page.evaluate(() =>
+    (window as any).setTestViewport({ height: 430, offsetTop: 65 }),
+  );
+  const tools = await page.locator(".mobile-editor-tools").boundingBox();
+  expect(tools!.y + tools!.height).toBe(495);
+  await expect(page.locator(".mobile-editor-tools")).toHaveCSS(
+    "padding-bottom",
+    "4px",
+  );
+  await page.screenshot({
+    path: "test-results/mobile-web/iphone-keyboard-geometry.png",
+  });
+});
+
 test("mobile capture, document tools, keyboard viewport and save on close", async ({
   page,
 }, info) => {
@@ -143,7 +370,7 @@ test("mobile gestures, actions, sidebar search and reading without keyboard", as
     touches: [{ clientX: 8, clientY: 300 }],
   });
   await shell.dispatchEvent("touchend", {
-    changedTouches: [{ clientX: 150, clientY: 300 }],
+    changedTouches: [{ clientX: 250, clientY: 300 }],
   });
   await expect(page.locator(".sidebar")).toHaveClass(/open/);
   await expect(page.locator(".sidebar")).toHaveCSS(
@@ -186,7 +413,7 @@ test("mobile tags persist without a blank note and remain editable in the header
       touches: [{ clientX: 8, clientY: 300 }],
     });
     await shell.dispatchEvent("touchend", {
-      changedTouches: [{ clientX: 150, clientY: 300 }],
+      changedTouches: [{ clientX: 250, clientY: 300 }],
     });
     await expect(page.locator(".sidebar")).toHaveClass(/open/);
   };
