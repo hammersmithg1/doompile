@@ -197,8 +197,11 @@ final class Storage: @unchecked Sendable {
         return Attachment(id:id,name:name,mimeType:mimeType,url:"local:\(id)",size:data.count)
     }
     func fileURL(_ attachment: Attachment) -> URL? {
-        guard let file = try? access({ try $0.file(attachment.id) }) else { return nil }
-        return directory.appendingPathComponent("files").appendingPathComponent(file.filename)
+        localFile(id: attachment.id)?.url
+    }
+    func localFile(id: String) -> (url: URL, mimeType: String)? {
+        guard let file = try? access({ try $0.file(id) }) else { return nil }
+        return (directory.appendingPathComponent("files").appendingPathComponent(file.filename), file.mimeType)
     }
     // A suspended main app or share extension may outlive a network request. A durable,
     // expiring lease coordinates them without triggering iOS's 0xdead10cc file-lock kill.

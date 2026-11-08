@@ -150,6 +150,15 @@ export function createBlockEditor(
   const recordingViews = new Set<() => void>();
   const NativeImage = Image.extend({
     draggable: true,
+    parseHTML() {
+      return [{
+        tag: "img[src], img[data-original-src]",
+        getAttrs: (element) => {
+          const src = element.getAttribute("data-original-src") || element.getAttribute("src");
+          return url(src) ? null : false;
+        },
+      }];
+    },
     addNodeView() {
       return (props) => inlineImageView(props, url);
     },

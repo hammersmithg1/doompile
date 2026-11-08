@@ -1,4 +1,32 @@
 import Foundation
+import ImageIO
+import UniformTypeIdentifiers
+import WebKit
+
+enum EditorImagePaste {
+    static let messageName = "storePastedImage"
+    typealias Store = (Data, String, String) throws -> Attachment
+
+    static func contentType(of data: Data) -> UTType? {
+        CGImageSourceCreateWithData(data as CFData, nil)
+            .flatMap { CGImageSourceGetType($0) }.flatMap { UTType($0 as String) }
+    }
+
+    @MainActor static func store(_ message: WKScriptMessage, in webView: WKWebView?, using store: Store?) throws -> [String: Any] {
+        let limit = 30 * 1024 * 1024
+        guard let webView, message.webView === webView, message.frameInfo.isMainFrame,
+              let store, let payload = message.body as? [String: String],
+              let name = payload["name"], let mime = payload["mimeType"], mime.hasPrefix("image/"), mime.utf16.count <= NoteLimits.mimeType,
+              let encoded = payload["data"], encoded.utf8.count <= limit / 3 * 4,
+              let data = Data(base64Encoded: encoded), !data.isEmpty, data.count <= limit else {
+            throw DoompileError.message("Не удалось прочитать изображение из буфера.")
+        }
+        let filename = String(decoding: (name as NSString).lastPathComponent.utf16.prefix(NoteLimits.attachmentName), as: UTF16.self)
+        let actualMime = contentType(of: data)?.preferredMIMEType ?? mime
+        let file = try store(data, filename.isEmpty ? "Изображение" : filename, actualMime)
+        return ["id": file.id, "url": file.url, "name": file.name, "mimeType": file.mimeType, "size": file.size]
+    }
+}
 
 /// Shared by the iPhone editor and Mac workspace; closing never means discarding a populated note.
 enum EditorLifecycle {

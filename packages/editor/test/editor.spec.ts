@@ -918,6 +918,106 @@ test("native touch commands preserve the caret, support lists and report selecte
   await expect(page.getByRole("textbox")).toBeFocused();
 });
 
+test("touch swipes change the touched paragraph or list item by one level", async ({ page }) => {
+  await page.setViewportSize({ width: 390, height: 720 });
+  await page.goto("/editor.html");
+  await page.evaluate((body) => {
+    const api = window.doompileEditor;
+    api.setTouchMode(true);
+    api.setDocument(body);
+  }, doc(paragraph("Caret"), paragraph("Target"), {
+    type: "taskList",
+    content: ["First", "Second"].map((text) => ({
+      type: "taskItem",
+      content: [paragraph(text)],
+    })),
+  }));
+  const caret = page.locator(".tiptap > p").first();
+  const target = page.getByText("Target", { exact: true });
+  const second = page.getByText("Second", { exact: true });
+  await caret.click();
+  await page.keyboard.press("End");
+  async function swipe(line: typeof target, dx: number, dy = 0, cancel = false) {
+    return line.evaluate((element, { dx, dy, cancel }) => {
+      const origin = { identifier: 0, clientX: 140, clientY: 180 };
+      const end = { ...origin, clientX: origin.clientX + dx, clientY: origin.clientY + dy };
+      function dispatch(type: string, touches: typeof origin[]) {
+        const event = new Event(type, { bubbles: true, cancelable: true });
+        Object.assign(event, { touches, changedTouches: touches.length ? touches : [end] });
+        return element.dispatchEvent(event);
+      }
+      dispatch("touchstart", [origin]);
+      const scrolled = dispatch("touchmove", [end]);
+      dispatch(cancel ? "touchcancel" : "touchend", []);
+      return scrolled;
+    }, { dx, dy, cancel });
+  }
+  expect(await swipe(target, 60, 110)).toBe(true);
+  await swipe(target, 85, 0, true);
+  await swipe(target, 25);
+  await expect(target).not.toHaveAttribute("data-indent");
+
+  expect(await swipe(target, 85)).toBe(false);
+  await expect(target).toHaveAttribute("data-indent", "1");
+  await swipe(target, 85);
+  await expect(target).toHaveAttribute("data-indent", "2");
+  await swipe(target, -85);
+  await expect(target).toHaveAttribute("data-indent", "1");
+  await page.keyboard.type("!");
+  await expect(caret).toHaveText("Caret!");
+  await expect(caret).not.toHaveAttribute("data-indent");
+
+  await swipe(second, 85);
+  const nested = page.locator("li ul li p");
+  await expect(nested).toHaveText("Second");
+  await swipe(second, -85);
+  await expect(nested).toHaveCount(0);
+  await swipe(second, -85);
+  await expect(page.locator(".tiptap > ul > li")).toHaveCount(2);
+});
+
+test("native image paste stores the image bytes before inserting it", async ({ page }) => {
+  const png = "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+aV4sAAAAASUVORK5CYII=";
+  await page.route("**/pasted.png", (route) => route.fulfill({
+    contentType: "image/png",
+    body: Buffer.from(png, "base64"),
+  }));
+  await page.addInitScript(() => {
+    Object.defineProperty(window, "webkit", { configurable: true, value: {
+      messageHandlers: {
+        doompile: { postMessage: () => {} },
+        storePastedImage: { postMessage: async (image: { name: string; mimeType: string; data: string }) => {
+          (window as any).pastedImage = image;
+          return { name: image.name, mimeType: image.mimeType, url: "http://localhost:4175/pasted.png" };
+        } },
+      },
+    } });
+  });
+  await page.goto("/editor.html");
+  const editor = page.getByRole("textbox");
+  await editor.click();
+  const paste = (withFile: boolean, src: string) => editor.evaluate((element, { withFile, src, png }) => {
+    const data = new DataTransfer();
+    data.setData("text/html", `<img src="${src}">`);
+    if (withFile) data.items.add(new File([Uint8Array.from(atob(png), (char) => char.charCodeAt(0))], "pasted.png", { type: "image/png" }));
+    element.dispatchEvent(new ClipboardEvent("paste", { clipboardData: data, bubbles: true, cancelable: true }));
+  }, { withFile, src, png });
+
+  await paste(false, "file:///missing.png");
+  await expect(page.getByRole("alert")).toContainText("Не удалось прочитать изображение");
+  await expect(editor.locator("[data-original-src]")).toHaveCount(0);
+
+  await paste(true, "blob:https://example.com/copied-image");
+  await expect.poll(() => page.evaluate(() => (window as any).pastedImage)).toEqual({ name: "pasted.png", mimeType: "image/png", data: png });
+  const image = editor.getByRole("img", { name: "pasted.png" });
+  await expect.poll(() => image.evaluate((element: HTMLImageElement) => element.naturalWidth)).toBe(1);
+  await expect(page.getByRole("alert")).toBeHidden();
+
+  await paste(false, `data:image/png;base64,${png}`);
+  await expect(editor.locator('img[data-original-src]')).toHaveCount(2);
+  await expect.poll(() => page.evaluate(() => (window as any).pastedImage.name)).toBe("Изображение.png");
+});
+
 test("native touch layout fits an iPhone and suppresses desktop formatting chrome", async ({
   page,
 }) => {

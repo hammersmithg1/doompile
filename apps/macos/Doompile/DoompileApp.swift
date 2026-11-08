@@ -305,7 +305,7 @@ struct NoteWorkspace: View {
                 case .retryVoice: recoverRecording()
                 case .preferencesClosed, .expandCapture, .sendCapture, nil: break
                 }
-            }).frame(maxWidth: .infinity, maxHeight: .infinity)
+            }, onPasteImage: storeFile).frame(maxWidth: .infinity, maxHeight: .infinity)
             if let error { Text(error).font(.system(size: 11)).foregroundStyle(MacPalette.orange).textSelection(.enabled).padding(12) }
             if let article = note.source?.articleText, !article.isEmpty { DisclosureGroup("Сохранённый текст статьи") { ScrollView { Text(article).font(.system(size: 12)).textSelection(.enabled).padding() }.frame(maxHeight: 200) }.font(.system(size: 11)).padding(12) }
 
@@ -386,12 +386,15 @@ struct NoteWorkspace: View {
         else { error = library.error ?? "Не удалось сохранить заметку на устройстве." }
     }
     private func addFile(_ data: Data, name: String, mime: String) throws {
+        bridge.insertAttachment(try storeFile(data, name: name, mime: mime))
+    }
+    private func storeFile(_ data: Data, name: String, mime: String) throws -> Attachment {
         guard library.isCurrentAccount else { throw DoompileError.authentication }
         guard data.count <= 30 * 1024 * 1024 else { throw DoompileError.message("Максимальный размер вложения — 30 МБ.") }
         guard note.attachments.count < 100 else { throw DoompileError.message("В одной заметке может быть до 100 вложений.") }
         let attachment = try Storage.shared.addFile(data, name: name, mimeType: mime)
         note.attachments.append(attachment)
-        bridge.insertAttachment(attachment)
+        return attachment
     }
     private func startRecording() async {
         do { try await voice.start(noteID: note.id); bridge.insertRecording(voice.id); bridge.recordingState(id: voice.id, seconds: 0) } catch { self.error = error.localizedDescription }

@@ -17,6 +17,11 @@ body {
   margin: 0;
   overflow-x: hidden;
 }
+#paste-feedback {
+  margin-bottom: 12px;
+  font: 13px/1.4 -apple-system, BlinkMacSystemFont, sans-serif;
+  color: var(--muted);
+}
 button {
   -webkit-tap-highlight-color: transparent;
   touch-action: manipulation;

@@ -1,19 +1,13 @@
 import { telemetryFetch as fetch } from "./telemetry";
-export function clipboardFiles(data: DataTransfer): File[] {
-  const files = Array.from(data.files);
-  if (files.length) return files;
-  return Array.from(data.items)
-    .filter((item) => item.kind === "file")
-    .map((item) => item.getAsFile())
-    .filter((file): file is File => !!file);
-}
+import { clipboardImageSource } from "../../../../packages/editor/src/clipboard-files";
+export {
+  clipboardFiles,
+  clipboardImageSource,
+  isDoompileClipboardHTML,
+} from "../../../../packages/editor/src/clipboard-files";
 export async function clipboardImage(data: DataTransfer): Promise<File | null> {
-  const html = data.getData("text/html");
-  if (!html) return null;
-  const document = new DOMParser().parseFromString(html, "text/html");
-  const src = document.querySelector("img")?.getAttribute("src");
-  if (!src || !/^(https?:|data:image\/|blob:)/i.test(src))
-    return readClipboardImage();
+  const src = clipboardImageSource(data.getData("text/html"));
+  if (!/^(https?:|data:image\/|blob:)/i.test(src)) return readClipboardImage();
   const response = await fetch(src);
   if (!response.ok)
     throw new Error(

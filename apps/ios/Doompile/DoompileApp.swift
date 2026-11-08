@@ -513,7 +513,8 @@ struct Home: View {
                         attachments: binding.attachments, notes: library.notes, bridge: quickBridge,
                         onReference: { id in
                             if let note = library.notes.first(where: { $0.id == id }) { editor = note }
-                        }, onRequestLink: { _ in expandQuickComposer() }, onAction: handleCompactCaptureAction, captureCompact: true)
+                        }, onRequestLink: { _ in expandQuickComposer() }, onAction: handleCompactCaptureAction, captureCompact: true,
+                        onPasteImage: { data, name, mime in try storeQuickImage(data, name: name, mime: mime, noteID: quickNote.id) })
                         .id(quickNote.id).frame(height: 55).accessibilityIdentifier("quick-rich-input")
                 } else {
                     TextField(UICopy.capturePlaceholder, text: Binding(get: { draft }, set: updateQuickText), axis: .vertical)
@@ -650,6 +651,16 @@ struct Home: View {
         var durable = note
         if let id = recorder.recordingID { durable.body = durable.body.removingRecording(id) }
         UserDefaults.standard.set(try JSONEncoder().encode(durable), forKey: quickComposerKey)
+    }
+    private func storeQuickImage(_ data: Data, name: String, mime: String, noteID: String) throws -> Attachment {
+        guard library.isCurrentAccount, !quickTransitioning, !quickEditorOpen,
+              var note = quickNote, note.id == noteID else { throw DoompileError.authentication }
+        let reserved = recorder.recording || recorder.starting ? 1 : 0
+        guard note.attachments.count + reserved < NoteLimits.attachments else { throw DoompileError.message("В заметке уже \(NoteLimits.attachments) вложений.") }
+        let attachment = try Storage.shared.addFile(data, name: name, mimeType: mime)
+        note.attachments.append(attachment)
+        try saveQuickDraft(note)
+        return attachment
     }
     private func refreshCompactQuickNote() async throws {
         guard quickBridge.ready, var note = quickNote else { return }
@@ -837,7 +848,7 @@ struct NoteEditor: View {
                 attachments: $note.attachments, noteID: note.id, notes: library.notes, focusOnLoad: focusOnOpen,
                 bridge: editorBridge, onReference: { id in
                     if let reference = library.notes.first(where: { $0.id == id }), reference.id != note.id { referencedNote = reference }
-                }, onRequestLink: { href in linkURL = href; editorBridge.blur(); linkPrompt = true }, onAction: handleAction)
+                }, onRequestLink: { href in linkURL = href; editorBridge.blur(); linkPrompt = true }, onAction: handleAction, onPasteImage: storeFile)
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
             if let error {
                 Text(error).font(.system(size: 12)).foregroundStyle(Palette.orange)
@@ -856,8 +867,9 @@ struct NoteEditor: View {
             Task {
                 do {
                     if let data = try await item?.loadTransferable(type: Data.self) {
-                        let mime = item?.supportedContentTypes.first?.preferredMIMEType ?? "image/jpeg"
-                        let ext = item?.supportedContentTypes.first?.preferredFilenameExtension ?? "jpg"
+                        let type = EditorImagePaste.contentType(of: data) ?? item?.supportedContentTypes.first
+                        let mime = type?.preferredMIMEType ?? "image/jpeg"
+                        let ext = type?.preferredFilenameExtension ?? "jpg"
                         try addFile(data, name: "Image.\(ext)", mime: mime)
                     }
                 } catch { self.error = error.localizedDescription }
@@ -1059,11 +1071,11 @@ struct NoteEditor: View {
         }
     }
     private func addFile(_ data: Data, name: String, mime: String) throws {
-        guard library.isCurrentAccount else { throw DoompileError.authentication }
         let attachment = try storeFile(data, name: name, mime: mime)
         editorBridge.insertAttachment(attachment)
     }
     private func storeFile(_ data: Data, name: String, mime: String) throws -> Attachment {
+        guard library.isCurrentAccount else { throw DoompileError.authentication }
         guard data.count <= 30 * 1024 * 1024 else { throw DoompileError.message("Максимальный размер вложения — 30 МБ.") }
         guard note.attachments.count < NoteLimits.attachments else { throw DoompileError.message("В заметке уже \(NoteLimits.attachments) вложений.") }
         let attachment = try Storage.shared.addFile(data, name: name, mimeType: mime)

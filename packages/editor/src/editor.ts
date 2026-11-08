@@ -8,12 +8,17 @@ import {
 import type { JSONContent } from "@tiptap/core";
 import { setBlockType } from "./formatting-ui";
 import { indentText } from "./formatting";
+import { clipboardFiles, clipboardImageSource, isDoompileClipboardHTML } from "./clipboard-files";
 import { errorProperties } from "../../telemetry/core";
+type ImagePasteHandler = {
+  postMessage: (message: { name: string; mimeType: string; data: string }) => Promise<Media>;
+};
 declare global {
   interface Window {
     webkit?: {
       messageHandlers: {
         doompile: { postMessage: (message: unknown) => void };
+        storePastedImage?: ImagePasteHandler;
       };
     };
     doompileEditor: typeof api;
@@ -33,6 +38,7 @@ function mediaURL(value: unknown): string {
   return /^https?:\/\//.test(url) ? url : "";
 }
 let frame = 0;
+const pasteFeedback = document.getElementById("paste-feedback")!;
 function height() {
   cancelAnimationFrame(frame);
   frame = requestAnimationFrame(() =>
@@ -58,8 +64,59 @@ const controller = createBlockEditor(document.getElementById("editor")!, {
   onHeight: height,
   onOpenAttachment: (url) => post({ type: "openAttachment", url }),
   onMediaPaste: (attachments) => post({ type: "pastedMedia", attachments }),
+  onPaste: (event) => {
+    const store = window.webkit?.messageHandlers.storePastedImage;
+    const clipboard = event.clipboardData;
+    if (!store || !clipboard) return false;
+    const html = clipboard.getData("text/html");
+    if (isDoompileClipboardHTML(html)) return false;
+    const images = clipboardFiles(clipboard).filter((file) => file.type.startsWith("image/"));
+    const source = images.length ? "" : clipboardImageSource(html);
+    if (!images.length && !/^(?:data:image\/|blob:|file:|webkit-fake-url:)/i.test(source)) return false;
+    void pasteImages(store, images, source);
+    return true;
+  },
 });
 const { editor } = controller;
+async function pasteImages(store: ImagePasteHandler, images: File[], source: string) {
+  pasteFeedback.hidden = true;
+  let bookmark = editor.state.selection.getBookmark();
+  const mapBookmark = ({ transaction }: { transaction: import("@tiptap/pm/state").Transaction }) => {
+    bookmark = bookmark.map(transaction.mapping);
+  };
+  const unreadable = "Не удалось прочитать изображение из буфера.";
+  editor.on("transaction", mapBookmark);
+  try {
+    if (!images.length) {
+      if (!/^(?:data:image\/|blob:)/i.test(source)) throw new Error(unreadable);
+      const response = await fetch(source).catch(() => null);
+      const blob = response?.ok ? await response.blob() : null;
+      if (!blob?.type.startsWith("image/")) throw new Error(unreadable);
+      images = [new File([blob], `Изображение.${blob.type.split("/")[1]}`, { type: blob.type })];
+    }
+    for (const image of images) {
+      if (!image.size) throw new Error(unreadable);
+      if (image.size > 30 * 1024 * 1024) throw new Error("Максимальный размер вложения — 30 МБ.");
+      const data = await new Promise<string>((resolve, reject) => {
+        const reader = new FileReader();
+        reader.onload = () => resolve(String(reader.result).split(",", 2)[1]);
+        reader.onerror = () => reject(new Error(unreadable));
+        reader.readAsDataURL(image);
+      });
+      if (!editor.isEditable) return;
+      const attachment = await store.postMessage({ name: image.name, mimeType: image.type, data });
+      if (!editor.isEditable) return;
+      editor.view.dispatch(editor.state.tr.setSelection(bookmark.resolve(editor.state.doc)));
+      controller.insertAttachment(attachment);
+      bookmark = editor.state.selection.getBookmark();
+    }
+  } catch (error) {
+    pasteFeedback.textContent = error instanceof Error ? error.message : unreadable;
+    pasteFeedback.hidden = false;
+  } finally {
+    editor.off("transaction", mapBookmark);
+  }
+}
 // The Mac capture panel keeps this editor alive when it changes size.
 // Compact mode only changes presentation; it never serializes rich blocks to text.
 editor.view.dom.addEventListener("keydown", (event) => {
@@ -95,6 +152,7 @@ const api = {
     title?: string,
     source?: Record<string, unknown>,
   ) {
+    pasteFeedback.hidden = true;
     controller.setDocument(
       title !== undefined || source !== undefined
         ? prepareDocument(body, title, source)

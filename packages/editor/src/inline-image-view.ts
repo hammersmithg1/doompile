@@ -26,8 +26,24 @@ export function inlineImageView(
 ) {
   const image = document.createElement("img");
   image.draggable = false;
+  const unavailable = document.createElement("span");
+  unavailable.className = "image-unavailable";
+  unavailable.textContent = "Изображение недоступно";
+  const showImage = (visible: boolean) => {
+    image.hidden = !visible;
+    unavailable.hidden = visible;
+  };
+  image.addEventListener("error", () => showImage(false));
+  image.addEventListener("load", () => showImage(true));
   const render = (attrs: Record<string, any>) => {
-    image.src = mediaURL(attrs.src);
+    const src = mediaURL(attrs.src);
+    if (src && image.getAttribute("src") !== src) {
+      showImage(true);
+      image.src = src;
+    } else if (!src) {
+      image.removeAttribute("src");
+      showImage(false);
+    }
     image.dataset.originalSrc = String(attrs.src || "");
     image.alt = attrs.alt || "";
     image.style.width = attrs.width ? `${Number(attrs.width)}px` : "";
@@ -63,5 +79,6 @@ export function inlineImageView(
       preserveAspectRatio: true,
     },
   });
+  view.wrapper.append(unavailable);
   return view;
 }

@@ -328,6 +328,38 @@ test("rich HTML copies media into another note without upload hints or missing a
     .toBe(2);
 });
 
+test("pasting an embedded image saves a readable attachment and feed preview", async ({ page }) => {
+  await page.addInitScript(() => {
+    const fetch = window.fetch.bind(window);
+    window.fetch = (input, init) => {
+      const file = init?.body instanceof FormData ? init.body.get("file") : null;
+      if (file instanceof File) {
+        const reader = new FileReader();
+        reader.onload = () => { (window as any).uploadedImage = reader.result; };
+        reader.readAsDataURL(file);
+      }
+      return fetch(input, init);
+    };
+  });
+  const app = await setup(page);
+  const png = "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+aV4sAAAAASUVORK5CYII=";
+  const image = file("Изображение.png", "image/png");
+  await page.route("**/api/attachments", (route) => route.fulfill({ json: { attachment: image } }));
+  await page.route(`**${image.url}`, (route) => route.fulfill({ contentType: "image/png", body: Buffer.from(png, "base64") }));
+  await expand(page);
+  const editor = page.getByRole("textbox", { name: "Текст заметки" });
+  await editor.evaluate((element, png) => {
+    const data = new DataTransfer();
+    data.setData("text/html", `<img src=data:image/png;base64,${png}>`);
+    element.dispatchEvent(new ClipboardEvent("paste", { clipboardData: data, bubbles: true, cancelable: true }));
+  }, png);
+  await expect.poll(() => editor.getByRole("img", { name: image.name }).evaluate((element: HTMLImageElement) => element.naturalWidth)).toBe(1);
+  await expect.poll(() => page.evaluate(() => (window as any).uploadedImage)).toBe(`data:image/png;base64,${png}`);
+  await page.getByRole("button", { name: "Закрыть редактор" }).click();
+  await expect.poll(() => app.writes.at(-1)?.attachments).toEqual([image]);
+  await expect(page.locator(".snippet-attachments").getByRole("img", { name: image.name })).toBeVisible();
+});
+
 test("command aliases are reachable from application settings and work in a fresh composer", async ({
   page,
 }) => {

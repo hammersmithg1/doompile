@@ -238,7 +238,7 @@ struct DesktopHome: View {
         HStack(alignment: .bottom, spacing: 5) {
             if quick.richMounted { richComposerInput }
             else {
-                MacQuickInput(text: Binding(get: { quick.note.plainText }, set: quick.updateText), height: $quickHeight, focused: $quickFocused, onSubmit: saveQuick)
+                MacQuickInput(text: Binding(get: { quick.note.plainText }, set: quick.updateText), height: $quickHeight, focused: $quickFocused, onSubmit: saveQuick, onPasteImage: pasteQuickImage)
                     .frame(height: quickHeight).padding(.leading, 8)
             }
             if !quickExpanded { composerButtons }
@@ -248,10 +248,14 @@ struct DesktopHome: View {
         .overlay(RoundedRectangle(cornerRadius: 15).stroke(quickFocused ? MacPalette.adaptive(0xC9C5C0, 0x69646F) : MacPalette.line))
         .shadow(color: .black.opacity(0.025), radius: 6, y: 2)
     }
+    private func pasteQuickImage(_ data: Data) {
+        do { try quick.addFile(data, name: "Изображение.png", mime: "image/png") }
+        catch { quick.error = error.localizedDescription }
+    }
     private var richComposerInput: some View {
         MacRichEditorView(document: $quick.note.body, plainText: $quick.note.plainText, height: $quickEditorHeight, attachments: $quick.note.attachments, noteID: quick.note.id, notes: library.notes, focusOnLoad: true, captureCompact: !quickExpanded, bridge: quick.bridge, onReference: { id in
             if let note = library.notes.first(where: { $0.id == id }) { open(note) }
-        }, onRequestLink: { quickLinkValue = $0; quickLink = true }, onAction: composerAction)
+        }, onRequestLink: { quickLinkValue = $0; quickLink = true }, onAction: composerAction, onPasteImage: quick.storeFile)
         .id(quick.note.id)
         .frame(maxWidth: .infinity, minHeight: quickExpanded ? 180 : 43, maxHeight: quickExpanded ? .infinity : 43)
         .onReceive(quick.bridge.$ready) { ready in if ready { quick.editorReady() } }

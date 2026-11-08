@@ -82,15 +82,19 @@ import Combine
         try addFile(data, name: url.lastPathComponent, mime: UTType(filenameExtension: url.pathExtension)?.preferredMIMEType ?? "application/octet-stream")
     }
     func addFile(_ data: Data, name: String, mime: String) throws {
+        let attachment = try storeFile(data, name: name, mime: mime)
+        if richMounted { bridge.insertAttachment(attachment) }
+        else { note = MacQuickDocument.updating(note, text: note.plainText) }
+        try persist()
+    }
+    func storeFile(_ data: Data, name: String, mime: String) throws -> Attachment {
         guard accountScope == Connection.scope else { throw DoompileError.authentication }
         let reserved = voice.recording || startingVoice ? 1 : 0
         guard data.count <= 30 * 1024 * 1024, note.attachments.count + reserved < NoteLimits.attachments else { throw DoompileError.message("До 100 вложений, не более 30 МБ каждое.") }
         if !voice.recording, !MacPreview.hasContent(note) { note.createdAt = Note.now() }
         let attachment = try Storage.shared.addFile(data, name: name, mimeType: mime)
         note.attachments.append(attachment)
-        if richMounted { bridge.insertAttachment(attachment) }
-        else { note = MacQuickDocument.updating(note, text: note.plainText) }
-        try persist()
+        return attachment
     }
     func removeFile(_ id: String) {
         guard !richMounted else { return }

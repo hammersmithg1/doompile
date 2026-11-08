@@ -1,4 +1,5 @@
 import XCTest
+import UniformTypeIdentifiers
 @testable import DoompileCore
 
 final class SQLiteMigrationTests: XCTestCase {
@@ -67,5 +68,16 @@ final class SQLiteMigrationTests: XCTestCase {
         var server=checkpoint; server.revision=1
         try store.accept(server,matching:checkpoint)
         XCTAssertFalse(try store.snapshot().dirty.contains(note.id))
+    }
+    func testLocalMediaReadsStoredMIMEBeforeAttachmentIsAddedToNote() throws {
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        let store = Storage(directory: directory)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let bytes = try XCTUnwrap(Data(base64Encoded: "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+aV4sAAAAASUVORK5CYII="))
+        let attachment = try store.addFile(bytes, name: "pasted.png", mimeType: "image/png")
+        let file = try XCTUnwrap(store.localFile(id: attachment.id))
+        XCTAssertEqual(file.mimeType, "image/png")
+        XCTAssertEqual(try Data(contentsOf: file.url), bytes)
+        XCTAssertEqual(EditorImagePaste.contentType(of: bytes)?.preferredMIMEType, "image/png")
     }
 }

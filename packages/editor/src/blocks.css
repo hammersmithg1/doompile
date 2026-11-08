@@ -471,6 +471,16 @@
   max-width: 100%;
   height: auto;
 }
+.block-editor [data-resize-wrapper] img[hidden] {
+  display: none;
+}
+.block-editor .image-unavailable {
+  padding: 6px 10px;
+  border-radius: 8px;
+  background: var(--editor-panel);
+  color: var(--editor-muted);
+  font-size: 13px;
+}
 .block-editor [data-resize-handle] {
   width: 12px;
   height: 12px;

@@ -200,11 +200,17 @@ import UniformTypeIdentifiers
         } catch is CancellationError {} catch { Telemetry.shared.failure(.runtimeError, error); self.error = error.localizedDescription }
     }
     func addFile(_ data: Data, name: String, mime: String) throws {
+        let attachment = try storeFile(data, name: name, mime: mime)
+        if richMounted { bridge.insertAttachment(attachment) }
+        else { note = MacQuickDocument.updating(note, text: note.plainText) }
+    }
+    func storeFile(_ data: Data, name: String, mime: String) throws -> Attachment {
         guard Connection.signedIn, Connection.scope == accountScope else { throw DoompileError.authentication }
         let reserved = voice.recording || startingVoice ? 1 : 0
         guard data.count <= 30 * 1024 * 1024, note.attachments.count + reserved < NoteLimits.attachments else { throw DoompileError.message("До 100 вложений, не более 30 МБ каждое.") }
         let attachment = try Storage.shared.addFile(data, name: name, mimeType: mime)
-        note.attachments.append(attachment); bridge.insertAttachment(attachment)
+        note.attachments.append(attachment)
+        return attachment
     }
     func removeCompactAttachment(_ id: String) {
         guard !richMounted else { return }
@@ -345,13 +351,17 @@ struct QuickCaptureRoot: View {
     private var richInput: some View {
         MacRichEditorView(document: $capture.note.body, plainText: $capture.note.plainText, height: $editorHeight, attachments: $capture.note.attachments, noteID: capture.note.id, notes: library.notes, focusOnLoad: true, captureCompact: !capture.expanded, bridge: bridge, onReference: { id in
             Task { await capture.dismiss(); if let url = NoteLinks.appURL(id: id) { NSWorkspace.shared.open(url) } }
-        }, onRequestLink: { capture.link = $0; capture.showLink = true }, onAction: capture.action)
+        }, onRequestLink: { capture.link = $0; capture.showLink = true }, onAction: capture.action, onPasteImage: capture.storeFile)
         .id(capture.note.id)
         .frame(maxWidth: .infinity, minHeight: capture.expanded ? 240 : 43, maxHeight: capture.expanded ? .infinity : 43)
     }
     private var nativeInput: some View {
-        MacQuickInput(text: Binding(get: { capture.note.plainText }, set: capture.updateText), height: $capture.inputHeight, focused: $capture.focused, onSubmit: submit)
+        MacQuickInput(text: Binding(get: { capture.note.plainText }, set: capture.updateText), height: $capture.inputHeight, focused: $capture.focused, onSubmit: submit, onPasteImage: pasteQuickImage)
             .frame(height: capture.inputHeight).padding(.leading, 8)
+    }
+    private func pasteQuickImage(_ data: Data) {
+        do { try capture.addFile(data, name: "Изображение.png", mime: "image/png") }
+        catch { capture.error = error.localizedDescription }
     }
     @ViewBuilder private var compactButtons: some View {
         MacComposerButton(icon: "mic", label: "Записать голосовую заметку", disabled: capture.startingVoice || voice.recording || capture.busy) { capture.action("voice") }

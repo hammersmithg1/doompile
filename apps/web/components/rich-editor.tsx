@@ -10,6 +10,8 @@ import { X } from "../../../packages/design/ui-icons";
 import {
   clipboardFiles,
   clipboardImage,
+  clipboardImageSource,
+  isDoompileClipboardHTML,
   isLocalImagePath,
   readClipboardImage,
 } from "@/lib/client/clipboard";
@@ -69,25 +71,16 @@ export default function RichEditor(props: {
         const data = event.clipboardData;
         if (!data) return false;
         const html = data.getData("text/html");
-        if (
-          /data-doompile-clipboard|data-original-src|data-attachment|data-source-snippet|src=["'][^"']*\/api\/attachments\//i.test(
-            html,
-          )
-        )
-          return false;
+        if (isDoompileClipboardHTML(html)) return false;
         const files = clipboardFiles(data);
         if (files.length) {
           void uploadFiles(files);
           return true;
         }
-        if (
-          isLocalImagePath(data.getData("text/plain")) ||
-          /<img\b[^>]*src=["'](?:file:|blob:|data:image\/)/i.test(html)
-        ) {
+        const localPath = isLocalImagePath(data.getData("text/plain"));
+        if (localPath || /^(?:file:|webkit-fake-url:|blob:|data:image\/)/i.test(clipboardImageSource(html))) {
           void (
-            isLocalImagePath(data.getData("text/plain"))
-              ? readClipboardImage()
-              : clipboardImage(data)
+            localPath ? readClipboardImage() : clipboardImage(data)
           )
             .then((file) => {
               if (file) void upload(file);

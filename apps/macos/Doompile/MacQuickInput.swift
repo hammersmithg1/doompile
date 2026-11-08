@@ -8,6 +8,7 @@ struct MacQuickInput: NSViewRepresentable {
     @Binding var focused: Bool
     var placeholder = "Добавь что-нибудь в кучу…"
     var onSubmit: () -> Void
+    var onPasteImage: (Data) -> Void
 
     func makeCoordinator() -> Coordinator { Coordinator(self) }
     func makeNSView(context: Context) -> NSScrollView {
@@ -30,6 +31,7 @@ struct MacQuickInput: NSViewRepresentable {
         input.maxSize = NSSize(width: CGFloat.greatestFiniteMagnitude, height: CGFloat.greatestFiniteMagnitude)
         input.autoresizingMask = [.width]
         input.string = text; input.placeholder = placeholder
+        input.onPasteImage = { [weak coordinator = context.coordinator] in coordinator?.parent.onPasteImage($0) }
         input.setAccessibilityLabel("Быстрая заметка")
         scroll.documentView = input
         scroll.drawsBackground = false
@@ -88,6 +90,19 @@ final class QuickInputScrollView: NSScrollView {
 
 final class QuickTextView: NSTextView {
     var placeholder = "" { didSet { needsDisplay = true } }
+    var onPasteImage: ((Data) -> Void)?
+    override func paste(_ sender: Any?) {
+        let board = NSPasteboard.general
+        if let onPasteImage {
+            if let png = board.data(forType: .png) { onPasteImage(png); return }
+            if let tiff = board.data(forType: .tiff),
+               let png = NSBitmapImageRep(data: tiff)?.representation(using: .png, properties: [:]) {
+                onPasteImage(png)
+                return
+            }
+        }
+        super.paste(sender)
+    }
     override func draw(_ dirtyRect: NSRect) {
         super.draw(dirtyRect)
         guard string.isEmpty else { return }

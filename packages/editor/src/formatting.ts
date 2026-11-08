@@ -1,4 +1,8 @@
 import { Extension, Mark, mergeAttributes, type Editor } from "@tiptap/core";
+import { closeHistory } from "@tiptap/pm/history";
+import { liftListItem, sinkListItem } from "@tiptap/pm/schema-list";
+import { Plugin, TextSelection } from "@tiptap/pm/state";
+import type { EditorView } from "@tiptap/pm/view";
 
 export const textColors = [
   "",
@@ -95,28 +99,151 @@ export const Superscript = Mark.create({
   renderHTML: () => ["sup", 0],
 });
 
-export function indentText(editor: Editor, direction: number) {
-  if (editor.isActive("listItem") || editor.isActive("taskItem")) {
+export function indentText(
+  editor: Editor,
+  direction: number,
+  position?: number,
+) {
+  const { state, view } = editor;
+  if (
+    position === undefined &&
+    (editor.isActive("listItem") || editor.isActive("taskItem"))
+  ) {
     const type = editor.isActive("taskItem") ? "taskItem" : "listItem";
     return direction > 0
       ? editor.commands.sinkListItem(type)
       : editor.commands.liftListItem(type);
   }
-  const { from, to } = editor.state.selection,
-    tr = editor.state.tr;
-  editor.state.doc.nodesBetween(from, to, (node, pos) => {
-    if (["paragraph", "heading"].includes(node.type.name))
-      tr.setNodeMarkup(pos, undefined, {
-        ...node.attrs,
-        indent: Math.max(0, Math.min(6, (node.attrs.indent || 0) + direction)),
-      });
+  if (position !== undefined) {
+    const selection = TextSelection.create(state.doc, position);
+    const listItems = [];
+    for (let depth = selection.$from.depth; depth > 0; depth--) {
+      const { type } = selection.$from.node(depth);
+      if (type.name === "listItem" || type.name === "taskItem")
+        listItems.push(type);
+    }
+    if (listItems.length) {
+      if (direction < 0 && listItems.length === 1) return false;
+      const bookmark = state.selection.getBookmark();
+      const command = direction > 0 ? sinkListItem : liftListItem;
+      return command(listItems[0])(
+        state.apply(state.tr.setSelection(selection)),
+        (tr) => {
+          tr.setSelection(bookmark.map(tr.mapping).resolve(tr.doc));
+          if (state.storedMarks) tr.setStoredMarks(state.storedMarks);
+          view.dispatch(closeHistory(tr));
+        },
+      );
+    }
+  }
+  const from = position ?? state.selection.from;
+  const to = position ?? state.selection.to;
+  const tr = state.tr;
+  let handled = false;
+  state.doc.nodesBetween(from, to, (node, pos) => {
+    if (!["paragraph", "heading"].includes(node.type.name)) return;
+    handled = true;
+    const indent = Math.max(
+      0,
+      Math.min(6, (node.attrs.indent || 0) + direction),
+    );
+    if (indent !== node.attrs.indent)
+      tr.setNodeMarkup(pos, undefined, { ...node.attrs, indent });
   });
-  if (tr.docChanged) editor.view.dispatch(tr);
-  return tr.docChanged;
+  if (tr.docChanged)
+    view.dispatch(position === undefined ? tr : closeHistory(tr));
+  return handled;
 }
+
+function touchIndent(editor: Editor, view: EditorView) {
+  const { dom } = view;
+  const listeners = new AbortController();
+  let gesture: { start: Touch; line: Element; horizontal: boolean } | null =
+    null;
+  const cancel = () => {
+    gesture = null;
+  };
+  dom.addEventListener(
+    "touchstart",
+    (event) => {
+      cancel();
+      if (!view.editable || view.composing || event.touches.length !== 1)
+        return;
+      const start = event.touches[0];
+      if (start.clientX < 24 || start.clientX > window.innerWidth - 24) return;
+      const target = event.target;
+      if (
+        !(target instanceof Element) ||
+        target.closest("table, pre, a, button, input, [contenteditable=false]")
+      )
+        return;
+      const line = target.closest("p, h1, h2, h3");
+      if (line && dom.contains(line))
+        gesture = { start, line, horizontal: false };
+    },
+    { passive: true, signal: listeners.signal },
+  );
+  // ProseMirror's own touchmove listener is passive. Cancel only a horizontal pan.
+  dom.addEventListener(
+    "touchmove",
+    (event) => {
+      if (!gesture) return;
+      const { start } = gesture;
+      const touch = event.touches[0];
+      if (
+        event.touches.length !== 1 ||
+        touch.identifier !== start.identifier ||
+        !event.cancelable
+      )
+        return cancel();
+      const dx = Math.abs(touch.clientX - start.clientX);
+      const dy = Math.abs(touch.clientY - start.clientY);
+      if (!gesture.horizontal) {
+        if (Math.max(dx, dy) < 10) return;
+        if (dx <= dy * 1.4) return cancel();
+        gesture.horizontal = true;
+      }
+      event.preventDefault();
+    },
+    { passive: false, signal: listeners.signal },
+  );
+  dom.addEventListener(
+    "touchend",
+    (event) => {
+      const swipe = gesture;
+      cancel();
+      if (
+        !swipe?.horizontal ||
+        !view.editable ||
+        view.composing ||
+        !dom.contains(swipe.line)
+      )
+        return;
+      const touch = Array.from(event.changedTouches).find(
+        ({ identifier }) => identifier === swipe.start.identifier,
+      );
+      if (!touch || event.touches.length) return;
+      const dx = touch.clientX - swipe.start.clientX;
+      const dy = touch.clientY - swipe.start.clientY;
+      if (Math.abs(dx) < 48 || Math.abs(dx) <= Math.abs(dy) * 1.4) return;
+      event.preventDefault();
+      indentText(editor, Math.sign(dx), view.posAtDOM(swipe.line, 0));
+    },
+    { signal: listeners.signal },
+  );
+  dom.addEventListener("touchcancel", cancel, {
+    passive: true,
+    signal: listeners.signal,
+  });
+  return { destroy: () => listeners.abort() };
+}
+
 export const Formatting = Extension.create({
   name: "editorFormatting",
   priority: 1200,
+  addProseMirrorPlugins() {
+    return [new Plugin({ view: (view) => touchIndent(this.editor, view) })];
+  },
   addGlobalAttributes: () => [
     {
       types: ["paragraph", "heading"],

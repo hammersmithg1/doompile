@@ -77,6 +77,7 @@ struct MacRichEditorView: NSViewRepresentable {
     var onReference: (String) -> Void
     var onRequestLink: (String) -> Void
     var onAction: (String) -> Void
+    var onPasteImage: EditorImagePaste.Store? = nil
     func makeCoordinator() -> Coordinator { Coordinator(parent: self) }
     func makeNSView(context: Context) -> WKWebView {
         let configuration = WKWebViewConfiguration()
@@ -97,6 +98,9 @@ struct MacRichEditorView: NSViewRepresentable {
         """
         configuration.userContentController.addUserScript(WKUserScript(source: startup, injectionTime: .atDocumentStart, forMainFrameOnly: true))
         configuration.userContentController.add(context.coordinator, name: "doompile")
+        if onPasteImage != nil {
+            configuration.userContentController.addScriptMessageHandler(context.coordinator, contentWorld: .page, name: EditorImagePaste.messageName)
+        }
         configuration.setURLSchemeHandler(context.coordinator.media, forURLScheme: "doompile-media")
         let webView = WKWebView(frame: .zero, configuration: configuration)
         webView.navigationDelegate = context.coordinator
@@ -108,21 +112,25 @@ struct MacRichEditorView: NSViewRepresentable {
     }
     func updateNSView(_ webView: WKWebView, context: Context) {
         context.coordinator.parent = self
-        context.coordinator.media.attachments = attachments
         if bridge.ready { context.coordinator.applyTheme(); context.coordinator.applyCaptureMode() }
         // A transaction updates the SwiftUI binding. Resetting document here would lose the caret.
     }
     static func dismantleNSView(_ webView: WKWebView, coordinator: Coordinator) {
         webView.configuration.userContentController.removeScriptMessageHandler(forName: "doompile")
+        webView.configuration.userContentController.removeScriptMessageHandler(forName: EditorImagePaste.messageName, contentWorld: .page)
         let bridge = coordinator.parent.bridge
         if bridge.webView === webView { bridge.ready = false; bridge.webView = nil }
     }
-    final class Coordinator: NSObject, WKScriptMessageHandler, WKNavigationDelegate {
+    final class Coordinator: NSObject, WKScriptMessageHandler, WKScriptMessageHandlerWithReply, WKNavigationDelegate {
         var parent: MacRichEditorView
         let media = MacMediaSchemeHandler()
         private var appliedTheme: String?
         private var appliedCapture: Bool?
-        init(parent: MacRichEditorView) { self.parent = parent; media.attachments = parent.attachments }
+        init(parent: MacRichEditorView) { self.parent = parent }
+        func userContentController(_ userContentController: WKUserContentController, didReceive message: WKScriptMessage, replyHandler: @escaping (Any?, String?) -> Void) {
+            do { replyHandler(try EditorImagePaste.store(message, in: parent.bridge.webView, using: parent.onPasteImage), nil) }
+            catch { replyHandler(nil, error.localizedDescription) }
+        }
         func applyTheme() {
             let theme = parent.colorScheme == .dark ? "dark" : "light"
             guard theme != appliedTheme else { return }
@@ -189,7 +197,6 @@ struct MacRichEditorView: NSViewRepresentable {
 
 /// Only local attachments and the connected server can be requested by editor JavaScript.
 final class MacMediaSchemeHandler: NSObject, WKURLSchemeHandler {
-    var attachments: [Attachment] = []
     private var tasks: [ObjectIdentifier: Task<Void, Never>] = [:]
     private let session = URLSession(configuration: .ephemeral, delegate: NoRedirects(), delegateQueue: nil)
     func webView(_ webView: WKWebView, start urlSchemeTask: WKURLSchemeTask) {
@@ -201,12 +208,11 @@ final class MacMediaSchemeHandler: NSObject, WKURLSchemeHandler {
                 guard let url = urlSchemeTask.request.url, let host = url.host, ["local", "attachment"].contains(host), let id = url.pathComponents.last, UUID(uuidString: id) != nil else { throw URLError(.badURL) }
                 let data: Data
                 let mime: String
-                if host == "local" {
-                    let metadata = attachments.first { $0.id == id } ?? Attachment(id: id, name: "Attachment", mimeType: "application/octet-stream", url: "local:\(id)", size: 0)
-                    guard let file = Storage.shared.fileURL(metadata) else { throw URLError(.fileDoesNotExist) }
-                    data = try Data(contentsOf: file)
-                    mime = (try? Storage.shared.snapshot().files[id]?.mimeType) ?? metadata.mimeType
+                if let file = Storage.shared.localFile(id: id), let bytes = try? Data(contentsOf: file.url) {
+                    data = bytes
+                    mime = file.mimeType
                 } else {
+                    guard host == "attachment" else { throw URLError(.fileDoesNotExist) }
                     guard Connection.validEndpoint(Connection.endpoint), let remote = URL(string: Connection.endpoint + "/api/attachments/" + id) else { throw URLError(.badURL) }
                     var request = URLRequest(url: remote, timeoutInterval: 15)
                     request.setValue("Bearer " + Connection.token, forHTTPHeaderField: "Authorization")
