@@ -128,23 +128,43 @@ jobs:
             fi
             filter_args+=("-only-testing:$IOS_TEST_FILTER")
           fi
+          if [[ "$IOS_TEST_FILTER" == 'DoompileUITests/TouchUXTests/testDrawerRepeatedGesturesDoNotDuplicateNavigation' ]]; then
+            filter_args+=("-only-testing:DoompileUITests/TouchUXTests/testQuickKeyboardDismissesWhenTappingFeed")
+            xcrun simctl bootstatus "$simulator_id" -b
+            xcrun simctl status_bar "$simulator_id" override --time '9:41' \
+              --dataNetwork wifi --wifiMode active --wifiBars 3 --cellularMode active --cellularBars 4 \
+              --batteryState unplugged --batteryLevel 100
+            xcrun simctl io "$simulator_id" recordVideo --codec=h264 "$RUNNER_TEMP/sidebar-motion.mp4" &
+            video_pid=$!
+            stop_video() {
+              kill -INT "$video_pid" 2>/dev/null || true
+              for _ in {1..20}; do
+                if ! kill -0 "$video_pid" 2>/dev/null; then break; fi
+                sleep 0.2
+              done
+              kill -TERM "$video_pid" 2>/dev/null || true
+              wait "$video_pid" || true
+            }
+            trap stop_video EXIT
+          fi
           xcodebuild -project apps/ios/Doompile.xcodeproj -scheme Doompile \
             "${filter_args[@]}" -destination "platform=iOS Simulator,id=$simulator_id" \
             -derivedDataPath "$RUNNER_TEMP/DerivedData" \
             -resultBundlePath "$RUNNER_TEMP/iOS-Touch.xcresult" \
             -parallel-testing-enabled NO -retry-tests-on-failure -test-iterations 2 \
             CODE_SIGNING_ALLOWED=YES CODE_SIGN_IDENTITY=- test
-      - name: Export failed touch-test attachments
-        if: failure() && !inputs.reuse_validation
+      - name: Export touch-test attachments
+        if: ${{ !inputs.reuse_validation && (failure() || (github.event_name == 'workflow_dispatch' && inputs.test_filter != '')) }}
         run: xcrun xcresulttool export attachments --path "$RUNNER_TEMP/iOS-Touch.xcresult" --output-path "$RUNNER_TEMP/iOS-Touch-attachments"
       - name: Upload touch test results
-        if: failure() && !inputs.reuse_validation
+        if: ${{ !inputs.reuse_validation && (failure() || (github.event_name == 'workflow_dispatch' && inputs.test_filter != '')) }}
         uses: actions/upload-artifact@v4
         with:
           name: ios-touch-test-results
           path: |
             ${{ runner.temp }}/iOS-Touch.xcresult
             ${{ runner.temp }}/iOS-Touch-attachments
+            ${{ runner.temp }}/sidebar-motion.mp4
           if-no-files-found: ignore
       - name: Prepare private release packaging
         if: inputs.upload_testflight

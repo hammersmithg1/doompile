@@ -47,6 +47,7 @@ final class TouchUXTests: XCTestCase {
         input.tap(); input.typeText("Touch draft")
         XCTAssertTrue(app.keyboards.firstMatch.waitForExistence(timeout: 3))
         XCTAssertEqual(input.value as? String, "Touch draft")
+        screenshot("sidebar-feed-keyboard")
         app.coordinate(withNormalizedOffset: CGVector(dx: 0.9, dy: 0.38)).tap()
         XCTAssertTrue(app.keyboards.firstMatch.waitForNonExistence(timeout: 3))
         screenshot("home-no-header")
@@ -240,6 +241,7 @@ final class TouchUXTests: XCTestCase {
             .allElementsBoundByIndex.first { $0.isHittable && $0.frame.midY > app.frame.height * 0.25 && $0.frame.midY < app.frame.height * 0.65 }
         guard let row else { return XCTFail("The feed fixture must show a note") }
         let before = row.frame
+        screenshot("sidebar-feed-closed")
         for attempt in 0..<3 {
             if attempt == 0 {
                 app.buttons["open-sidebar"].tap()
@@ -251,6 +253,8 @@ final class TouchUXTests: XCTestCase {
             XCTAssertTrue(app.textFields["sidebar-search"].waitForExistence(timeout: 5))
             XCTAssertEqual(app.textFields.matching(identifier: "sidebar-search").count, 1)
             if attempt == 0 {
+                let visible = expectation(for: NSPredicate(format: "hittable == true"), evaluatedWith: app.textFields["sidebar-search"])
+                wait(for: [visible], timeout: 5)
                 screenshot("sidebar-behind-rounded-feed")
                 app.buttons["close-sidebar"].tap()
             } else {
