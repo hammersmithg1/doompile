@@ -58,7 +58,7 @@ notes.example.org {
 }
 ~~~
 
-Проверь `https://notes.example.org/api/health` и открой `https://notes.example.org/doompile`. Введи свой домен в клиентах и подтверди вход в браузере. Данные сохраняются в `runtime/self-host` при пересоздании контейнеров. Для staging, обновлений и проверяемых бэкапов см. [эксплуатацию сервера](server-operations.md).
+Проверь `https://notes.example.org/api/health` и открой `https://notes.example.org/doompile`. В клиентах открой **Своя конфигурация**, введи свой домен и подтверди вход в браузере. Данные сохраняются в `runtime/self-host` при пересоздании контейнеров. Для staging, обновлений и проверяемых бэкапов см. [эксплуатацию сервера](server-operations.md).
 
 ## Локальный запуск
 

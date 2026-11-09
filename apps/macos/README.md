@@ -36,7 +36,7 @@ python3 apps/macos/generate_project.py
 - Sidebar tags can be created without creating an empty note. Pinning, urgency and edits never change the note's position within its creation-date group. The editor has a draggable width divider and animates opening, closing and expansion; Reduce Motion is respected.
 - The main window is intentionally single-instance: it avoids two stale local editors overwriting the same offline note. Settings is a separate native window.
 
-On the sign-in screen, enter the HTTPS server URL and choose browser sign-in through Yandex/Google. The local dev server can be `http://localhost:3000`; start it separately with the setec wrapper described in [OAuth setup](../../docs/authentication.md). The device token lives in a private app directory excluded from backups. Mac upgrades from legacy Keychain storage require browser sign-in once. Account notes and drafts remain in their existing storage. The Settings window displays the actual local data directory; shared App Group storage is used when available, with Application Support fallback in a local developer build.
+On the sign-in screen, choose browser sign-in through Yandex or Google. Open **Своя конфигурация** to enter another server URL. The local dev server can be `http://localhost:3000`; start it separately with the setec wrapper described in [OAuth setup](../../docs/authentication.md). The device token lives in a private app directory excluded from backups. Mac upgrades from legacy Keychain storage require browser sign-in once. Account notes and drafts remain in their existing storage. The Settings window displays the actual local data directory; shared App Group storage is used when available, with Application Support fallback in a local developer build.
 
 ## Global quick capture
 
@@ -104,4 +104,4 @@ After the initial `npm run macos:build`, use `bash apps/macos/scripts/update-cli
 
 ## Персональные аккаунты
 
-На первом экране укажи сервер и нажми «Войти через браузер». Войди через Яндекс/Google, разреши подключение и вернись в приложение. В настройках отображаются имя, email и выход. SQLite, файлы, черновики и записи разделены по серверу и аккаунту; ключ входа хранится в закрытом каталоге приложения. Safari Clipper может взять персональное подключение из приложения. [OAuth и S3](../../docs/authentication.md).
+На первом экране нажми «Войти через браузер». Для своего сервера сначала укажи адрес в разделе «Своя конфигурация». Войди через Яндекс или Google, разреши подключение и вернись в приложение. В настройках отображаются имя, email и выход. SQLite, файлы, черновики и записи разделены по серверу и аккаунту; ключ входа хранится в закрытом каталоге приложения. Safari Clipper может взять персональное подключение из приложения. [OAuth и S3](../../docs/authentication.md).

@@ -5,10 +5,19 @@
   <section id="settings" hidden>
     <div class="settings-top"><h2>Подключение хранилища</h2><button id="back" class="quiet">Назад</button></div>
     <form id="connection-form">
-      <label for="endpoint">Адрес хранилища</label><input id="endpoint" type="url" placeholder="https://doompile.example.com" required autocomplete="url">
-      <button id="login" class="primary" type="button">Войти через Яндекс / Google ↗</button><p id="account" class="hint"></p><button id="logout" type="button" class="quiet" hidden>Выйти из аккаунта</button><details><summary class="hint">Подключить персональным токеном</summary><label for="token">Персональный токен</label><input id="token" type="password" placeholder="Персональный токен приложения" autocomplete="off">
-      <p class="hint">Персональный токен остаётся в расширении и не передаётся странице.</p><button class="primary" type="submit">Сохранить подключение ↗</button>
-    </details></form>
+      <button id="login" class="primary" type="button" disabled>Войти через Яндекс / Google ↗</button>
+      <p id="account" class="hint"></p><button id="logout" type="button" class="quiet" hidden>Выйти из аккаунта</button>
+      <details id="connection-configuration">
+        <summary>Своя конфигурация</summary>
+        <label for="endpoint">Адрес сервера</label><input id="endpoint" type="url" placeholder="https://doompile.example.com" autocomplete="url">
+        <p class="hint">Оставь поле пустым, чтобы использовать сервер по умолчанию.</p>
+        <details>
+          <summary class="hint">Подключить персональным токеном</summary>
+          <label for="token">Персональный токен</label><input id="token" type="password" placeholder="Персональный токен приложения" autocomplete="off">
+          <p class="hint">Персональный токен остаётся в расширении и не передаётся странице.</p><button class="primary" type="submit">Сохранить подключение ↗</button>
+        </details>
+      </details>
+    </form>
     <button id="check" class="secondary">Проверить соединение</button><button id="native" class="secondary">Взять подключение из приложения</button>
     <button id="editor-commands" class="secondary">Команды и алиасы редактора</button>
     <button id="diagnostics-export" class="secondary">Поделиться диагностикой</button>

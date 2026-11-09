@@ -63,7 +63,7 @@ export function startOAuth(request: Request, provider: string): Response {
   const url = new URL(
     provider === "google"
       ? "https://accounts.google.com/o/oauth2/v2/auth"
-      : "https://oauth.yandex.com/authorize",
+      : "https://oauth.yandex.ru/authorize",
   );
   url.search = new URLSearchParams({
     response_type: "code",
@@ -110,7 +110,7 @@ export async function exchangeProfile(
   const token = await oauthJSON(
     provider === "google"
       ? "https://oauth2.googleapis.com/token"
-      : "https://oauth.yandex.com/token",
+      : "https://oauth.yandex.ru/token",
     {
       method: "POST",
       headers: { "Content-Type": "application/x-www-form-urlencoded" },

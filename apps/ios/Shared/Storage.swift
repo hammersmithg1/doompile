@@ -19,8 +19,11 @@ enum DoompileError: LocalizedError {
 enum Connection {
     static let group = "group.app.doompile"
     static var defaults: UserDefaults { UserDefaults(suiteName: group) ?? .standard }
+    static var defaultEndpoint: String {
+        (Bundle.main.object(forInfoDictionaryKey: "DoompilePublicURL") as? String) ?? "http://localhost:3000"
+    }
     static var endpoint: String {
-        get { defaults.string(forKey: "endpoint") ?? (Bundle.main.object(forInfoDictionaryKey:"DoompilePublicURL") as? String) ?? "http://localhost:3000" }
+        get { defaults.string(forKey: "endpoint") ?? defaultEndpoint }
         set { defaults.set(newValue.trimmingCharacters(in: CharacterSet(charactersIn: "/ ")), forKey: "endpoint") }
     }
     static var account: NativeAccount? {

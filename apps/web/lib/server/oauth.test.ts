@@ -41,6 +41,7 @@ test("Yandex callback binds browser, provider and one-use state, sends PKCE and 
     );
     const url = new URL(start.headers.get("location")!),
       cookie = binding(start);
+    assert.equal(url.origin + url.pathname, "https://oauth.yandex.ru/authorize");
     assert.equal(
       url.searchParams.get("redirect_uri"),
       `${origin}/api/auth/yandex/callback`,
@@ -66,7 +67,7 @@ test("Yandex callback binds browser, provider and one-use state, sends PKCE and 
       globalThis,
       "fetch",
       async (address: string | URL | Request, options?: RequestInit) => {
-        if (String(address).endsWith("/token")) {
+        if (String(address) === "https://oauth.yandex.ru/token") {
           const parameters = new URLSearchParams(
             options!.body as URLSearchParams,
           );

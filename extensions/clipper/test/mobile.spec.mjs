@@ -125,3 +125,39 @@ test('Safari toolbar popup fits its sheet and hands the whole draft to the fulls
  expect(await page.evaluate(()=>testRoot.querySelector('.dp-expanded [aria-label="Важное"]').getAttribute('aria-pressed'))).toBe('true');
  await page.screenshot({path:'docs/review/clipper-0.11-mobile-toolbar-expanded.png'});
 });
+
+test('popup signs in with the saved or default server and keeps the address in custom configuration',async({page})=>{
+ await page.goto('/popup-fixture');
+ const savedEndpoint=new URL(page.url()).origin;
+ const defaultEndpoint=process.env.DOOMPILE_PUBLIC_URL?.trim().replace(/\/+$/, '')||'http://localhost:3000';
+ await page.evaluate(()=>{
+  const send=browser.runtime.sendMessage.bind(browser.runtime);
+  browser.runtime.sendMessage=message=>message.type==='doompile:login'
+   ?Promise.resolve({verificationUrl:`${message.endpoint}/connect?code=fixture`})
+   :send(message);
+  browser.permissions.request=async()=>true;
+  browser.tabs.create=async({url})=>{window.testLoginURL=url;};
+ });
+ const settings=page.getByRole('button',{name:'Настройки подключения'});
+ const configuration=page.getByText('Своя конфигурация',{exact:true});
+ const address=page.getByLabel('Адрес сервера');
+ const login=page.getByRole('button',{name:'Войти через Яндекс / Google ↗'});
+ const expectLogin=async endpoint=>{
+  await login.tap();
+  await expect.poll(()=>page.evaluate(()=>window.testLoginURL)).toBe(`${endpoint}/connect?code=fixture`);
+ };
+ await settings.tap();
+ await expect(address).toBeHidden();
+ await expect(address).toHaveValue(savedEndpoint);
+ await expectLogin(savedEndpoint);
+ await configuration.tap();
+ await expect(address).toBeVisible();
+ await address.fill('');
+ await configuration.tap();
+ await page.getByRole('button',{name:'Назад'}).tap();
+ await settings.tap();
+ await expectLogin(defaultEndpoint);
+ await configuration.tap();
+ await address.fill('https://notes.example.test');
+ await expectLogin('https://notes.example.test');
+});

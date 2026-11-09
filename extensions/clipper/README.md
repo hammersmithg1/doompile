@@ -10,7 +10,7 @@ npm run clipper:build
 node --test extensions/clipper/test/*.test.mjs
 ```
 
-Outputs: `dist/chromium`, `dist/firefox`, `dist/safari`. Native builds can use a separate `--out-dir` so the live temporary extension is not overwritten during packaging.
+Outputs: `dist/chromium`, `dist/firefox`, `dist/safari`. Native builds can use a separate `--out-dir` so the live temporary extension is not overwritten during packaging. Set `DOOMPILE_PUBLIC_URL` at build time to supply the default server origin. Local builds use `http://localhost:3000` by default.
 
 ## Install
 
@@ -50,13 +50,13 @@ Both the page annotation and toolbar popup use the shared chat composer. Compact
 
 The source card uses absolute coordinates anchored to the selection. Context-menu label is always **Сохранить в Doompile** for pages, selections, links, images and videos. Image capture stores its remote URL; it does not download an image file. Video timestamps come from the active accessible player or the URL; native YouTube share cannot expose a timestamp the source app did not provide.
 
-Configure the HTTPS Doompile URL through the gear and sign in with Yandex/Google in the browser, or import the personal connection from the containing app. Manual configuration accepts a verified personal token; blank tokens never bypass authentication. Permission patterns omit ports; actual fetch URLs preserve them. The background owns credentials, rejects redirects and never sends its token to page scripts.
+Open the gear and sign in with Yandex or Google in the browser, or import the personal connection from the containing app. **Своя конфигурация** lets you override the server origin and connect using a personal token. Permission patterns omit ports; actual fetch URLs preserve them. The background owns credentials, rejects redirects and never sends its token to page scripts.
 
 Captured documents contain one source block (quote plus a small source link), with no automatic page-title heading. Legacy duplicate prefixes are normalized once in the web and native editor; comments and attachments are preserved.
 
 Queue entries are stored separately and removed only after an exact API acknowledgement. Legacy queues remain recoverable at storage quota. Retry/backoff, startup and a one-minute alarm drain pending notes. Do not clear extension storage to fix a pending queue.
 
-No ENV variables are needed for the extension. No Docker/PDF service is required. Browser integration limits require user testing of the installed Safari extension; an Xcode build alone does not verify actual Reading List insertion.
+No Docker/PDF service is required. Browser integration limits require user testing of the installed Safari extension; an Xcode build alone does not verify actual Reading List insertion.
 
 Official APIs: [Apple Reading List](https://developer.apple.com/documentation/safariservices/ssreadinglist), [Mac sharing service](https://developer.apple.com/documentation/appkit/nssharingservice/name/addtosafarireadinglist), [Chromium Reading List](https://developer.chrome.com/docs/extensions/reference/api/readingList).
 
@@ -78,4 +78,4 @@ Editor assets have content-hashed filenames and an explicit compatibility contra
 
 ## Персональный вход
 
-В настройках укажи адрес сервера и нажми «Войти через Яндекс / Google». Заверши вход и подтверди подключение в браузере, затем снова открой расширение. Можно взять персональное подключение из нативного приложения. Ручное поле принимает только персональный токен; прежний общий ключ и автоматический localhost bypass больше не работают. Каждая запись очереди привязана к исходному аккаунту и серверу. При смене аккаунта чужие очереди скрыты и не отправляются. Старые unowned-клипы сохраняются отдельно и не присваиваются следующему вошедшему пользователю. [Настройка сервера](../../docs/authentication.md).
+В настройках нажми «Войти через Яндекс / Google». Для своего сервера сначала укажи адрес в разделе «Своя конфигурация». Заверши вход и подтверди подключение в браузере, затем снова открой расширение. Можно взять персональное подключение из нативного приложения. Ручное поле принимает только персональный токен; прежний общий ключ и автоматический localhost bypass больше не работают. Каждая запись очереди привязана к исходному аккаунту и серверу. При смене аккаунта чужие очереди скрыты и не отправляются. Старые unowned-клипы сохраняются отдельно и не присваиваются следующему вошедшему пользователю. [Настройка сервера](../../docs/authentication.md).

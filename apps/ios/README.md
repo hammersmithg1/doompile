@@ -19,7 +19,7 @@ swift test --package-path apps/ios --scratch-path /tmp/doompile-core-tests
 
 Open `Doompile.xcodeproj` in Xcode to run on a simulator or signed device. `generate_project.py` is deterministic and works on a Linux devbox; it does not require XcodeGen or CocoaPods. It copies the current built Safari resources. Run it again whenever extension resources change. Generated resources are not the authoritative clipper source: edit `extensions/clipper/src/`.
 
-The simulator can reach the locally running Next.js API at `http://localhost:3000`. A physical iPhone needs a reachable **HTTPS** origin (for example, the future devbox deployment). Enter the origin on the sign-in screen, sign in with Yandex/Google in the browser, approve the device, and return to the app. [OAuth setup](../../docs/authentication.md). Do not put production tokens in source files.
+The simulator can reach the locally running Next.js API at `http://localhost:3000`. On a physical iPhone, use the configured HTTPS origin or enter a reachable HTTPS origin under **Своя конфигурация**. Sign in with Yandex or Google in the browser, approve the device, and return to the app. [OAuth setup](../../docs/authentication.md). Do not put production tokens in source files.
 
 ## Current behavior
 

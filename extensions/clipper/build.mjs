@@ -31,6 +31,13 @@ const richEditor=await build({entryPoints:[path.join(here,'src/rich-editor.js')]
 const editorHash=createHash('sha256').update(richEditor.outputFiles[0].text).digest('hex').slice(0,16);
 const editorFile=`rich-editor-${editorHash}.js`;
 const editorConfig='globalThis.DoompileEditorBuild='+JSON.stringify({file:editorFile,hash:editorHash})+';\n';
+const publicURL=process.env.DOOMPILE_PUBLIC_URL?.trim().replace(/\/+$/, '');
+const scriptPrefixes={
+  'core.js':contracts+'\n'+design+'\n'+diagnostics.outputFiles[0].text+'\n',
+  'composer.js':design+'\n'+editorConfig+'globalThis.DoompileComposerCSS='+JSON.stringify(composerCSS)+';\n',
+  'receipt.js':design+'\n',
+  'popup.js':'globalThis.DoompileDefaultEndpoint='+JSON.stringify(publicURL||'')+';\n',
+};
 const base = {
   manifest_version:3, name:'Doompile — '+brand.copy.tagline, version:'0.11.0',
   description:'Сохраняй ссылки, статьи, цитаты и моменты видео вместе со своими мыслями.',
@@ -66,7 +73,7 @@ for (const browser of ['chromium','firefox','safari']) {
   const buildConfig='globalThis.DoompileBuild='+JSON.stringify({platform:'clipper_'+browser,release:(base.version+'.'+commit).slice(0,80)})+';\n';
   await writeFile(path.join(dir,'background.js'),asciiScript(buildConfig+telemetry.outputFiles[0].text+'\n'+editorConfig+core+'\n'+background));
   for (const name of sources) {
-    if(name.endsWith('.js'))await writeFile(path.join(dir,name),asciiScript((name==='core.js'?contracts+'\n'+design+'\n'+diagnostics.outputFiles[0].text+'\n':'')+(name==='composer.js'?design+'\n'+editorConfig+'globalThis.DoompileComposerCSS='+JSON.stringify(composerCSS)+';\n':'')+(name==='receipt.js'?design+'\n':'')+await readFile(path.join(here,'src',name),'utf8')));
+    if(name.endsWith('.js'))await writeFile(path.join(dir,name),asciiScript((scriptPrefixes[name]||'')+await readFile(path.join(here,'src',name),'utf8')));
     else if(name==='composer.css')await writeFile(path.join(dir,name),composerCSS);
     else if(name==='receipt.css') await writeFile(path.join(dir,name),designTokens+'\n'+await readFile(path.join(here,'src',name),'utf8'));
     else await copyFile(path.join(here,'src',name),path.join(dir,name));

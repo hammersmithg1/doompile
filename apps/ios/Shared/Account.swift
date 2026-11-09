@@ -95,19 +95,33 @@ struct NativeAccount: Codable, Equatable {
 struct AccountLoginView: View {
     @ObservedObject private var account = AccountSession.shared
     @Environment(\.openURL) private var openURL
-    @State private var endpoint = Connection.endpoint
+    @State private var endpoint = Connection.endpoint == Connection.defaultEndpoint ? "" : Connection.endpoint
     var body: some View {
         VStack(alignment:.leading,spacing:20) {
             HStack(spacing: 8) { DoompileWordmark(height: 32); DoompileHalo(width: 38) }
             Text(BrandCopy.motto).font(.title2.bold())
             Text("Войди через Яндекс или Google, чтобы заметки и файлы были рядом на всех устройствах.").font(.callout).foregroundStyle(.secondary)
-            TextField("https://…",text:$endpoint).textFieldStyle(.roundedBorder)
             Button(account.signingIn ? "Заверши вход в браузере…" : "Войти через браузер ↗") {
-                Task { if let url = await account.start(endpoint:endpoint) { openURL(url) } }
+                let address = endpoint.trimmingCharacters(in: .whitespacesAndNewlines)
+                let server = address.isEmpty ? Connection.defaultEndpoint : address
+                Task { if let url = await account.start(endpoint: server) { openURL(url) } }
             }.buttonStyle(.borderedProminent).disabled(account.signingIn)
             if account.signingIn { Button("Отменить") { account.cancel() }.buttonStyle(.plain) }
             if let error = account.error { Text(error).font(.footnote).foregroundStyle(.red) }
             Text("После входа разреши подключение приложения и вернись сюда.").font(.footnote).foregroundStyle(.secondary)
+            DisclosureGroup("Своя конфигурация") {
+                VStack(alignment: .leading, spacing: 6) {
+                    TextField("Адрес сервера", text: $endpoint, prompt: Text("https://…"))
+                        .textFieldStyle(.roundedBorder)
+                        .autocorrectionDisabled()
+                        #if os(iOS)
+                        .keyboardType(.URL)
+                        .textInputAutocapitalization(.never)
+                        #endif
+                    Text("Оставь поле пустым, чтобы использовать сервер по умолчанию.")
+                        .foregroundStyle(.secondary)
+                }.padding(.top, 8)
+            }.font(.footnote).disabled(account.signingIn)
             DisclosureGroup("Диагностика") { DiagnosticsView() }.font(.footnote)
         }.padding(32).frame(maxWidth:440)
     }
