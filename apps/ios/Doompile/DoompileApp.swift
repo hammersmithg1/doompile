@@ -345,12 +345,9 @@ struct Home: View {
                 onCancelled: cancelDrawerDrag))
             .safeAreaInset(edge: .top, spacing: 0) { sidebarButton }
             .safeAreaInset(edge: .bottom, spacing: 0) { composer }
-            .background(Palette.ink, in: shape)
+            .background(Palette.ink, ignoresSafeAreaEdges: [])
             .clipShape(shape)
-            .overlay {
-                shape.strokeBorder(Palette.line.opacity(progress * 0.7))
-                    .allowsHitTesting(false)
-            }
+            .compositingGroup()
             .shadow(color: .black.opacity(progress * 0.18), radius: 16, x: -4)
             .scaleEffect(reduceMotion ? 1 : 1 - 0.027 * progress, anchor: .leading)
             .offset(x: progress * width)
