@@ -130,11 +130,10 @@ jobs:
           fi
           if [[ "$IOS_TEST_FILTER" == 'DoompileUITests/TouchUXTests/testDrawerRepeatedGesturesDoNotDuplicateNavigation' ]]; then
             filter_args+=("-only-testing:DoompileUITests/TouchUXTests/testQuickKeyboardDismissesWhenTappingFeed")
-            xcrun simctl bootstatus "$simulator_id" -b
-            xcrun simctl status_bar "$simulator_id" override --time '9:41' \
-              --dataNetwork wifi --wifiMode active --wifiBars 3 --cellularMode active --cellularBars 4 \
-              --batteryState unplugged --batteryLevel 100
-            xcrun simctl io "$simulator_id" recordVideo --codec=h264 "$RUNNER_TEMP/sidebar-motion.mp4" &
+            (
+              until xcrun simctl spawn "$simulator_id" launchctl print system >/dev/null 2>&1; do sleep 1; done
+              exec xcrun simctl io "$simulator_id" recordVideo --codec=h264 "$RUNNER_TEMP/sidebar-motion.mp4"
+            ) &
             video_pid=$!
             stop_video() {
               kill -INT "$video_pid" 2>/dev/null || true
