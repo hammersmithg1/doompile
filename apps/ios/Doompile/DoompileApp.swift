@@ -310,7 +310,9 @@ struct Home: View {
         GeometryReader { geometry in
             let width = min(320.0, geometry.size.width * 0.82)
             ZStack(alignment: .leading) {
-                Palette.sidebar.ignoresSafeArea(.container, edges: .vertical)
+                Palette.ink
+                    .overlay { Palette.sidebar.opacity(min(1, drawerProgress * 3)) }
+                    .ignoresSafeArea(.container, edges: .vertical)
                 sidebar.frame(width: width)
                     .disabled(drawerDragOrigin != nil)
                     .allowsHitTesting(drawer)
@@ -334,7 +336,7 @@ struct Home: View {
     }
     private func homeForeground(width: CGFloat) -> some View {
         let progress = min(1, max(0, drawerProgress))
-        let shape = RoundedRectangle(cornerRadius: 30 * progress, style: .continuous)
+        let shape = RoundedRectangle(cornerRadius: 32 * min(1, progress * 2.5), style: .continuous)
         return feed
             .scrollDisabled(drawer)
             .modifier(HorizontalDragModifier(enabled: !drawer, target: .openDrawer,
@@ -343,13 +345,10 @@ struct Home: View {
                 onCancelled: cancelDrawerDrag))
             .safeAreaInset(edge: .top, spacing: 0) { sidebarButton }
             .safeAreaInset(edge: .bottom, spacing: 0) { composer }
-            .background {
-                shape.fill(Palette.ink)
-                    .overlay { shape.strokeBorder(Palette.line.opacity(progress * 0.75)) }
-                    .ignoresSafeArea(.container, edges: .vertical)
-                    .shadow(color: .black.opacity(progress * 0.20), radius: 19, x: -5)
-                    .allowsHitTesting(false)
-            }
+            .background(Palette.ink, ignoresSafeAreaEdges: [])
+            .clipShape(shape)
+            .compositingGroup()
+            .shadow(color: .black.opacity(progress * 0.18), radius: 16, x: -4)
             .scaleEffect(reduceMotion ? 1 : 1 - 0.027 * progress, anchor: .leading)
             .offset(x: progress * width)
             .allowsHitTesting(!drawer)
