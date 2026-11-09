@@ -398,28 +398,25 @@ final class TouchUXTests: XCTestCase {
         XCTAssertTrue(app.buttons["Убрать тег Research"].waitForExistence(timeout: 3))
         XCTAssertTrue(app.buttons["Убрать тег Idea"].exists)
     }
-    func testDiagonalNoteSwipesKeepFeedPosition() throws {
+    func testDiagonalNoteSwipesKeepFeedPosition() {
         app.terminate()
         app.launchEnvironment["DOOMPILE_UI_SCROLL_FIXTURE"] = "1"
         app.launch()
         let feed = app.scrollViews["note-feed"]
         XCTAssertTrue(feed.waitForExistence(timeout: 10))
-        feed.swipeUp()
-
-        let rows = app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH 'note-'"))
-        let center = feed.frame.midY
-        let row = try XCTUnwrap(rows.allElementsBoundByIndex.filter(\.isHittable).min {
-            abs($0.frame.midY - center) < abs($1.frame.midY - center)
-        })
+        let rows = feed.buttons.matching(NSPredicate(format: "identifier BEGINSWITH 'note-'"))
+        let row = rows.element(boundBy: 2)
+        XCTAssertTrue(row.waitForExistence(timeout: 5) && row.isHittable)
         let original = row.frame
         let y = (original.midY - app.frame.minY) / app.frame.height
         let id = String(row.identifier.dropFirst("note-".count))
         let pin = app.buttons["swipe-action-pin-" + id]
+        XCTAssertFalse(pin.exists)
 
         let openStart = app.coordinate(withNormalizedOffset: CGVector(dx: 0.76, dy: y))
-        let openEnd = app.coordinate(withNormalizedOffset: CGVector(dx: 0.25, dy: y + 0.07))
+        let openEnd = app.coordinate(withNormalizedOffset: CGVector(dx: 0.25, dy: y - 0.07))
         openStart.press(forDuration: 0.03, thenDragTo: openEnd)
-        XCTAssertTrue(pin.waitForExistence(timeout: 3))
+        XCTAssertTrue(pin.waitForExistence(timeout: 3) && pin.isHittable)
         XCTAssertEqual(row.frame.minY, original.minY, accuracy: 2)
 
         let closeStart = app.coordinate(withNormalizedOffset: CGVector(dx: 0.18, dy: y))
