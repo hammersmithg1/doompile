@@ -1444,6 +1444,7 @@ export default function Doompile({
       />
       <aside
         ref={mobileSidebar.panel}
+        id="workspace-navigation"
         className={`sidebar ${sidebar ? "open" : ""}`}
         aria-label="Навигация"
         inert={composing || editorBusy || (isMobile && !sidebar)}
@@ -1591,6 +1592,20 @@ export default function Doompile({
             </button>
           </div>
         )}
+        <div className="mobile-tools" inert={composing || editorBusy}>
+          <button
+            className="icon-button"
+            aria-label="Открыть меню"
+            aria-controls="workspace-navigation"
+            aria-expanded={sidebar}
+            onClick={() => {
+              setOpenSwipe(null);
+              setSidebar(true);
+            }}
+          >
+            <PanelLeft size={20} />
+          </button>
+        </div>
         <div
           className="main-scroll"
           inert={composing || editorBusy}
@@ -1599,15 +1614,6 @@ export default function Doompile({
             if (el === input.current) (el as HTMLElement).blur();
           }}
         >
-          <div className="mobile-tools">
-            <button
-              className="icon-button"
-              aria-label="Открыть меню"
-              onClick={() => setSidebar(true)}
-            >
-              <PanelLeft size={20} />
-            </button>
-          </div>
           {(query || filter !== "all") && (
             <div className="feed-label">
               {title}

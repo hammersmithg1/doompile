@@ -43,6 +43,7 @@
     top: var(--mobile-top, 0px);
     height: var(--mobile-height, 100dvh);
     min-height: 0;
+    background: var(--sidebar);
     --mobile-bottom-inset: env(safe-area-inset-bottom, 0px);
     /* Browser chrome already occupies part of the bottom safe area. */
     --mobile-bottom-inset: max(
@@ -52,26 +53,36 @@
   }
   .main-scroll,
   .has-detail .main-scroll {
-    padding: max(20px, env(safe-area-inset-top))
-      max(16px, env(safe-area-inset-right)) 16px
+    padding: 6px max(16px, env(safe-area-inset-right)) 16px
       max(16px, env(safe-area-inset-left));
     overscroll-behavior-y: contain;
   }
   .main-column {
     min-height: 0;
+    z-index: 1;
+    background: var(--bg);
+  }
+  .app-shell:is([data-sidebar-open="true"], [data-sidebar-moving="true"]) > .main-column {
+    border-radius: calc(28px * var(--sidebar-progress, 0));
+    box-shadow: -10px 2px 36px color-mix(in srgb, #000 calc(24% * var(--sidebar-progress, 0)), transparent);
+    overflow: clip;
+    transform: translate3d(var(--sidebar-position, 0px), 0, 0)
+      scale(calc(1 - 0.035 * var(--sidebar-progress, 0)));
+    transform-origin: left center;
   }
   .mobile-tools {
-    position: absolute;
-    width: 1px;
-    height: 1px;
-    overflow: hidden;
-    clip-path: inset(50%);
+    flex-shrink: 0;
+    margin: 0;
+    padding: max(6px, env(safe-area-inset-top)) 0 0
+      max(10px, env(safe-area-inset-left));
   }
-  .mobile-tools:focus-within {
-    position: static;
-    width: auto;
-    height: auto;
-    clip-path: none;
+  .composing .mobile-tools,
+  .has-detail .mobile-tools {
+    display: none;
+  }
+  .mobile-tools .icon-button {
+    width: 44px;
+    height: 44px;
   }
   .sidebar {
     position: absolute;
@@ -80,22 +91,32 @@
     height: 100%;
     padding-top: max(24px, env(safe-area-inset-top));
     width: min(310px, 86vw) !important;
-    transform: translate3d(var(--sidebar-offset, -100%), 0, 0);
+    z-index: 0;
+    background: transparent;
+    border-right: 0;
+    visibility: hidden;
+    transform: none;
     transition: none;
     box-shadow: none;
   }
-  .app-shell[data-sidebar-open="true"] .sidebar,
-  .app-shell[data-sidebar-moving="true"] .sidebar {
-    box-shadow: 15px 0 50px #00000020;
+  .app-shell:is([data-sidebar-open="true"], [data-sidebar-moving="true"]) > .sidebar {
+    visibility: visible;
   }
   .sidebar.open {
-    transform: translate3d(var(--sidebar-offset, 0px), 0, 0);
+    transform: none;
   }
   .sidebar-scrim {
     position: absolute;
+    left: var(--sidebar-position, 0px);
+    inset-block: calc(1.75% * var(--sidebar-progress, 0));
+    border-radius: calc(28px * var(--sidebar-progress, 0)) 0 0 calc(28px * var(--sidebar-progress, 0));
+    z-index: 2;
+    background: color-mix(in srgb, var(--text) 6%, transparent);
+    backdrop-filter: none;
     opacity: var(--sidebar-progress, 0);
     visibility: hidden;
     pointer-events: none;
+    touch-action: none;
     animation: none;
   }
   .app-shell[data-sidebar-open="true"] .sidebar-scrim,
@@ -103,7 +124,7 @@
     visibility: visible;
     pointer-events: auto;
   }
-  .app-shell[data-sidebar-moving="true"] .sidebar {
+  .app-shell[data-sidebar-moving="true"] > .main-column {
     will-change: transform;
   }
   .sidebar .nav-item {
@@ -295,27 +316,32 @@
     position: relative;
     overflow: hidden;
     border-radius: 9px;
+    background: var(--sidebar);
   }
   .mobile-row-content {
     position: relative;
     z-index: 1;
     background: var(--bg);
-    transition: transform 140ms ease-out;
+    border-radius: calc(12px * var(--row-progress, 0));
+    transform: translate3d(var(--row-position, 0px), 0, 0);
     touch-action: pan-y pinch-zoom;
-  }
-  .mobile-row-content.is-dragging {
-    transition: none;
   }
   .mobile-row-actions {
     display: flex;
     position: absolute;
     inset: 0 0 0 auto;
     width: 156px;
-    align-items: stretch;
+    gap: 4px;
+    padding-inline: 4px;
+    align-items: center;
+    transform: translate3d(calc((1 - var(--row-progress, 0)) * 18px), 0, 0);
+    opacity: clamp(0, calc(var(--row-progress, 0) * 2.8), 1);
   }
   .mobile-row-actions button {
-    width: 52px;
-    background: var(--sidebar);
+    flex: 1;
+    height: 44px;
+    border-radius: 12px;
+    background: var(--surface);
     color: var(--muted);
     display: grid;
     place-items: center;
@@ -327,6 +353,9 @@
   .mobile-row-actions button:last-child {
     background: #d9536326;
     color: #d95363;
+  }
+  .mobile-row-actions button:active {
+    filter: brightness(0.92);
   }
   .detail-pane,
   .detail-expanded > .detail-pane {
@@ -525,10 +554,5 @@
   }
   .note-editor-header:has(.header-recording) {
     padding-bottom: 36px;
-  }
-}
-@media (prefers-reduced-motion: reduce) {
-  .mobile-row-content {
-    transition: none;
   }
 }

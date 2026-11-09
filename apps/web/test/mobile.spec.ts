@@ -51,31 +51,30 @@ async function setup(page: Page, populated = true) {
   return notes;
 }
 async function swipe(page: Page, selector: string, dx: number, dy = 0) {
-  const row = page.locator(selector).first();
-  await row.dispatchEvent("touchstart", {
-    touches: [{ clientX: 250, clientY: 250 }],
-  });
-  await row.dispatchEvent("touchmove", {
-    touches: [{ clientX: 250 + dx, clientY: 250 + dy }],
-  });
-  await row.dispatchEvent("touchend", {
-    touches: [],
-    changedTouches: [{ clientX: 250 + dx, clientY: 250 + dy }],
-  });
+  await dispatchTouch(page, selector, "start", 250, 250);
+  await dispatchTouch(page, selector, "move", 250 + dx, 250 + dy);
+  await dispatchTouch(page, selector, "end", 250 + dx, 250 + dy);
 }
-async function sidebarTouch(
+function sidebarTouch(page: Page, type: "start" | "move" | "end" | "cancel", x: number, y = 300) {
+  return dispatchTouch(page, ".app-shell", type, x, y);
+}
+async function dispatchTouch(
   page: Page,
+  selector: string,
   type: "start" | "move" | "end" | "cancel",
   x: number,
-  y = 300,
+  y: number,
 ) {
-  await page.locator(".app-shell").dispatchEvent(`touch${type}`, {
-    touches:
-      type === "end" || type === "cancel"
-        ? []
-        : [{ identifier: 1, clientX: x, clientY: y }],
-    changedTouches: [{ identifier: 1, clientX: x, clientY: y }],
-  });
+  return page.locator(selector).first().evaluate((target, { type, x, y }) => {
+    const touch = { identifier: 1, clientX: x, clientY: y };
+    const event = new Event(`touch${type}`, { bubbles: true, cancelable: true });
+    Object.assign(event, {
+      touches: type === "end" || type === "cancel" ? [] : [touch],
+      changedTouches: [touch],
+    });
+    target.dispatchEvent(event);
+    return event.defaultPrevented;
+  }, { type, x, y });
 }
 
 test("mobile feed keeps text and timestamps inside swipe wrappers at narrow widths", async ({
@@ -113,31 +112,34 @@ test("sidebar follows the finger, reverses, cancels and settles using release mo
   test.skip(info.project.name !== "iphone-webkit");
   await setup(page);
   const panel = page.locator(".sidebar");
-  const right = () => panel.evaluate((e) => e.getBoundingClientRect().right);
-  await expect.poll(right).toBe(0);
+  const surface = page.locator(".main-column");
+  const left = () => surface.evaluate((e) => e.getBoundingClientRect().left);
+  await expect.poll(left).toBe(0);
   await sidebarTouch(page, "start", 8);
-  await sidebarTouch(page, "move", 88);
-  expect(await right()).toBeCloseTo(80, 0);
+  expect(await sidebarTouch(page, "move", 88)).toBe(true);
+  expect(await left()).toBeCloseTo(80, 0);
+  expect((await panel.boundingBox())?.x).toBe(0);
   const firstOpacity = await page
     .locator(".sidebar-scrim")
     .evaluate((e) => Number(getComputedStyle(e).opacity));
-  await sidebarTouch(page, "move", 138);
-  expect(await right()).toBeCloseTo(130, 0);
+  expect(await sidebarTouch(page, "move", 138, 442)).toBe(true);
+  expect(await left()).toBeCloseTo(130, 0);
   expect(
     await page
       .locator(".sidebar-scrim")
       .evaluate((e) => Number(getComputedStyle(e).opacity)),
   ).toBeGreaterThan(firstOpacity);
   await sidebarTouch(page, "move", 58);
-  expect(await right()).toBeCloseTo(50, 0);
+  expect(await left()).toBeCloseTo(50, 0);
   await sidebarTouch(page, "cancel", 58);
-  await expect.poll(right).toBe(0);
+  await expect.poll(left).toBe(0);
   await expect(panel).not.toHaveClass(/open/);
 
   // A vertical edge gesture stays a scroll, even with substantial horizontal drift.
   await sidebarTouch(page, "start", 8);
-  await sidebarTouch(page, "move", 120, 470);
-  expect(await right()).toBe(0);
+  expect(await sidebarTouch(page, "move", 120, 470)).toBe(false);
+  expect(await sidebarTouch(page, "move", 248, 470)).toBe(false);
+  expect(await left()).toBe(0);
   await sidebarTouch(page, "end", 120, 470);
   await expect(panel).not.toHaveClass(/open/);
 
@@ -145,8 +147,8 @@ test("sidebar follows the finger, reverses, cancels and settles using release mo
   await page.locator(".app-shell").evaluate((root) => {
     for (const [type, x] of [
       ["start", 8],
-      ["move", 108],
-      ["end", 108],
+      ["move", 53],
+      ["end", 53],
     ] as const) {
       const touch = { identifier: 1, clientX: x, clientY: 300 };
       // Linux WebKit does not expose a constructible Touch class.
@@ -159,32 +161,80 @@ test("sidebar follows the finger, reverses, cancels and settles using release mo
     }
   });
   await expect(panel).toHaveClass(/open/);
-  await expect.poll(right).toBe(310);
-  await expect(page.locator(".main-column")).toHaveAttribute("inert", "");
+  await expect.poll(left).toBe(310);
+  await expect(surface).toHaveAttribute("inert", "");
+  await expect(surface).toHaveCSS("border-top-left-radius", "28px");
+  await expect(surface).toHaveCSS("overflow", "clip");
   await sidebarTouch(page, "start", 250);
   await sidebarTouch(page, "move", 190);
-  expect(await right()).toBeCloseTo(250, 0);
+  expect(await left()).toBeCloseTo(250, 0);
   await sidebarTouch(page, "cancel", 190);
-  await expect.poll(right).toBe(310);
+  await expect.poll(left).toBe(310);
 
   await sidebarTouch(page, "start", 250);
   await sidebarTouch(page, "move", 50);
   await sidebarTouch(page, "end", 50);
-  await expect.poll(right).toBe(0);
-  await expect(page.locator(".main-column")).not.toHaveAttribute("inert", "");
+  await expect.poll(left).toBe(0);
+  await expect(surface).not.toHaveAttribute("inert", "");
   await expect(page.locator(".sidebar-scrim")).toBeHidden();
 
   // Respect reduced motion while keeping direct manipulation available.
   await page.emulateMedia({ reducedMotion: "reduce" });
   await sidebarTouch(page, "start", 8);
   await sidebarTouch(page, "move", 248);
-  expect(await right()).toBeCloseTo(240, 0);
+  expect(await left()).toBeCloseTo(240, 0);
   await sidebarTouch(page, "end", 248);
-  expect(await right()).toBe(310);
+  expect(await left()).toBe(310);
   await page
     .getByRole("button", { name: "Закрыть навигацию" })
-    .click({ position: { x: 360, y: 300 } });
-  expect(await right()).toBe(0);
+    .click();
+  expect(await left()).toBe(0);
+
+  await page.getByRole("button", { name: "Открыть меню", exact: true }).click();
+  expect(await left()).toBe(310);
+  await expect(page.getByRole("textbox", { name: "Поиск заметок" })).toBeVisible();
+});
+
+test("horizontal drawer and row gestures keep a long feed still while vertical swipes scroll", async ({ page }, info) => {
+  test.skip(info.project.name !== "desktop-chromium");
+  await page.setViewportSize({ width: 390, height: 844 });
+  const cdp = await page.context().newCDPSession(page);
+  await cdp.send("Emulation.setTouchEmulationEnabled", { enabled: true, maxTouchPoints: 1 });
+  const notes = await setup(page);
+  for (let i = 0; i < 25; i++) notes.push(createNote({ plainText: `Длинная лента ${i}`, revision: 1 }));
+  await page.reload();
+  await expect(page.locator(".mobile-note-row")).toHaveCount(26);
+  const feed = page.locator(".main-scroll");
+  const scroll = () => feed.evaluate((element) => element.scrollTop);
+  async function drag(points: [number, number][]) {
+    const [[x, y], ...moves] = points;
+    await cdp.send("Input.dispatchTouchEvent", { type: "touchStart", touchPoints: [{ x, y }] });
+    for (const [x, y] of moves) {
+      await cdp.send("Input.dispatchTouchEvent", { type: "touchMove", touchPoints: [{ x, y }] });
+    }
+    await cdp.send("Input.dispatchTouchEvent", { type: "touchEnd", touchPoints: [] });
+  }
+
+  await drag([[8, 310], [24, 308], [95, 251], [160, 170]]);
+  await expect(page.locator(".sidebar")).toHaveClass(/open/);
+  expect(await scroll()).toBe(0);
+  await page.getByRole("button", { name: "Закрыть меню", exact: true }).click();
+  await expect(page.locator(".sidebar-scrim")).toBeHidden();
+
+  const row = page.locator(".mobile-note-row").first();
+  const rect = (await row.boundingBox())!;
+  const y = Math.round(rect.y + rect.height / 2);
+  await drag([[270, y], [254, y - 2], [194, y - 61], [140, y - 100]]);
+  await expect(row).toHaveAttribute("data-revealed", "true");
+  expect(await scroll()).toBe(0);
+  await drag([[115, y], [135, y], [212, y], [265, y]]);
+  await expect(row).toHaveAttribute("data-revealed", "false");
+
+  await drag([[235, 505], [231, 481], [202, 414], [170, 330]]);
+  await expect.poll(scroll).toBeGreaterThan(50);
+  await expect(page.locator(".mobile-note-row[data-revealed=true]")).toHaveCount(0);
+  await expect(page.locator(".sidebar")).not.toHaveClass(/open/);
+  await expect(page.getByRole("button", { name: "Открыть меню", exact: true })).toBeInViewport();
 });
 
 test("Safari keyboard geometry updates in the same frame and restores after dismissal", async ({
@@ -292,11 +342,7 @@ test("mobile capture, document tools, keyboard viewport and save on close", asyn
   test.skip(info.project.name !== "iphone-webkit");
   const notes = await setup(page, false);
   await expect(page.locator(".mobile-welcome")).toBeVisible();
-  expect(
-    await page
-      .locator(".mobile-tools")
-      .evaluate((e) => getComputedStyle(e).clipPath),
-  ).toBe("inset(50%)");
+  await expect(page.getByRole("button", { name: "Открыть меню", exact: true })).toBeVisible();
   const input = page.getByRole("textbox", { name: "Быстрая заметка" });
   await input.fill("Непустой быстрый черновик");
   await input.press("Enter");
@@ -375,8 +421,9 @@ test("mobile gestures, actions, sidebar search and reading without keyboard", as
   await expect(page.locator(".sidebar")).toHaveClass(/open/);
   await expect(page.locator(".sidebar")).toHaveCSS(
     "transform",
-    "matrix(1, 0, 0, 1, 0, 0)",
+    "none",
   );
+  await expect.poll(() => page.locator(".main-column").evaluate((surface) => surface.getBoundingClientRect().left)).toBe(310);
   await expect(
     page.getByRole("textbox", { name: "Поиск заметок" }),
   ).toBeVisible();
