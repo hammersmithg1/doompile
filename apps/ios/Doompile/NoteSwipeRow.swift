@@ -23,6 +23,19 @@ struct NoteSwipeRow<Content: View>: View {
 
     var body: some View {
         ZStack(alignment: .trailing) {
+            if open || offset < 0 {
+                HStack(spacing: 6) {
+                    action(note.pinned ? "Открепить" : "Закрепить", name: "pin", icon: note.pinned ? "pin.slash" : "pin", color: Palette.accent, perform: onPin)
+                    action(note.urgent ? "Убрать из важного" : "Сделать важной", name: "urgent", icon: note.urgent ? "flame" : "flame.fill", color: Palette.orange, perform: onUrgent)
+                    action("Удалить", name: "delete", icon: "trash", color: Palette.orange, perform: onDelete)
+                }.frame(width: revealWidth - 6)
+                    .scaleEffect(0.94 + 0.06 * progress, anchor: .trailing)
+                    .offset(x: (1 - progress) * 12)
+                    .opacity(min(1, progress * 3))
+                    .mask(alignment: .trailing) { Rectangle().frame(width: max(0, -offset - 6)) }
+                    .accessibilityHidden(!open).allowsHitTesting(open && dragOrigin == nil)
+                    .transition(.opacity)
+            }
             content().frame(maxWidth: .infinity).background(Palette.ink)
                 .contentShape(Rectangle())
                 .onTapGesture {
@@ -38,16 +51,6 @@ struct NoteSwipeRow<Content: View>: View {
                     Button(note.urgent ? "Убрать из важного" : "Сделать важной", systemImage: "flame", action: onUrgent)
                     Button("Удалить", systemImage: "trash", role: .destructive, action: onDelete)
                 }
-            HStack(spacing: 6) {
-                action(note.pinned ? "Открепить" : "Закрепить", name: "pin", icon: note.pinned ? "pin.slash" : "pin", color: Palette.accent, perform: onPin)
-                action(note.urgent ? "Убрать из важного" : "Сделать важной", name: "urgent", icon: note.urgent ? "flame" : "flame.fill", color: Palette.orange, perform: onUrgent)
-                action("Удалить", name: "delete", icon: "trash", color: Palette.orange, perform: onDelete)
-            }.frame(width: revealWidth - 6)
-                .scaleEffect(0.94 + 0.06 * progress, anchor: .trailing)
-                .offset(x: (1 - progress) * 12)
-                .opacity(min(1, progress * 3))
-                .mask(alignment: .trailing) { Rectangle().frame(width: max(0, -offset - 6)) }
-                .accessibilityHidden(!open).allowsHitTesting(open && dragOrigin == nil)
         }
         .clipShape(RoundedRectangle(cornerRadius: 14))
         .contentShape(Rectangle())
@@ -77,7 +80,7 @@ struct NoteSwipeRow<Content: View>: View {
         let threshold = revealWidth * (open ? 0.36 : 0.46)
         let willOpen = origin + translation + momentum < -threshold
         let remaining = (willOpen ? -revealWidth : 0) - offset
-        let initialVelocity = abs(remaining) > 1 ? Double(momentum / (0.12 * remaining)) : 0
+        let initialVelocity = abs(remaining) > 1 ? Double(momentum / (HorizontalDragTarget.projectionTime * remaining)) : 0
         settleDrag(open: willOpen, initialVelocity: min(4, max(0, initialVelocity)))
     }
     private func cancelDrag() {
