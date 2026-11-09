@@ -309,15 +309,13 @@ struct Home: View {
     private var homeContent: some View {
         GeometryReader { geometry in
             let width = min(320.0, geometry.size.width * 0.82)
-            let insets = geometry.safeAreaInsets
             ZStack(alignment: .leading) {
-                Palette.sidebar
+                Palette.sidebar.ignoresSafeArea(.container, edges: .vertical)
                 sidebar.frame(width: width)
-                    .padding(.top, insets.top).padding(.bottom, insets.bottom)
                     .disabled(drawerDragOrigin != nil)
                     .allowsHitTesting(drawer)
                     .accessibilityHidden(!drawer)
-                homeForeground(width: width, insets: insets)
+                homeForeground(width: width)
                 Button(action: closeDrawer) { Color.clear.contentShape(Rectangle()) }
                     .buttonStyle(.plain)
                     .frame(width: geometry.size.width - drawerProgress * width)
@@ -327,31 +325,31 @@ struct Home: View {
                     .accessibilityLabel("Закрыть боковое меню")
                     .accessibilityIdentifier("close-sidebar")
             }
-            .clipped()
             .contentShape(Rectangle())
             .modifier(HorizontalDragModifier(enabled: drawer, target: .closeDrawer,
                 onChanged: { translation, _ in changeDrawer(translation: translation, width: width) },
                 onEnded: { translation, predicted in finishDrawer(translation: translation, predicted: predicted, width: width) },
                 onCancelled: cancelDrawerDrag))
-            .ignoresSafeArea(.container, edges: .vertical)
         }
     }
-    private func homeForeground(width: CGFloat, insets: EdgeInsets) -> some View {
+    private func homeForeground(width: CGFloat) -> some View {
         let progress = min(1, max(0, drawerProgress))
         let shape = RoundedRectangle(cornerRadius: 30 * progress, style: .continuous)
         return feed
             .scrollDisabled(drawer)
-            .safeAreaInset(edge: .top, spacing: 0) { sidebarButton }
-            .safeAreaInset(edge: .bottom, spacing: 0) { composer }
-            .padding(.top, insets.top).padding(.bottom, insets.bottom)
-            .background(Palette.ink)
-            .clipShape(shape)
-            .overlay { shape.strokeBorder(Palette.line.opacity(progress * 0.75)).allowsHitTesting(false) }
-            .shadow(color: .black.opacity(progress * 0.20), radius: 19, x: -5)
             .modifier(HorizontalDragModifier(enabled: !drawer, target: .openDrawer,
                 onChanged: { translation, _ in changeDrawer(translation: translation, width: width) },
                 onEnded: { translation, predicted in finishDrawer(translation: translation, predicted: predicted, width: width) },
                 onCancelled: cancelDrawerDrag))
+            .safeAreaInset(edge: .top, spacing: 0) { sidebarButton }
+            .safeAreaInset(edge: .bottom, spacing: 0) { composer }
+            .background {
+                shape.fill(Palette.ink)
+                    .overlay { shape.strokeBorder(Palette.line.opacity(progress * 0.75)) }
+                    .ignoresSafeArea(.container, edges: .vertical)
+                    .shadow(color: .black.opacity(progress * 0.20), radius: 19, x: -5)
+                    .allowsHitTesting(false)
+            }
             .scaleEffect(reduceMotion ? 1 : 1 - 0.027 * progress, anchor: .leading)
             .offset(x: progress * width)
             .allowsHitTesting(!drawer)

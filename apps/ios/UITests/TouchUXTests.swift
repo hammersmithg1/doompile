@@ -46,6 +46,7 @@ final class TouchUXTests: XCTestCase {
         let input = app.textFields["quick-input"]
         input.tap(); input.typeText("Touch draft")
         XCTAssertTrue(app.keyboards.firstMatch.waitForExistence(timeout: 3))
+        XCTAssertEqual(input.value as? String, "Touch draft")
         app.coordinate(withNormalizedOffset: CGVector(dx: 0.9, dy: 0.38)).tap()
         XCTAssertTrue(app.keyboards.firstMatch.waitForNonExistence(timeout: 3))
         screenshot("home-no-header")
