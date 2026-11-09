@@ -36,6 +36,10 @@ on:
         description: "Optional single test for unsigned diagnostics (DoompileUITests/TouchUXTests/testName)"
         type: string
         default: ''
+      record_motion:
+        description: "Record simulator video for a targeted unsigned test"
+        type: boolean
+        default: false
       simulator_os:
         description: "Optional iOS simulator version; empty selects the newest available runtime"
         type: string
@@ -118,8 +122,8 @@ jobs:
           IOS_TEST_FILTER: ${{ inputs.test_filter }}
           IOS_SIMULATOR_OS: ${{ inputs.simulator_os }}
           IOS_UPLOAD_REQUESTED: ${{ inputs.upload_testflight }}
+          IOS_RECORD_MOTION: ${{ inputs.record_motion }}
         run: |
-          simulator_id=$(python3 .agents/ci/select_ios_simulator.py --os "$IOS_SIMULATOR_OS")
           filter_args=()
           if [[ -n "$IOS_TEST_FILTER" ]]; then
             if [[ "$IOS_UPLOAD_REQUESTED" == true || ! "$IOS_TEST_FILTER" =~ ^DoompileUITests/TouchUXTests/test[A-Za-z0-9]+$ ]]; then
@@ -128,23 +132,54 @@ jobs:
             fi
             filter_args+=("-only-testing:$IOS_TEST_FILTER")
           fi
+          if [[ "$IOS_RECORD_MOTION" == true && -z "$IOS_TEST_FILTER" ]]; then
+            echo 'Recording requires a single unsigned test selected with test_filter.' >&2
+            exit 1
+          fi
+
+          simulator_id=$(python3 .agents/ci/select_ios_simulator.py --os "$IOS_SIMULATOR_OS")
+          if [[ "$IOS_RECORD_MOTION" == true ]]; then
+            (
+              until xcrun simctl spawn "$simulator_id" launchctl print system >/dev/null 2>&1; do sleep 1; done
+              exec xcrun simctl io "$simulator_id" recordVideo --codec=h264 "$RUNNER_TEMP/iOS-Touch-motion.mp4"
+            ) &
+            video_pid=$!
+            stop_video() {
+              kill -INT "$video_pid" 2>/dev/null || true
+              for _ in {1..20}; do
+                if ! kill -0 "$video_pid" 2>/dev/null; then break; fi
+                sleep 0.2
+              done
+              kill -KILL "$video_pid" 2>/dev/null || true
+              wait "$video_pid" || true
+            }
+            trap stop_video EXIT
+          fi
           xcodebuild -project apps/ios/Doompile.xcodeproj -scheme Doompile \
             "${filter_args[@]}" -destination "platform=iOS Simulator,id=$simulator_id" \
             -derivedDataPath "$RUNNER_TEMP/DerivedData" \
             -resultBundlePath "$RUNNER_TEMP/iOS-Touch.xcresult" \
             -parallel-testing-enabled NO -retry-tests-on-failure -test-iterations 2 \
             CODE_SIGNING_ALLOWED=YES CODE_SIGN_IDENTITY=- test
-      - name: Export failed touch-test attachments
-        if: failure() && !inputs.reuse_validation
-        run: xcrun xcresulttool export attachments --path "$RUNNER_TEMP/iOS-Touch.xcresult" --output-path "$RUNNER_TEMP/iOS-Touch-attachments"
+      - name: Export touch test attachments
+        if: >-
+          ${{ !inputs.reuse_validation && (failure() || (!cancelled() && github.event_name == 'workflow_dispatch' &&
+            !inputs.upload_testflight && inputs.test_filter != '')) }}
+        run: |
+          if [[ -d "$RUNNER_TEMP/iOS-Touch.xcresult" ]]; then
+            xcrun xcresulttool export attachments --path "$RUNNER_TEMP/iOS-Touch.xcresult" --output-path "$RUNNER_TEMP/iOS-Touch-attachments"
+          fi
       - name: Upload touch test results
-        if: failure() && !inputs.reuse_validation
+        if: >-
+          ${{ !inputs.reuse_validation && (failure() || (!cancelled() && github.event_name == 'workflow_dispatch' &&
+            !inputs.upload_testflight && inputs.test_filter != '')) }}
         uses: actions/upload-artifact@v4
         with:
           name: ios-touch-test-results
           path: |
             ${{ runner.temp }}/iOS-Touch.xcresult
             ${{ runner.temp }}/iOS-Touch-attachments
+            ${{ runner.temp }}/iOS-Touch-motion.mp4
           if-no-files-found: ignore
       - name: Prepare private release packaging
         if: inputs.upload_testflight
