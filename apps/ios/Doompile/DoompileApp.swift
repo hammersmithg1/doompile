@@ -347,7 +347,6 @@ struct Home: View {
             .safeAreaInset(edge: .bottom, spacing: 0) { composer }
             .background(Palette.ink, ignoresSafeAreaEdges: [])
             .clipShape(shape)
-            .compositingGroup()
             .shadow(color: .black.opacity(progress * 0.18), radius: 16, x: -4)
             .scaleEffect(reduceMotion ? 1 : 1 - 0.027 * progress, anchor: .leading)
             .offset(x: progress * width)
