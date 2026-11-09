@@ -17,7 +17,9 @@ enum NoteLinks {
         guard let value = Bundle.main.object(forInfoDictionaryKey: "DoompilePublicURL") as? String else { return nil }
         return origin(value)
     }
-    static var acceptedOrigins: [URL] { [configuredOrigin, origin(Connection.endpoint)].compactMap { $0 } }
+    static var acceptedOrigins: [URL] {
+        [configuredOrigin, origin(Connection.endpoint), Connection.origins.previous.flatMap { origin($0) }].compactMap { $0 }
+    }
     static func sameOrigin(_ lhs: URL, _ rhs: URL) -> Bool {
         func port(_ url: URL) -> Int { url.port ?? (url.scheme == "https" ? 443 : 80) }
         return lhs.scheme?.lowercased() == rhs.scheme?.lowercased() && lhs.host?.lowercased() == rhs.host?.lowercased() && port(lhs) == port(rhs)

@@ -18,7 +18,7 @@ REPO = ROOT.parent.parent
 build_commit = os.environ.get('DOOMPILE_BUILD_COMMIT') or os.environ.get('GITHUB_SHA') or subprocess.run(['git', 'rev-parse', '--short=12', 'HEAD'], cwd=REPO, capture_output=True, text=True).stdout.strip() or 'development'
 sys.path.insert(0, str(REPO / 'infra'))
 from apple_links import link_configuration
-link_info, link_entitlements = link_configuration()
+link_info, link_entitlements = link_configuration(previous=os.environ.get('DOOMPILE_PREVIOUS_PUBLIC_URL'))
 
 source = Path(os.environ.get('DOOMPILE_CLIPPER_DIR', str(REPO / 'extensions/clipper/dist/safari'))).expanduser().resolve()
 if not (source / 'manifest.json').is_file():
@@ -39,6 +39,7 @@ def plist(path, value):
     (ROOT / path).write_bytes(plistlib.dumps(value, sort_keys=False))
 
 base = {
+    **link_info,
     'DoompileBuildCommit': build_commit,
     'CFBundleDevelopmentRegion': 'ru',
     'ITSAppUsesNonExemptEncryption': False,
@@ -53,7 +54,7 @@ base = {
     'NSAppTransportSecurity': {'NSAllowsLocalNetworking': True},
 }
 plist('Doompile/Info.plist', {
-    **base, **link_info, 'CFBundleDisplayName': 'Doompile', 'LSRequiresIPhoneOS': True,
+    **base, 'CFBundleDisplayName': 'Doompile', 'LSRequiresIPhoneOS': True,
     'UIApplicationSceneManifest': {'UIApplicationSupportsMultipleScenes': False},
     'UISupportedInterfaceOrientations': ['UIInterfaceOrientationPortrait'],
     'UILaunchScreen': {'UIColorName': 'LaunchBackground'},

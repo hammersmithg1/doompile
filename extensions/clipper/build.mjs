@@ -32,11 +32,16 @@ const editorHash=createHash('sha256').update(richEditor.outputFiles[0].text).dig
 const editorFile=`rich-editor-${editorHash}.js`;
 const editorConfig='globalThis.DoompileEditorBuild='+JSON.stringify({file:editorFile,hash:editorHash})+';\n';
 const publicURL=process.env.DOOMPILE_PUBLIC_URL?.trim().replace(/\/+$/, '');
+const previousURL=process.env.DOOMPILE_PREVIOUS_PUBLIC_URL?.trim().replace(/\/+$/, '');
+if(previousURL&&[publicURL,previousURL].some(url=>!url?.startsWith('https://')||new URL(url).origin!==url)){
+  throw new Error('Origin migration requires HTTPS origins in DOOMPILE_PUBLIC_URL and DOOMPILE_PREVIOUS_PUBLIC_URL.');
+}
+const serverConfig='globalThis.DoompileServer='+JSON.stringify({endpoint:publicURL||'',previousEndpoint:previousURL||''})+';\n';
 const scriptPrefixes={
   'core.js':contracts+'\n'+design+'\n'+diagnostics.outputFiles[0].text+'\n',
   'composer.js':design+'\n'+editorConfig+'globalThis.DoompileComposerCSS='+JSON.stringify(composerCSS)+';\n',
   'receipt.js':design+'\n',
-  'popup.js':'globalThis.DoompileDefaultEndpoint='+JSON.stringify(publicURL||'')+';\n',
+  'popup.js':serverConfig,
 };
 const base = {
   manifest_version:3, name:'Doompile — '+brand.copy.tagline, version:'0.11.0',
@@ -71,7 +76,7 @@ for (const browser of ['chromium','firefox','safari']) {
   }
   await writeFile(path.join(dir,'manifest.json'),JSON.stringify(manifest,null,2)+'\n');
   const buildConfig='globalThis.DoompileBuild='+JSON.stringify({platform:'clipper_'+browser,release:(base.version+'.'+commit).slice(0,80)})+';\n';
-  await writeFile(path.join(dir,'background.js'),asciiScript(buildConfig+telemetry.outputFiles[0].text+'\n'+editorConfig+core+'\n'+background));
+  await writeFile(path.join(dir,'background.js'),asciiScript(buildConfig+serverConfig+telemetry.outputFiles[0].text+'\n'+editorConfig+core+'\n'+background));
   for (const name of sources) {
     if(name.endsWith('.js'))await writeFile(path.join(dir,name),asciiScript((scriptPrefixes[name]||'')+await readFile(path.join(here,'src',name),'utf8')));
     else if(name==='composer.css')await writeFile(path.join(dir,name),composerCSS);

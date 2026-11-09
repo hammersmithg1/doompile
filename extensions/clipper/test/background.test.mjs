@@ -7,13 +7,13 @@ import {webcrypto} from 'node:crypto';
 const coreSource=(await readFile(new URL('../src/contracts.js',import.meta.url),'utf8'))+'\n'+(await readFile(new URL('../src/core.js',import.meta.url),'utf8'));
 const contentSource=await readFile(new URL('../src/content.js',import.meta.url),'utf8');
 const source=coreSource+'\n'+(await readFile(new URL('../src/background.js',import.meta.url),'utf8'));
-function setup(fetcher=async(url,options)=>new Response(JSON.stringify({note:{...JSON.parse(options.body).note,revision:1}}),{status:200})) {
+function setup(fetcher=async(url,options)=>new Response(JSON.stringify({note:{...JSON.parse(options.body).note,revision:1}}),{status:200}),server) {
   const user={id:'11111111-1111-4111-8111-111111111111',email:'test@example.test',name:'Test'};
   const data={};let listener,installed,clicked;const menus=[],injections=[];const noop=()=>{};
   const api={runtime:{id:'extension-id',getURL:s=>'chrome-extension://extension-id/'+s,onMessage:{addListener:fn=>listener=fn},onInstalled:{addListener:fn=>installed=fn},onStartup:{addListener:noop}},
     storage:{local:{get:async()=>structuredClone(data),set:async values=>Object.assign(data,structuredClone(values)),remove:async keys=>{for(const key of Array.isArray(keys)?keys:[keys])delete data[key];}}},
     action:{setBadgeText:async()=>{},setBadgeBackgroundColor:async()=>{}},alarms:{onAlarm:{addListener:noop}},contextMenus:{removeAll:async()=>{},create:item=>menus.push(item),onClicked:{addListener:fn=>clicked=fn}},scripting:{executeScript:async data=>{injections.push(data);return [{frameId:data.target.frameIds[0],result:data.func?{ok:true}:null}];}},tabs:{sendMessage:async()=>{throw new Error('Page commands must not use tabs.sendMessage');}}};
-  const sandbox={browser:api,URL,crypto:webcrypto,AbortSignal,fetch:async(url,options)=>url.endsWith('/api/session')&&options?.headers?.Authorization?Response.json({authenticated:true,user}):fetcher(url,options),console,setTimeout,clearTimeout};vm.runInNewContext(source,sandbox);
+  const sandbox={browser:api,DoompileServer:server,URL,crypto:webcrypto,AbortSignal,fetch:async(url,options)=>url.endsWith('/api/session')&&options?.headers?.Authorization?Response.json({authenticated:true,user}):fetcher(url,options),console,setTimeout,clearTimeout};vm.runInNewContext(source,sandbox);
   const send=(message,sender={id:'extension-id',url:'chrome-extension://extension-id/popup.html'})=>new Promise(resolve=>listener({...message,...(['doompile:capture','doompile:capture-popup','doompile:tags'].includes(message.type)&&!Object.hasOwn(message,'account')?{account:data.connection?.user?.id?data.connection.endpoint+'|'+data.connection.user.id:null}:{})},sender,resolve));
   return {data,send,installed,clicked,menus,injections,api};
 }
@@ -43,6 +43,25 @@ test('failed uploads retain captures, successful retry removes them',async()=>{
   assert.equal(Object.keys(outbox(data)).length,1);assert.equal(requests[0].options.headers.Authorization,'Bearer test-token');assert.equal(requests[0].options.redirect,'error');
   fail=false;await send({type:'doompile:retry'});
   assert.equal(Object.keys(outbox(data)).length,0);
+});
+test('an existing account sends its queued captures to the new origin after a server move',async()=>{
+  const previousEndpoint='https://old.example.test',endpoint='https://notes.example.test';
+  const before=setup(async()=>{throw new Error('Offline');});
+  await before.send({type:'doompile:configure',endpoint:previousEndpoint,token:'test-token'});
+  const clip=await before.send({type:'doompile:capture-popup',capture});
+  await before.send({type:'doompile:retry'});
+  assert.equal(Object.keys(outbox(before.data)).length,1);
+
+  const requests=[];
+  const after=setup(async(url,options)=>{
+    requests.push({url,token:options.headers.Authorization});
+    return Response.json({note:{...JSON.parse(options.body).note,revision:1}});
+  },{endpoint,previousEndpoint});
+  Object.assign(after.data,structuredClone(before.data));
+  const status=await after.send({type:'doompile:retry'});
+  assert.equal(status.endpoint,endpoint);
+  assert.equal(status.queued,0);
+  assert.deepEqual(requests,[{url:`${endpoint}/api/notes/${clip.id}`,token:'Bearer test-token'}]);
 });
 test('a duplicate already accepted before a lost response is acknowledged',async()=>{
   const {data,send}=setup(async(url,options)=>new Response(JSON.stringify({current:{...JSON.parse(options.body).note,revision:1}}),{status:409}));

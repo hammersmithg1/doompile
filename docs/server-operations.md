@@ -18,6 +18,8 @@ Supply these values through the process environment or a secret provider. On a s
 
 Register each deployment's OAuth callback at its provider. Keep the browser, iOS, macOS and clipper pointed at the intended origin. Configure signed Apple builds with DOOMPILE_PUBLIC_URL. See [authentication](authentication.md) and [Apple signing](apple-signing-setup.md).
 
+When moving the same instance to another public origin, set DOOMPILE_PUBLIC_URL to the new origin and DOOMPILE_PREVIOUS_PUBLIC_URL to the old one in the Apple and clipper builds. Keep the previous origin in build settings so clients continue to use their existing on-device account storage. Update DOOMPILE_MACOS_UPDATE_FEED_URL to the new origin with the same feed path and signing key.
+
 Use the pinned Node version, Docker Compose and rsync.
 
 ~~~sh

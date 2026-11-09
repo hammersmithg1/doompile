@@ -2,6 +2,18 @@ import XCTest
 @testable import DoompileCore
 
 final class CoreTests: XCTestCase {
+    func testServerMoveUsesNewAddressWithExistingAccountScope() {
+        let old = "https://old.example.com", current = "https://notes.example.com", custom = "https://custom.example.com"
+        let original = Connection.Origins(current: old, previous: nil)
+        let moved = Connection.Origins(current: current, previous: old)
+        let userID = "11111111-1111-4111-8111-111111111111"
+        XCTAssertEqual(moved.networkEndpoint(old), current)
+        XCTAssertEqual(moved.networkEndpoint(custom), custom)
+        XCTAssertEqual(moved.scope(endpoint: current, userID: userID), original.scope(endpoint: old, userID: userID))
+        XCTAssertEqual(moved.scope(endpoint: custom, userID: userID), original.scope(endpoint: custom, userID: userID))
+        XCTAssertNotEqual(moved.scope(endpoint: current, userID: userID), moved.scope(endpoint: custom, userID: userID))
+    }
+
     func testManualSourceCardSuppliesMetadataAndTitleWithoutPlainText() throws {
         var note = Note.text("")
         note.body = .object(["type": .string("doc"), "content": .array([.object(["type": .string("sourceSnippet"), "attrs": .object(["url": .string("https://example.com/article"), "title": .string("Article"), "quote": .string("Exact quote")])])])])

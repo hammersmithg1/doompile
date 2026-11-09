@@ -3,9 +3,12 @@ import os
 from urllib.parse import urlsplit, urlunsplit
 
 
-def link_configuration(value=None):
+def link_configuration(value=None, *, previous=None):
     value = (os.environ.get('DOOMPILE_PUBLIC_URL', '') if value is None else value).strip()
+    previous = (previous or '').strip()
     if not value:
+        if previous:
+            raise ValueError('DOOMPILE_PREVIOUS_PUBLIC_URL requires DOOMPILE_PUBLIC_URL.')
         return {}, {}
     parsed = urlsplit(value)
     host = parsed.hostname
@@ -22,4 +25,14 @@ def link_configuration(value=None):
         authority += ':' + str(parsed.port)
     origin = urlunsplit((parsed.scheme, authority, '', '', ''))
     entitlements = {'com.apple.developer.associated-domains': ['applinks:' + host]} if parsed.scheme == 'https' and not local else {}
-    return {'DoompilePublicURL': origin}, entitlements
+    info = {'DoompilePublicURL': origin}
+    if previous:
+        try:
+            previous_info, previous_entitlements = link_configuration(previous)
+        except ValueError:
+            raise ValueError('DOOMPILE_PREVIOUS_PUBLIC_URL must be a public HTTPS origin.') from None
+        if not entitlements or not previous_entitlements:
+            raise ValueError('Origin migration requires two public HTTPS origins.')
+        if previous_info['DoompilePublicURL'] != origin:
+            info['DoompilePreviousPublicURL'] = previous_info['DoompilePublicURL']
+    return info, entitlements

@@ -41,7 +41,7 @@ struct NativeAccount: Codable, Equatable {
         guard !signingIn else { return nil }
         signingIn = true; error = nil
         let attempt = UUID(); attemptID = attempt
-        let base = endpoint.trimmingCharacters(in: CharacterSet(charactersIn: "/ "))
+        let base = Connection.origins.networkEndpoint(endpoint.trimmingCharacters(in: CharacterSet(charactersIn: "/ ")))
         do {
             #if os(macOS)
             let label = "Doompile для Mac"

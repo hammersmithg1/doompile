@@ -3,8 +3,8 @@
  const api=globalThis.browser||globalThis.chrome,$=id=>document.getElementById(id);
  let serverOrigin,polling,composer,receipt,capture=null,editorLoading,lastSubmission,captureAccount;
  const endpointField=$('endpoint');
- const defaultEndpoint=globalThis.DoompileDefaultEndpoint||'http://localhost:3000';
- const selectedEndpoint=()=>DoompileCore.endpoint(endpointField.value.trim()||defaultEndpoint);
+ const defaultEndpoint=globalThis.DoompileServer?.endpoint||'http://localhost:3000';
+ const selectedEndpoint=()=>DoompileCore.currentEndpoint(DoompileCore.endpoint(endpointField.value.trim()||defaultEndpoint));
  const transport=DoompileTransport.create(api);
  const report=(name,properties={})=>{void api.runtime.sendMessage({type:'doompile:telemetry',name,properties}).catch(()=>{});};
  report('clipper.opened',{screen:'capture'});

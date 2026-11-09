@@ -25,6 +25,14 @@
     // WebExtension host match patterns must not contain an explicit port.
     return `${url.protocol}//${url.hostname}/*`;
   }
+  function currentEndpoint(value) {
+    const server = root.DoompileServer;
+    return server?.previousEndpoint && value === server.previousEndpoint ? server.endpoint : value;
+  }
+  function scopeEndpoint(value) {
+    const server = root.DoompileServer;
+    return server?.previousEndpoint && value === server.endpoint ? server.previousEndpoint : value;
+  }
   function isLocalEndpoint(value) {
     try {
       return HTTP_LOCAL.has(new URL(endpoint(value)).hostname);
@@ -274,6 +282,8 @@
   root.DoompileCore = {
     endpoint,
     permissionPattern,
+    currentEndpoint,
+    scopeEndpoint,
     isLocalEndpoint,
     timecode,
     formatTime,

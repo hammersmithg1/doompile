@@ -58,6 +58,7 @@ jobs:
   build:
     env:
       DOOMPILE_PUBLIC_URL: ${{ vars.DOOMPILE_PUBLIC_URL }}
+      DOOMPILE_PREVIOUS_PUBLIC_URL: ${{ vars.DOOMPILE_PREVIOUS_PUBLIC_URL }}
     runs-on: macos-15
     timeout-minutes: ${{ inputs.upload_testflight && 60 || 30 }}
     steps:

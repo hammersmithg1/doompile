@@ -19,7 +19,7 @@ build_commit = os.environ.get('DOOMPILE_BUILD_COMMIT') or os.environ.get('GITHUB
 sys.path.insert(0, str(REPO / 'infra'))
 from apple_links import link_configuration
 from update_configuration import update_configuration
-link_info, link_entitlements = link_configuration()
+link_info, link_entitlements = link_configuration(previous=os.environ.get('DOOMPILE_PREVIOUS_PUBLIC_URL'))
 update_info = update_configuration()
 
 clipper = Path(os.environ.get('DOOMPILE_CLIPPER_DIR', str(REPO / 'extensions/clipper/dist/safari'))).expanduser().resolve()
@@ -49,6 +49,7 @@ def plist(path, value):
     target.write_bytes(plistlib.dumps(value, sort_keys=False))
 
 base = {
+    **link_info,
     'DoompileBuildCommit': build_commit,
     'CFBundleDevelopmentRegion': 'ru', 'CFBundleExecutable': '$(EXECUTABLE_NAME)',
     'CFBundleIdentifier': '$(PRODUCT_BUNDLE_IDENTIFIER)', 'CFBundleInfoDictionaryVersion': '6.0',
@@ -58,7 +59,7 @@ base = {
     'NSAppTransportSecurity': {'NSAllowsLocalNetworking': True},
 }
 app = {
-    **base, **link_info, **update_info, 'CFBundleDisplayName': 'Doompile', 'NSPrincipalClass': 'NSApplication',
+    **base, **update_info, 'CFBundleDisplayName': 'Doompile', 'NSPrincipalClass': 'NSApplication',
     'SUEnableInstallerLauncherService': True,
     'LSUIElement': True,
     'NSHighResolutionCapable': True, 'NSSupportsAutomaticGraphicsSwitching': True,

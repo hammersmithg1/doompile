@@ -4,7 +4,7 @@
   <p><strong>Save it. Forget it.</strong></p>
   <p>Заметки для мыслей, ссылок, цитат и всего, что хочется сохранить на потом.</p>
   <p>Проект с открытым исходным кодом под <a href="LICENSE">лицензией MIT</a>.</p>
-  <p><a href="https://grudin.me/doompile"><strong>Открыть облачный Doompile</strong></a> · <a href="docs/get-started.md#свой-сервер"><strong>Развернуть у себя</strong></a></p>
+  <p><a href="https://doompile.space/doompile"><strong>Открыть облачный Doompile</strong></a> · <a href="docs/get-started.md#свой-сервер"><strong>Развернуть у себя</strong></a></p>
 </div>
 
 ![Лента Doompile с заметками, цитатами, тегами и быстрым вводом](docs/review/brand-void-v2/desktop-feed-dark.png)
@@ -21,7 +21,7 @@
 
 Открой готовый сервис в браузере, войди и сохрани первую заметку. Приложения и Web Clipper подключаются к той же коллекции.
 
-[Открыть веб-версию](https://grudin.me/doompile) · [Клиенты и расширения](docs/get-started.md#клиенты)
+[Открыть веб-версию](https://doompile.space/doompile) · [Клиенты и расширения](docs/get-started.md#клиенты)
 
 ### Свой сервер
 

@@ -2,7 +2,7 @@
   'use strict';
   const api = globalThis.browser || globalThis.chrome;
   const core = globalThis.DoompileCore;
-  const telemetry = globalThis.DoompileTelemetryRuntime?.extensionTelemetry(api, globalThis.DoompileBuild);
+  const telemetry = globalThis.DoompileTelemetryRuntime?.extensionTelemetry(api, globalThis.DoompileBuild, core);
   const fetch = telemetry ? telemetry.fetch : globalThis.fetch.bind(globalThis);
   const flushTelemetry = () => telemetry?.flush().catch(() => {});
   const forwardedEvents = new Set(['editor.ready','editor.action','editor.failed','runtime.error','clipper.opened','clipper.failed']);
@@ -24,7 +24,7 @@
   }
   const trustedUI = sender => sender.id === api.runtime.id && !sender.tab && sender.url?.startsWith(api.runtime.getURL(''));
   const configured = connection => !!(connection?.token && connection?.user?.id);
-  const accountKey = connection => configured(connection) ? connection.endpoint+'|'+connection.user.id : null;
+  const accountKey = connection => configured(connection) ? core.scopeEndpoint(connection.endpoint)+'|'+connection.user.id : null;
   const authHeaders = connection => ({'X-Doompile-API-Version':String(globalThis.DoompileContracts.apiVersion),...(connection.token ? {Authorization:'Bearer '+connection.token,'X-Doompile-User-ID':connection.user?.id||''} : {})});
   function canUseReadingList(){return !!api.readingList?.addEntry || !!(api.runtime.getManifest?.().permissions?.includes('nativeMessaging'));}
   function bounded(work, milliseconds, message){let timer;return Promise.race([work,new Promise((_,reject)=>{timer=setTimeout(()=>reject(new Error(message)),milliseconds);})]).finally(()=>clearTimeout(timer));}
@@ -52,11 +52,13 @@
   }
   async function state() {
     const data=await api.storage.local.get(null);
-    const outbox={},owner=accountKey(data.connection);
+    const saved=data.connection;
+    const connection=saved?{...saved,endpoint:core.currentEndpoint(saved.endpoint)}:null;
+    const outbox={},owner=accountKey(connection);
     for(const [id,item] of Object.entries(data.outbox||{}))if(!acknowledgedLegacy.has(id)&&(item.owner||null)===owner)outbox[id]=transientErrors.get(id)||item;
     for(const [key,item] of Object.entries(data))if(key.startsWith('clip:')&&item?.note?.id&&(item.owner||null)===owner)outbox[item.note.id]=transientErrors.get(item.note.id)||item;
     const recent=lastDelivery||data.lastDelivery;
-    return {connection:data.connection||null,outbox,delivery:recent&&(recent.owner||null)===owner?recent:null};
+    return {connection,outbox,delivery:recent&&(recent.owner||null)===owner?recent:null};
   }
   async function removeQueued(id) {
     // Removal must not rewrite the entire queue: it must work even at the quota limit.
@@ -262,11 +264,12 @@
         const {pendingLogin:flow}=await api.storage.local.get('pendingLogin');
         if(!flow)return {pending:false};
         if(flow.expires<Date.now()){await api.storage.local.remove('pendingLogin');throw new Error('Ссылка входа истекла. Начни ещё раз.');}
-        const response=await fetch(flow.endpoint+'/api/auth/device',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({code:flow.code,secret:flow.secret}),credentials:'omit',redirect:'error',signal:AbortSignal.timeout(10000)});
+        const endpoint=core.currentEndpoint(flow.endpoint);
+        const response=await fetch(endpoint+'/api/auth/device',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({code:flow.code,secret:flow.secret}),credentials:'omit',redirect:'error',signal:AbortSignal.timeout(10000)});
         if(!response.ok){await api.storage.local.remove('pendingLogin');throw new Error('Вход не завершён. Начни ещё раз.');}
         const result=await response.json();
         if(result.status==='approved'){
-          const connection=await makeConnection(flow.endpoint,result.token);
+          const connection=await makeConnection(endpoint,result.token);
           const installed=await exclusive(async()=>{const {pendingLogin:current}=await api.storage.local.get('pendingLogin');if(current?.code!==flow.code)return false;await api.storage.local.set({connection});await api.storage.local.remove('pendingLogin');return true;});
           if(!installed)return {pending:false};lastError=null;
           void flush(true).catch(error=>{lastError=error.message;});
@@ -288,7 +291,7 @@
       }
       if (message?.type === 'doompile:native-configure') {
         const result = await api.runtime.sendNativeMessage('app.doompile', {type:'configuration'});
-        const connection = await makeConnection(result.endpoint,result.token);
+        const connection = await makeConnection(core.currentEndpoint(result.endpoint),result.token);
         await exclusive(async () => {await api.storage.local.set({connection});await api.storage.local.remove('pendingLogin');});lastError=null;lastDelivery=null;readingListErrors.clear(); void flush(true).catch(error=>{lastError=error.message;}); return {ok:true};
       }
       if (message?.type === 'doompile:retry') { await flush(true); return status(); }

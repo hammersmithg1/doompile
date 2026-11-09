@@ -23,6 +23,10 @@ type ExtensionAPI = {
 export function extensionTelemetry(
   api: ExtensionAPI,
   build: { platform: Platform; release: string },
+  origins?: {
+    scopeEndpoint: (endpoint: string | undefined) => string | undefined;
+    currentEndpoint: (endpoint: string) => string;
+  },
 ) {
   const recorders = new Map<string, Promise<Recorder>>();
   let work = Promise.resolve();
@@ -32,8 +36,9 @@ export function extensionTelemetry(
   async function recorder(connection?: Connection) {
     if (connection === undefined)
       connection = (await api.storage.local.get("connection")).connection;
+    const endpoint = origins?.scopeEndpoint(connection?.endpoint) ?? connection?.endpoint;
     const scope = connection?.user?.id
-      ? `${connection.endpoint}|${connection.user.id}`
+      ? `${endpoint}|${connection.user.id}`
       : "signed-out";
     if (!recorders.has(scope))
       recorders.set(
@@ -123,11 +128,12 @@ export function extensionTelemetry(
       const connection = (await api.storage.local.get("connection")).connection;
       if (!connection?.token || !connection?.user?.id || Date.now() < retryAt)
         return;
+      const endpoint = origins?.currentEndpoint(connection.endpoint) ?? connection.endpoint;
       const { value } = await recorder(connection);
       await value.flush(async (events) => {
         try {
           const response = await rawFetch(
-            `${connection.endpoint}/api/telemetry`,
+            `${endpoint}/api/telemetry`,
             {
               method: "POST",
               headers: {

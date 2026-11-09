@@ -17,21 +17,39 @@ enum DoompileError: LocalizedError {
 }
 
 enum Connection {
-    static let group = "group.app.doompile"
-    static var defaults: UserDefaults { UserDefaults(suiteName: group) ?? .standard }
-    static var defaultEndpoint: String {
-        (Bundle.main.object(forInfoDictionaryKey: "DoompilePublicURL") as? String) ?? "http://localhost:3000"
+    struct Origins {
+        let current: String
+        let previous: String?
+
+        func networkEndpoint(_ endpoint: String) -> String {
+            endpoint == previous ? current : endpoint
+        }
+
+        func scope(endpoint: String, userID: String) -> String {
+            // Both names identify the same collection, including its local data and token.
+            let storageEndpoint = endpoint == current ? (previous ?? endpoint) : endpoint
+            return SHA256.hash(data: Data((storageEndpoint + "|" + userID).utf8)).map { String(format: "%02x", $0) }.joined()
+        }
     }
+
+    static let group = "group.app.doompile"
+    static let origins = Origins(
+        current: (Bundle.main.object(forInfoDictionaryKey: "DoompilePublicURL") as? String) ?? "http://localhost:3000",
+        previous: Bundle.main.object(forInfoDictionaryKey: "DoompilePreviousPublicURL") as? String
+    )
+    static var defaults: UserDefaults { UserDefaults(suiteName: group) ?? .standard }
+    static var defaultEndpoint: String { origins.current }
     static var endpoint: String {
-        get { defaults.string(forKey: "endpoint") ?? defaultEndpoint }
+        get { origins.networkEndpoint(defaults.string(forKey: "endpoint") ?? defaultEndpoint) }
         set { defaults.set(newValue.trimmingCharacters(in: CharacterSet(charactersIn: "/ ")), forKey: "endpoint") }
     }
     static var account: NativeAccount? {
-        guard let data = defaults.data(forKey: "account-v1"), let value = try? JSONDecoder().decode(NativeAccount.self, from:data), UUID(uuidString:value.id) != nil, validEndpoint(value.endpoint) else { return nil }
+        guard let data = defaults.data(forKey: "account-v1"), var value = try? JSONDecoder().decode(NativeAccount.self, from:data), UUID(uuidString:value.id) != nil, validEndpoint(value.endpoint) else { return nil }
+        value.endpoint = origins.networkEndpoint(value.endpoint)
         return value
     }
     static func scope(endpoint: String, userID: String) -> String {
-        SHA256.hash(data:Data((endpoint + "|" + userID).utf8)).map { String(format:"%02x",$0) }.joined()
+        origins.scope(endpoint: endpoint, userID: userID)
     }
     static var scope: String { account?.scope ?? "signed-out" }
     static var signedIn: Bool { account != nil && !token.isEmpty }
