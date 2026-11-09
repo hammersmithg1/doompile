@@ -36,6 +36,26 @@ test("both public paths serve signed feed bytes without authentication or stale 
   }
 }));
 
+test("the latest download follows the published appcast on both paths", () => releases(async (directory) => {
+  const paths = [
+    { base: "https://notes.example.org/downloads/macos/", download: rootDownload, method: "GET" },
+    { base: url, download: prefixedDownload, method: "HEAD" },
+  ];
+  for (const archive of [archiveName, "Doompile-macOS-9.1.zip"]) {
+    await writeFile(join(directory, archive), "0123456789");
+    await writeFile(join(directory, "appcast.xml"), `<rss><channel><item><enclosure url="https://updates.example.org/macos/${archive}" /></item></channel></rss>`);
+    for (const { base, download, method } of paths) {
+      const request = new Request(base + "latest.zip", { method });
+      const response = await download(request, { params: Promise.resolve({ file: "latest.zip" }) });
+      assert.equal(response.status, 307);
+      assert.equal(new URL(response.headers.get("Location")!, request.url).href, base + archive);
+      assert.equal(response.headers.get("Cache-Control"), "no-store");
+    }
+  }
+  await writeFile(join(directory, "appcast.xml"), '<rss><channel><item><enclosure url="https://updates.example.org/private.json" /></item></channel></rss>');
+  assert.equal((await macOSUpdateDownload(new Request(url + "latest.zip"), "latest.zip")).status, 404);
+}));
+
 test("downloads stream immutable archives and support HEAD, resuming and conditional requests", () => releases(async () => {
   const head = await macOSUpdateDownload(new Request(url + archiveName, { method: "HEAD" }), archiveName);
   assert.equal(head.status, 200);

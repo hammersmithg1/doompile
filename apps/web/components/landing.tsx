@@ -1,11 +1,12 @@
 "use client";
-import { ArrowUpRight, LockKeyhole } from "../../../packages/design/ui-icons";
+import { ArrowUpRight, Download, LockKeyhole } from "../../../packages/design/ui-icons";
 import { Halo, PileCat, Wordmark, BrandIllustration } from "./brand";
 import { brandCopy } from "../../../packages/design/copy";
 
 const repositoryUrl = "https://github.com/hammersmithg1/doompile";
 const quickStartUrl = `${repositoryUrl}/blob/main/docs/get-started.md`;
 const selfHostUrl = `${quickStartUrl}#свой-сервер`;
+const macDownloadUrl = "https://doompile.space/doompile/downloads/macos/latest.zip";
 
 export default function Landing({
   configuration,
@@ -49,6 +50,9 @@ export default function Landing({
           <div className="landing-actions">
             <a className="landing-action-primary" href="#sign-in">
               Начать в браузере
+            </a>
+            <a href={macDownloadUrl}>
+              Скачать для Mac <Download size={16} />
             </a>
             <a href={selfHostUrl}>
               Развернуть у себя <ArrowUpRight size={16} />

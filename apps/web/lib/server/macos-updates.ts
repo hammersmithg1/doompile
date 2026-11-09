@@ -2,21 +2,37 @@ import { constants } from "node:fs";
 import { open } from "node:fs/promises";
 import { join } from "node:path";
 import { Readable } from "node:stream";
+import { DomUtils, parseDocument } from "htmlparser2";
 import { parseByteRange } from "./range";
+
+const archiveFilename = /^Doompile-macOS-[1-9]\d*(?:\.\d+){0,2}\.zip$/;
 
 // This directory contains public release artifacts only, separate from user data.
 export async function macOSUpdateDownload(request: Request, filename: string): Promise<Response> {
   const directory = process.env.DOOMPILE_MACOS_RELEASES_DIR;
   const feed = filename === "appcast.xml";
-  if (!directory || (!feed && !/^Doompile-macOS-[1-9]\d*(?:\.\d+){0,2}\.zip$/.test(filename)))
+  const latest = filename === "latest.zip";
+  if (!directory || (!feed && !latest && !archiveFilename.test(filename)))
     return new Response(null, { status: 404 });
   let file;
   try {
-    file = await open(join(directory, filename), constants.O_RDONLY | constants.O_NOFOLLOW);
+    file = await open(join(directory, latest ? "appcast.xml" : filename), constants.O_RDONLY | constants.O_NOFOLLOW);
     const stat = await file.stat();
     if (!stat.isFile()) {
       await file.close();
       return new Response(null, { status: 404 });
+    }
+    if (latest) {
+      const document = parseDocument(await file.readFile("utf8"), { xmlMode: true });
+      await file.close();
+      const channel = DomUtils.findOne((tag) => tag.name === "channel", document.children);
+      const item = channel && DomUtils.findOne((tag) => tag.name === "item", channel.children, false);
+      const enclosure = item && DomUtils.findOne((tag) => tag.name === "enclosure", item.children, false);
+      const archive = enclosure?.attribs.url?.split("/").pop();
+      const headers = new Headers({ "Cache-Control": "no-store" });
+      if (!archive || !archiveFilename.test(archive)) return new Response(null, { status: 404, headers });
+      headers.set("Location", archive);
+      return new Response(null, { status: 307, headers });
     }
     const etag = `"${stat.size.toString(16)}-${stat.mtimeMs.toString(16)}"`;
     const headers = new Headers({

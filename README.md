@@ -5,6 +5,7 @@
   <p>Заметки для мыслей, ссылок, цитат и всего, что хочется сохранить на потом.</p>
   <p>Проект с открытым исходным кодом под <a href="LICENSE">лицензией MIT</a>.</p>
   <p><a href="https://doompile.space/doompile"><strong>Открыть облачный Doompile</strong></a> · <a href="docs/get-started.md#свой-сервер"><strong>Развернуть у себя</strong></a></p>
+  <p><a href="https://doompile.space/doompile/downloads/macos/latest.zip"><strong>Скачать для Mac</strong></a> · macOS 14 и новее</p>
 </div>
 
 ![Лента Doompile с заметками, цитатами, тегами и быстрым вводом](docs/review/brand-void-v2/desktop-feed-dark.png)
