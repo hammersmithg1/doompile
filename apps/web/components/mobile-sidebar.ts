@@ -74,9 +74,10 @@ export function useMobileSidebar({
           Math.abs(dx) > 20 &&
           Math.abs(velocity) > 0.45 &&
           Math.sign(dx) === Math.sign(velocity);
+        const threshold = width * (current.current.open ? 0.68 : 0.32);
         const next = fast
           ? velocity > 0
-          : motion.position + velocity * 100 > width / 2;
+          : motion.position + velocity * 100 > threshold;
         animate(next, velocity);
         current.current.onChange(next);
       },
