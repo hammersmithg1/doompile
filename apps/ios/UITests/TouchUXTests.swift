@@ -231,12 +231,38 @@ final class TouchUXTests: XCTestCase {
         screenshot("note-moved-to-urgent")
     }
     func testDrawerRepeatedGesturesDoNotDuplicateNavigation() {
-        for _ in 0..<3 {
-            openSidebar()
+        app.terminate()
+        app.launchEnvironment["DOOMPILE_UI_SCROLL_FIXTURE"] = "1"
+        app.launch()
+        XCTAssertTrue(app.scrollViews["note-feed"].waitForExistence(timeout: 10))
+        let row = app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH 'note-' AND label CONTAINS 'Scroll fixture'"))
+            .allElementsBoundByIndex.first { $0.isHittable && $0.frame.midY > app.frame.height * 0.25 && $0.frame.midY < app.frame.height * 0.65 }
+        guard let row else { return XCTFail("The feed fixture must show a note") }
+        let before = row.frame
+        for attempt in 0..<3 {
+            if attempt == 0 {
+                app.buttons["open-sidebar"].tap()
+            } else {
+                let start = app.coordinate(withNormalizedOffset: CGVector(dx: 0.015, dy: 0.49))
+                let end = app.coordinate(withNormalizedOffset: CGVector(dx: 0.23, dy: 0.54))
+                start.press(forDuration: 0.05, thenDragTo: end, withVelocity: .fast, thenHoldForDuration: 0)
+            }
+            XCTAssertTrue(app.textFields["sidebar-search"].waitForExistence(timeout: 5))
             XCTAssertEqual(app.textFields.matching(identifier: "sidebar-search").count, 1)
-            app.coordinate(withNormalizedOffset: CGVector(dx: 0.65, dy: 0.45)).press(forDuration: 0.05, thenDragTo: app.coordinate(withNormalizedOffset: CGVector(dx: 0.03, dy: 0.45)))
+            if attempt == 0 {
+                screenshot("sidebar-behind-rounded-feed")
+                app.buttons["close-sidebar"].tap()
+            } else {
+                app.coordinate(withNormalizedOffset: CGVector(dx: 0.65, dy: 0.45)).press(forDuration: 0.05, thenDragTo: app.coordinate(withNormalizedOffset: CGVector(dx: 0.03, dy: 0.45)))
+            }
             let hidden = expectation(for: NSPredicate(format: "hittable == false"), evaluatedWith: app.textFields["sidebar-search"])
-            wait(for: [hidden], timeout: 3)
+            let settled = expectation(for: NSPredicate { element, _ in
+                guard let row = element as? XCUIElement, row.exists else { return false }
+                return abs(row.frame.minX - before.minX) < 2
+            }, evaluatedWith: row)
+            wait(for: [hidden, settled], timeout: 3)
+            XCTAssertTrue(row.exists)
+            XCTAssertEqual(row.frame.minY, before.minY, accuracy: 3, "A diagonal drawer swipe must leave the feed at the same scroll position")
             XCTAssertFalse(app.alerts["Новый тег"].exists, "Dragging across a button must cancel its tap")
         }
     }
@@ -371,6 +397,37 @@ final class TouchUXTests: XCTestCase {
         app.buttons["Теги заметки"].tap()
         XCTAssertTrue(app.buttons["Убрать тег Research"].waitForExistence(timeout: 3))
         XCTAssertTrue(app.buttons["Убрать тег Idea"].exists)
+    }
+    func testDiagonalNoteSwipesKeepFeedPosition() throws {
+        app.terminate()
+        app.launchEnvironment["DOOMPILE_UI_SCROLL_FIXTURE"] = "1"
+        app.launch()
+        let feed = app.scrollViews["note-feed"]
+        XCTAssertTrue(feed.waitForExistence(timeout: 10))
+        feed.swipeUp()
+
+        let rows = app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH 'note-'"))
+        let center = feed.frame.midY
+        let row = try XCTUnwrap(rows.allElementsBoundByIndex.filter(\.isHittable).min {
+            abs($0.frame.midY - center) < abs($1.frame.midY - center)
+        })
+        let original = row.frame
+        let y = (original.midY - app.frame.minY) / app.frame.height
+        let id = String(row.identifier.dropFirst("note-".count))
+        let pin = app.buttons["swipe-action-pin-" + id]
+
+        let openStart = app.coordinate(withNormalizedOffset: CGVector(dx: 0.76, dy: y))
+        let openEnd = app.coordinate(withNormalizedOffset: CGVector(dx: 0.25, dy: y + 0.07))
+        openStart.press(forDuration: 0.03, thenDragTo: openEnd)
+        XCTAssertTrue(pin.waitForExistence(timeout: 3))
+        XCTAssertEqual(row.frame.minY, original.minY, accuracy: 2)
+
+        let closeStart = app.coordinate(withNormalizedOffset: CGVector(dx: 0.18, dy: y))
+        let closeEnd = app.coordinate(withNormalizedOffset: CGVector(dx: 0.72, dy: y - 0.07))
+        closeStart.press(forDuration: 0.03, thenDragTo: closeEnd)
+        XCTAssertTrue(pin.waitForNonExistence(timeout: 3))
+        XCTAssertEqual(row.frame.minY, original.minY, accuracy: 2)
+        XCTAssertFalse(app.buttons["close-editor"].exists)
     }
     func testNoteSwipeClosesAndReopensBothDirections() {
         createNote("Repeat swipe note")

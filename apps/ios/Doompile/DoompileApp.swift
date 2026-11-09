@@ -177,6 +177,7 @@ struct Brand: View {
 struct Home: View {
     @EnvironmentObject var library: Library
     @Environment(\.scenePhase) var phase
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @AppStorage private var draft: String
     @AppStorage private var collapsedSectionsJSON: String
     @State private var quickNote: Note?
@@ -307,34 +308,67 @@ struct Home: View {
     }
     private var homeContent: some View {
         GeometryReader { geometry in
-            let width = min(320.0, geometry.size.width * 0.87)
+            let width = min(320.0, geometry.size.width * 0.82)
+            let insets = geometry.safeAreaInsets
             ZStack(alignment: .leading) {
-                Palette.ink.ignoresSafeArea()
-                feed
-                    .modifier(HorizontalDragModifier(enabled: !drawer, target: .openDrawer,
-                        onChanged: { translation, _ in changeDrawer(translation: translation, width: width, opening: true) },
-                        onEnded: { _, predicted in finishDrawer(predicted: predicted, width: width) }))
-                    .safeAreaInset(edge: .bottom, spacing: 0) { composer }
-                    .accessibilityHidden(drawer)
-                    .accessibilityAction(named: Text("Открыть боковое меню")) { openDrawer() }
-                // Keep one sidebar mounted throughout the gesture and its settling animation.
-                Color.black.opacity(0.22 * drawerProgress).ignoresSafeArea()
-                    .onTapGesture { closeDrawer() }.accessibilityLabel("Закрыть боковое меню")
-                    .allowsHitTesting(drawer).accessibilityHidden(!drawer)
-                ZStack(alignment: .leading) {
-                    sidebar.frame(width: width)
-                        .disabled(drawerDragOrigin != nil)
-                        .offset(x: (drawerProgress - 1) * width)
-                        .shadow(color: .black.opacity(0.08 * drawerProgress), radius: 16, x: 4)
-                }.frame(width: width).contentShape(Rectangle())
-                    .modifier(HorizontalDragModifier(enabled: drawer, target: .closeDrawer,
-                        onChanged: { translation, _ in changeDrawer(translation: translation, width: width, opening: false) },
-                        onEnded: { _, predicted in finishDrawer(predicted: predicted, width: width) }))
+                Palette.sidebar
+                sidebar.frame(width: width)
+                    .padding(.top, insets.top).padding(.bottom, insets.bottom)
+                    .disabled(drawerDragOrigin != nil)
                     .allowsHitTesting(drawer)
                     .accessibilityHidden(!drawer)
-
+                homeForeground(width: width, insets: insets)
+                Button(action: closeDrawer) { Color.clear.contentShape(Rectangle()) }
+                    .buttonStyle(.plain)
+                    .frame(width: geometry.size.width - drawerProgress * width)
+                    .frame(maxWidth: .infinity, alignment: .trailing)
+                    .allowsHitTesting(drawer)
+                    .accessibilityHidden(!drawer)
+                    .accessibilityLabel("Закрыть боковое меню")
+                    .accessibilityIdentifier("close-sidebar")
             }
+            .clipped()
+            .contentShape(Rectangle())
+            .modifier(HorizontalDragModifier(enabled: drawer, target: .closeDrawer,
+                onChanged: { translation, _ in changeDrawer(translation: translation, width: width) },
+                onEnded: { translation, predicted in finishDrawer(translation: translation, predicted: predicted, width: width) },
+                onCancelled: cancelDrawerDrag))
+            .ignoresSafeArea(.container, edges: .vertical)
         }
+    }
+    private func homeForeground(width: CGFloat, insets: EdgeInsets) -> some View {
+        let progress = min(1, max(0, drawerProgress))
+        let shape = RoundedRectangle(cornerRadius: 30 * progress, style: .continuous)
+        return feed
+            .scrollDisabled(drawer)
+            .safeAreaInset(edge: .top, spacing: 0) { sidebarButton }
+            .safeAreaInset(edge: .bottom, spacing: 0) { composer }
+            .padding(.top, insets.top).padding(.bottom, insets.bottom)
+            .background(Palette.ink)
+            .clipShape(shape)
+            .overlay { shape.strokeBorder(Palette.line.opacity(progress * 0.75)).allowsHitTesting(false) }
+            .shadow(color: .black.opacity(progress * 0.20), radius: 19, x: -5)
+            .modifier(HorizontalDragModifier(enabled: !drawer, target: .openDrawer,
+                onChanged: { translation, _ in changeDrawer(translation: translation, width: width) },
+                onEnded: { translation, predicted in finishDrawer(translation: translation, predicted: predicted, width: width) },
+                onCancelled: cancelDrawerDrag))
+            .scaleEffect(reduceMotion ? 1 : 1 - 0.027 * progress, anchor: .leading)
+            .offset(x: progress * width)
+            .allowsHitTesting(!drawer)
+            .accessibilityHidden(drawer)
+    }
+    private var sidebarButton: some View {
+        Button(action: openDrawer) {
+            DoompileSymbol(systemName: "sidebar.left", size: 21)
+                .frame(width: 44, height: 44).contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .foregroundStyle(Palette.text)
+        .padding(.leading, 12)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(Palette.ink)
+        .accessibilityLabel("Открыть боковое меню")
+        .accessibilityIdentifier("open-sidebar")
     }
     private func recordFilterView(_ value: String) {
         let category: String
@@ -577,7 +611,7 @@ struct Home: View {
                 Text(library.pending > 0 ? "\(library.pending) ждут синхронизации" : "Всё сохранено на устройстве")
             }.font(.system(size: 10)).foregroundStyle(Palette.muted).padding(.horizontal, 12).padding(.top, 8)
         }.padding(.horizontal, 18).padding(.bottom, 22).frame(maxHeight: .infinity)
-            .background(Palette.sidebar.ignoresSafeArea()).foregroundStyle(Palette.text)
+            .foregroundStyle(Palette.text)
     }
     private func navRow(_ title: String, icon: String, count: Int) -> some View {
         Button { filter = title; closeDrawer() } label: {
@@ -587,31 +621,50 @@ struct Home: View {
             }.font(.system(size: 14)).padding(12).background(filter == title ? Palette.limeSoft : .clear, in: RoundedRectangle(cornerRadius: 10))
         }.buttonStyle(.plain).accessibilityIdentifier("nav-" + title)
     }
-    private func changeDrawer(translation: CGSize, width: CGFloat, opening: Bool) {
-        guard abs(translation.width) > abs(translation.height) * 1.2 else { return }
+    private func changeDrawer(translation: CGSize, width: CGFloat) {
         if drawerDragOrigin == nil {
-            guard opening ? translation.width > 0 : translation.width < 0 else { return }
-            drawerDragOrigin = drawerProgress * width
+            drawerDragOrigin = drawerProgress
             focused = false; searchFocused = false; quickBridge.blur()
+            revealedNoteID = nil
         }
         guard let origin = drawerDragOrigin else { return }
         var transaction = Transaction(); transaction.disablesAnimations = true
-        withTransaction(transaction) { drawerProgress = min(1, max(0, (origin + translation.width) / width)) }
+        withTransaction(transaction) { drawerProgress = min(1, max(0, origin + translation.width / width)) }
     }
-    private func finishDrawer(predicted: CGSize, width: CGFloat) {
+    private func finishDrawer(translation: CGSize, predicted: CGSize, width: CGFloat) {
         guard let origin = drawerDragOrigin else { return }
-        drawerDragOrigin = nil
-        setDrawer((origin + predicted.width) / width > 0.5)
+        let progress = min(1, max(0, origin + translation.width / width))
+        let projected = predicted.width - translation.width
+        let flick = abs(translation.width) >= 28 && abs(projected) >= 28
+        let open = flick ? projected > 0 : progress > (drawer ? 0.68 : 0.32)
+        let remaining = ((open ? 1 : 0) - progress) * width
+        let initialVelocity = abs(remaining) > 1 ? Double(projected / (HorizontalDragTarget.projectionTime * remaining)) : 0
+        setDrawer(open, initialVelocity: min(4, max(0, initialVelocity)))
     }
-    private func setDrawer(_ open: Bool) {
+    private func cancelDrawerDrag() {
+        guard drawerDragOrigin != nil else { return }
+        setDrawer(drawer)
+    }
+    private func setDrawer(_ open: Bool, initialVelocity: Double = 0) {
         focused = false; searchFocused = false; quickBridge.blur()
+        if open { revealedNoteID = nil }
         drawerDragOrigin = nil
-        withAnimation(TouchMotion.quick) { drawer = open; drawerProgress = open ? 1 : 0 }
+        let motion: Animation = reduceMotion ? .linear(duration: 0.01)
+            : .interpolatingSpring(stiffness: 330, damping: 36, initialVelocity: initialVelocity)
+        withAnimation(motion) { drawer = open; drawerProgress = open ? 1 : 0 }
     }
     private func openDrawer() { setDrawer(true) }
     private func closeDrawer() { setDrawer(false) }
-    private func toggleUrgent(_ note: Note) { var updated = note; updated.urgent.toggle(); library.save(updated) }
-    private func togglePinned(_ note: Note) { var updated = note; updated.pinned.toggle(); library.save(updated) }
+    private func toggleUrgent(_ note: Note) {
+        var updated = note
+        updated.urgent.toggle()
+        if library.save(updated, feedback: false) { UISelectionFeedbackGenerator().selectionChanged() }
+    }
+    private func togglePinned(_ note: Note) {
+        var updated = note
+        updated.pinned.toggle()
+        if library.save(updated, feedback: false) { UISelectionFeedbackGenerator().selectionChanged() }
+    }
     @ViewBuilder private func noteMenu(_ note: Note) -> some View {
         if let url = NoteLinks.shareURL(id: note.id) {
             Button { UIPasteboard.general.url = url } label: { DoompileLabel("Скопировать ссылку", systemImage: "link") }
