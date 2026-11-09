@@ -51,7 +51,7 @@ export default function Landing({
             <a className="landing-action-primary" href="#sign-in">
               Начать в браузере
             </a>
-            <a href={macDownloadUrl}>
+            <a className="landing-action-mac" href={macDownloadUrl}>
               Скачать для Mac <Download size={16} />
             </a>
             <a href={selfHostUrl}>

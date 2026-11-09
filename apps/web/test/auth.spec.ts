@@ -154,14 +154,17 @@ test("the OSS landing fits a short laptop and scrolls on narrow phones", async (
     await page.setViewportSize(size);
     await page.goto("/");
     const footer = page.locator(".landing-footer");
+    const macDownload = page.getByRole("link", { name: "Скачать для Mac" });
     await expect(footer).toBeVisible();
     expect(
       await page.evaluate(() => document.documentElement.scrollWidth),
     ).toBeLessThanOrEqual(size.width);
     if (isMobile) {
+      await expect(macDownload).toHaveCount(0);
       await footer.getByRole("link").scrollIntoViewIfNeeded();
       expect(await page.evaluate(() => window.scrollY)).toBeGreaterThan(0);
     } else {
+      await expect(macDownload).toBeVisible();
       expect(
         await page.evaluate(() => document.documentElement.scrollHeight),
       ).toBeLessThanOrEqual(size.height);

@@ -414,6 +414,11 @@
     width: 64px;
   }
 }
+@media (max-width: 720px), (hover: none) and (pointer: coarse) {
+  .landing-actions > .landing-action-mac {
+    display: none;
+  }
+}
 @media (max-width: 720px) {
   .landing {
     padding: max(23px, env(safe-area-inset-top))
