@@ -63,10 +63,7 @@ import XCTest
 
     func testGlobalComposerText() {
         let app = launch(dark: true, global: true)
-        let panel = app.windows.matching(NSPredicate(
-            format: "identifier == %@ OR title == %@ OR label == %@",
-            "quick-capture-panel", "Быстрая заметка — Doompile", "Быстрая заметка — Doompile"
-        )).firstMatch
+        let panel = element(app, "quick-capture-panel")
         XCTAssertTrue(panel.waitForExistence(timeout: 8))
         let mic = element(panel, "quick-composer-mic")
         XCTAssertTrue(mic.waitForExistence(timeout: 8))
@@ -124,7 +121,8 @@ import XCTest
         XCTAssertTrue(mic.waitForExistence(timeout: 8))
         XCTAssertFalse(stop.exists)
         capture("mac-main-voice-sent-dark", in: window)
-        let recordings = app.buttons.matching(NSPredicate(format: "label == %@", "Слушать Голосовая заметка.m4a"))
+        let feed = app.scrollViews["Лента заметок"]
+        let recordings = feed.buttons.matching(NSPredicate(format: "label == %@", "Слушать Голосовая заметка.m4a"))
         let allSaved = XCTNSPredicateExpectation(predicate: NSPredicate(format: "count == 3"), object: recordings)
         XCTAssertEqual(XCTWaiter.wait(for: [allSaved], timeout: 35), .completed)
 
