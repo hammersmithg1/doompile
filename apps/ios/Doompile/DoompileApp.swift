@@ -546,16 +546,15 @@ struct Home: View {
                     HStack(spacing: 8) {
                         ForEach(attachments) { file in
                             CaptureAttachmentSnippet(attachment: file, remove: { removeQuickAttachment(file) })
-                                .frame(width: 210)
-                                .accessibilityElement(children: .contain).accessibilityIdentifier("quick-attachment")
+                                .frame(width: 254)
                         }
                         ForEach(quickPreparing) { file in
                             CaptureAttachmentSnippet(attachment: file, transfer: .uploading(nil))
-                                .frame(width: 210)
+                                .frame(width: 254)
                         }
                         if preparingPhoto {
                             CaptureAttachmentSnippet(attachment: Attachment(id: "photo", name: "Фото", mimeType: "image/*", url: "", size: 0),
-                                transfer: .uploading(nil)).frame(width: 210)
+                                transfer: .uploading(nil)).frame(width: 254)
                         }
                     }.padding(.horizontal, 6)
                 }.padding(.top, 4)
@@ -609,7 +608,8 @@ struct Home: View {
                 onPasteImage: { data, name, mime in try storeQuickImage(data, name: name, mime: mime, noteID: quickNote.id) })
                 .id(quickNote.id).frame(height: 44).accessibilityIdentifier("quick-rich-input")
         } else {
-            TextField(UICopy.capturePlaceholder, text: Binding(get: { draft }, set: updateQuickText), axis: .vertical)
+            TextField(UICopy.capturePlaceholder, text: Binding(get: { draft }, set: updateQuickText),
+                prompt: Text(UICopy.capturePlaceholder).foregroundColor(Palette.muted), axis: .vertical)
                 .lineLimit(1).focused($focused).onTapGesture { focused = true }.font(.system(size: 16))
                 .foregroundStyle(Palette.text).frame(maxWidth: .infinity).accessibilityIdentifier("quick-input")
         }

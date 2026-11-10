@@ -38,6 +38,7 @@ struct CaptureAttachmentSnippet: View {
             .foregroundStyle(Palette.muted)
             VStack(alignment: .leading, spacing: 2) {
                 Text(attachment.name).font(.system(size: 13, weight: .medium)).lineLimit(1).truncationMode(.middle)
+                    .accessibilityIdentifier(remove == nil ? "attachment-name" : "quick-attachment")
                 Text(metadata).font(.system(size: 11)).lineLimit(1).foregroundStyle(Palette.muted)
             }
             Spacer(minLength: 0)
