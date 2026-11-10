@@ -20,18 +20,27 @@ export default function VoiceCapture({
   const press = useRef<{ id: number; time: number } | null>(null);
   const ignoreClick = useRef(false);
   const showSend = hasContent || recording.draft?.target === "quick";
-  const unavailable = sending ||
+  const unavailable =
+    sending ||
     (showSend
-      ? recording.draft?.target === "quick" && ["starting", "stopping", "uploading"].includes(recording.status)
+      ? recording.draft?.target === "quick" &&
+        ["starting", "stopping", "uploading"].includes(recording.status)
       : recording.status !== "idle");
   function release(event: PointerEvent<HTMLButtonElement>, cancelled: boolean) {
     const current = press.current;
     if (current?.id !== event.pointerId) return;
     press.current = null;
-    if (cancelled) {
-      void recordingSession.discardQuick();
+    const { left, right, top, bottom } =
+      event.currentTarget.getBoundingClientRect();
+    const outside =
+      event.clientX < left ||
+      event.clientX > right ||
+      event.clientY < top ||
+      event.clientY > bottom;
+    if (cancelled || outside) {
+      recordingSession.stop();
     } else if (
-      performance.now() - current.time >= holdDuration &&
+      event.timeStamp - current.time >= holdDuration &&
       recordingSession.getSnapshot().status === "recording"
     ) {
       void send();
@@ -44,13 +53,18 @@ export default function VoiceCapture({
       className={`composer-primary ${showSend ? "send-button" : "icon-button quick-voice"}`}
       aria-disabled={unavailable || undefined}
       aria-label={showSend ? "Сохранить заметку" : "Записать голосовую заметку"}
-      title={showSend ? "Сохранить заметку" : "Нажать для записи или удерживать для быстрой отправки"}
+      title={
+        showSend
+          ? "Сохранить заметку"
+          : "Нажать для записи или удерживать для быстрой отправки"
+      }
       onContextMenu={(event) => event.preventDefault()}
       onPointerDown={(event) => {
         ignoreClick.current = false;
-        if (showSend || unavailable || !event.isPrimary || event.button !== 0) return;
+        if (showSend || unavailable || !event.isPrimary || event.button !== 0)
+          return;
         event.currentTarget.setPointerCapture(event.pointerId);
-        press.current = { id: event.pointerId, time: performance.now() };
+        press.current = { id: event.pointerId, time: event.timeStamp };
         ignoreClick.current = true;
         void recordingSession.start("quick");
       }}

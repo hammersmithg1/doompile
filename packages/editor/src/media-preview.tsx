@@ -347,6 +347,9 @@ export default function AttachmentPreview({
               ? FileCode2
               : File;
   const className = `attachment-card ${image ? "attachment-image" : ""}`;
+  const type = extension.toUpperCase().slice(0, 12) ||
+    a.mimeType.split("/")[1] || "Файл";
+  const size = fileSize(a.size);
   const content = (
     <>
       <span className="attachment-art">
@@ -364,12 +367,15 @@ export default function AttachmentPreview({
       <span className="attachment-info">
         <strong title={a.name}>{a.name}</strong>
         <small>
-          {extension.toUpperCase().slice(0, 12) ||
-            a.mimeType.split("/")[1] ||
-            "Файл"}
-          <span>·</span>
-          {fileSize(a.size)}
-          {transfer && <><span>·</span>{transfer.status}</>}
+          {transfer ? (
+            <>
+              <span className="attachment-transfer-details">{type} · {size}</span>
+              <span aria-hidden="true">·</span>
+              {transfer.status}
+            </>
+          ) : (
+            <>{type}<span>·</span>{size}</>
+          )}
         </small>
       </span>
     </>

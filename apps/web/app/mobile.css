@@ -208,8 +208,17 @@
   .composer-tools {
     height: auto;
   }
+  .send-button,
   .composer-tools .composer-primary {
     border-radius: 50%;
+  }
+  .send-button {
+    width: 38px;
+    height: 38px;
+    margin: 0;
+  }
+  .send-button:disabled {
+    display: none;
   }
   .composer-footnote {
     display: none;

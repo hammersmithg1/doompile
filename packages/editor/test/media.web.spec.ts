@@ -1,4 +1,4 @@
-import { test, expect, type Page } from "./web-test";
+import { test, expect, mockMicrophone, type Page } from "./web-test";
 const firstID = "a6ad6431-ad38-4533-92a0-c337487ef00b";
 const file = (
   name: string,
@@ -63,7 +63,8 @@ async function setup(
       await route.fulfill({ status: 503, json: { error: "offline" } });
     else
       await route.fulfill({
-        json: { attachment: file("Голосовая заметка.wav", "audio/wav") },
+        json: { attachment: file("Голосовая заметка.wav", "audio/wav",
+          route.request().headers()["x-doompile-upload-id"]) },
       });
   });
   await page.goto("/");
@@ -84,77 +85,6 @@ async function setup(
       failUpload = value;
     },
   };
-}
-async function mockMicrophone(page: Page) {
-  await page.addInitScript(() => {
-    const metrics = { starts: 0, stops: 0, tracksStopped: 0 };
-    (window as any).microphoneMetrics = metrics;
-    Object.defineProperty(window, "AudioContext", {
-      configurable: true,
-      value: undefined,
-    });
-    // A valid PCM WAV chunk makes local recovery/playback exercise real media elements.
-    function wav() {
-      const bytes = new ArrayBuffer(844),
-        v = new DataView(bytes);
-      const text = (offset: number, value: string) =>
-        Array.from(value).forEach((c, i) =>
-          v.setUint8(offset + i, c.charCodeAt(0)),
-        );
-      text(0, "RIFF");
-      v.setUint32(4, 836, true);
-      text(8, "WAVEfmt ");
-      v.setUint32(16, 16, true);
-      v.setUint16(20, 1, true);
-      v.setUint16(22, 1, true);
-      v.setUint32(24, 8000, true);
-      v.setUint32(28, 16000, true);
-      v.setUint16(32, 2, true);
-      v.setUint16(34, 16, true);
-      text(36, "data");
-      v.setUint32(40, 800, true);
-      return new Blob([bytes], { type: "audio/wav" });
-    }
-    class Recorder {
-      state = "inactive";
-      mimeType = "audio/wav";
-      timer: any;
-      ondataavailable: any;
-      onstop: any;
-      onerror: any;
-      start(slice: number) {
-        this.state = "recording";
-        metrics.starts++;
-        this.timer = setInterval(() => this.requestData(), slice);
-      }
-      requestData() {
-        this.ondataavailable?.({ data: wav() });
-      }
-      stop() {
-        if (this.state !== "recording") return;
-        this.state = "inactive";
-        clearInterval(this.timer);
-        metrics.stops++;
-        this.requestData();
-        setTimeout(() => this.onstop?.(), 0);
-      }
-    }
-    Object.defineProperty(navigator, "mediaDevices", {
-      configurable: true,
-      value: {
-        getUserMedia: async () => ({
-          getTracks: () => [
-            {
-              stop() {
-                metrics.tracksStopped++;
-              },
-            },
-          ],
-        }),
-      },
-    });
-    (window as any).MediaRecorder = Recorder;
-  });
 }
 
 test("opening a cached note follows the newer server copy without autosaving the old document", async ({
@@ -582,7 +512,7 @@ test("stopping an inline recording on an existing note attaches it to the same n
     await page.evaluate(() => (window as any).microphoneMetrics.stops),
   ).toBe(1);
 });
-test("reload restores checkpointed audio without sending and the send arrow retries a failed upload", async ({
+test("reload restores checkpointed audio without sending and a failed upload can be retried in the feed", async ({
   page,
 }) => {
   await mockMicrophone(page);
@@ -627,19 +557,14 @@ test("reload restores checkpointed audio without sending and the send arrow retr
     exact: true,
   });
   await send.click();
-  await expect(
-    page.getByRole("button", { name: "Повторить сохранение" }),
-  ).toBeVisible();
+  const retry = page.locator(".note-main").getByRole("button", { name: /Повторить загрузку/ });
+  await expect(retry).toBeVisible();
   expect(app.uploads).toHaveLength(1);
   expect(app.writes).toHaveLength(0);
-  await expect(page.locator(".quick-recording audio")).toHaveAttribute(
-    "src",
-    /^blob:/,
-  );
-  app.fail(false);
-  await send.click();
-  await expect(page.locator(".note-main .attachment-audio")).toBeVisible();
   await expect(page.locator(".quick-recording")).toHaveCount(0);
+  app.fail(false);
+  await retry.click();
+  await expect(page.locator(".note-main .attachment-audio")).toBeVisible();
   expect(app.uploads).toHaveLength(2);
   await expect.poll(() => app.notes.length).toBe(1);
 });
@@ -766,7 +691,8 @@ test("a quick attachment finishing upload after expansion stays in the expanded 
     requested = true;
     await gate;
     await route.fulfill({
-      json: { attachment: file("pending.pdf", "application/pdf") },
+      json: { attachment: file("pending.pdf", "application/pdf",
+        route.request().headers()["x-doompile-upload-id"]) },
     });
   });
   await drop(page, ".quick-composer", "pending.pdf");
@@ -790,10 +716,7 @@ test("expanded send saves text, a pending file and active voice in one note", as
   });
   let requested = false;
   await page.route("**/api/attachments", async (route) => {
-    const pendingFile = route
-      .request()
-      .postDataBuffer()
-      ?.includes(Buffer.from("pending.pdf"));
+    const pendingFile = !requested;
     if (pendingFile) {
       requested = true;
       await gate;
@@ -804,9 +727,10 @@ test("expanded send saves text, a pending file and active voice in one note", as
           ? file(
               "pending.pdf",
               "application/pdf",
-              "d8e1a8cd-60a1-4a1c-b3fa-e76f79646ee8",
+              route.request().headers()["x-doompile-upload-id"],
             )
-          : file("Голосовая заметка.wav", "audio/wav"),
+          : file("Голосовая заметка.wav", "audio/wav",
+              route.request().headers()["x-doompile-upload-id"]),
       },
     });
   });

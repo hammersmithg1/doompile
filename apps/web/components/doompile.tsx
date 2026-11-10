@@ -103,6 +103,7 @@ import { useMobileViewport } from "./mobile-viewport";
 import { useMobileSidebar } from "./mobile-sidebar";
 type Filter = "all" | "urgent" | "pinned" | "media" | "tag";
 const collapsedCaptureKey = "doompile-collapsed-capture";
+const localCaptureSaved = "Заметка сохранена на устройстве";
 const typeLabel = {
   note: "Заметка",
   article: "Статья",
@@ -875,6 +876,15 @@ export default function Doompile({
   useEffect(() => {
     if (recording.error && !recording.draft) notify(recording.error);
   }, [recording.error]);
+  const quickRecordingActive = recording.draft?.target === "quick" &&
+    (recording.status === "starting" || recording.status === "recording");
+  useEffect(() => {
+    if (quickRecordingActive || draftUploads.length) {
+      setToast((message) => message === uiCopy.saved || message === localCaptureSaved
+        ? ""
+        : message);
+    }
+  }, [quickRecordingActive, draftUploads.length]);
   useEffect(() => {
     void recordingSession.restore();
   }, []);
@@ -990,9 +1000,13 @@ export default function Doompile({
     } catch {}
   }
   function recordingFile(draft: RecordingDraft) {
+    const extension = draft.mimeType.includes("mp4") ? "m4a"
+      : draft.mimeType.includes("ogg") ? "ogg"
+      : draft.mimeType.includes("wav") ? "wav"
+      : "webm";
     return new window.File(
       [draft.blob],
-      `Голосовая заметка.${draft.mimeType.includes("mp4") ? "m4a" : "webm"}`,
+      `Голосовая заметка.${extension}`,
       { type: draft.mimeType },
     );
   }
@@ -1146,7 +1160,7 @@ export default function Doompile({
       setQuery("");
       const group = groupFeed([note])[0]?.id;
       if (group) setCollapsed((current) => current[group] ? { ...current, [group]: false } : current);
-      notify(pending.length ? "Заметка сохранена на устройстве" : uiCopy.saved);
+      notify(pending.length ? localCaptureSaved : uiCopy.saved);
       if (!isMobile) input.current?.focus({ preventScroll: true });
     } catch (error) {
       notify(error instanceof Error ? error.message : "Не удалось сохранить. Попробуй ещё раз.");
@@ -1288,14 +1302,43 @@ export default function Doompile({
     return (await r.json()).attachment;
   }
   function startDraftUpload(file: QuickUpload) {
-    void uploadQuickFile(file).then(() => {
-      if (!submitting.current && draftUploadsRef.current.includes(file))
+    void uploadQuickFile(file).then((attachment) => {
+      if (submitting.current || !draftUploadsRef.current.includes(file)) return;
+      const target = closing.current ? undefined : latestComposer.current;
+      if (!target) {
         persistDraftAttachments();
+        return;
+      }
+      const api = editorAPI.current;
+      changeDraftUploads(draftUploadsRef.current.filter((item) => item !== file));
+      setEditor((current) =>
+        current?.id === target.id ? {
+          ...current,
+          attachments: [...current.attachments, attachment],
+          body: api ? current.body : {
+            ...current.body,
+            content: [
+              ...(current.body.content || []),
+              attachmentNode(attachment),
+              { type: "paragraph" },
+            ],
+          },
+        } : current,
+      );
+      api?.insertAttachment(attachment);
+      forgetUpload(attachment.id);
     }).catch(() => {});
   }
+  useEffect(() => {
+    if (!composing) return;
+    for (const file of draftUploadsRef.current)
+      if (uploadState(file.attachment.id).status === "ready") startDraftUpload(file);
+  }, [composing]);
   function attachQuick(files: File[]) {
     if (submitting.current || closing.current || latestComposer.current) return;
-    const available = NOTE_LIMITS.attachments - draftAttachmentsRef.current.length - draftUploadsRef.current.length;
+    const hasVoice = recordingSession.getSnapshot().draft?.target === "quick";
+    const available = NOTE_LIMITS.attachments - draftAttachmentsRef.current.length -
+      draftUploadsRef.current.length - Number(hasVoice);
     if (files.length > available)
       notify(`В одну заметку можно добавить до ${NOTE_LIMITS.attachments} вложений.`);
     const added = files.slice(0, Math.max(available, 0)).map((file) => quickUpload(file));
@@ -1966,11 +2009,6 @@ export default function Doompile({
                                       ))}
                                     </div>
                                   )}
-                                  {n.attachments.length > 0 && (
-                                    <div className="attachment-note-open" aria-label="Открыть заметку">
-                                      <span>{time(n.createdAt)}</span>
-                                    </div>
-                                  )}
                                   {n.tags.length > 0 && (
                                     <div className="note-tags">
                                       {n.tags.map((t) => (
@@ -1980,9 +2018,20 @@ export default function Doompile({
                                   )}
                                 </div>
                               </div>
-                              <time className="row-time">
-                                {time(n.createdAt)}
-                              </time>
+                              {!pending && n.attachments.length > 0 ? (
+                                <button
+                                  type="button"
+                                  className="row-time"
+                                  aria-label={`Открыть заметку ${n.title}`}
+                                  onClick={() => setSelected(n.id)}
+                                >
+                                  <time dateTime={n.createdAt}>{time(n.createdAt)}</time>
+                                </button>
+                              ) : (
+                                <time className="row-time" dateTime={n.createdAt}>
+                                  {time(n.createdAt)}
+                                </time>
+                              )}
                               {pending ? (
                                 <button
                                   className="icon-button row-more queued-note-delete"

@@ -1,7 +1,12 @@
 "use client";
 
 import { brandCopy, uiCopy } from "../../../packages/design/copy";
-import type { Dispatch, SetStateAction, RefObject, ClipboardEvent } from "react";
+import type {
+  Dispatch,
+  SetStateAction,
+  RefObject,
+  ClipboardEvent,
+} from "react";
 import { X, Paperclip, Maximize2 } from "../../../packages/design/ui-icons";
 import type { Attachment } from "@doompile/core";
 import { recordingSession, type RecordingState } from "@/lib/client/recording";
@@ -61,7 +66,8 @@ export default function QuickComposer({
             Добавить в новое сообщение
           </div>
         )}
-        {(attachments.length > 0 || (recording.draft && recording.draft.target !== editorId)) && (
+        {(attachments.length > 0 ||
+          (recording.draft && recording.draft.target !== editorId)) && (
           <div className="quick-attachments">
             {attachments.map((attachment) => (
               <CaptureAttachment
@@ -89,16 +95,17 @@ export default function QuickComposer({
                   onStop={recordingSession.stop}
                   onRetry={recordingSession.retry}
                 />
-                {recording.draft.target === "quick" && recording.status === "ready" && (
-                  <button
-                    type="button"
-                    className="draft-remove"
-                    aria-label="Убрать голосовую запись"
-                    onClick={() => void recordingSession.discardQuick()}
-                  >
-                    <X size={14} />
-                  </button>
-                )}
+                {recording.draft.target === "quick" &&
+                  recording.status === "ready" && (
+                    <button
+                      type="button"
+                      className="draft-remove"
+                      aria-label="Убрать голосовую запись"
+                      onClick={() => void recordingSession.discardQuick()}
+                    >
+                      <X size={14} />
+                    </button>
+                  )}
                 {recording.draft.target !== "quick" && (
                   <button
                     type="button"

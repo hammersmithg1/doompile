@@ -8,7 +8,13 @@ import {
 } from "@doompile/core";
 import { LocalNotes, type StoredRecord } from "./local-notes";
 import { syncOutbox } from "./sync-outbox";
-import { forgetUpload, uploadQuickFile, type QuickUpload } from "./quick-uploads";
+import {
+  forgetUpload,
+  markUploadFailed,
+  uploadQuickFile,
+  uploadState,
+  type QuickUpload,
+} from "./quick-uploads";
 import { track, flushTelemetry } from "./telemetry";
 import {
   errorProperties,
@@ -40,6 +46,7 @@ let records: Record<string, StoredRecord> = {};
 let database: LocalNotes | undefined;
 let initializing: Promise<void> | undefined;
 let syncing = false;
+let syncRequested = false;
 let channel: BroadcastChannel | undefined;
 const transferring = new Set<string>();
 const writer =
@@ -55,8 +62,12 @@ function emit(patch: Partial<State> = {}) {
       .sort(compareNoteCreation),
     pending: Object.values(records).filter((r) => r.pending).length,
     queuedUploads: Object.fromEntries(
-      Object.values(records).filter((record) => record.uploads?.length)
-        .map((record) => [record.note.id, record.uploads!.map((file) => file.attachment.id)]),
+      Object.values(records)
+        .filter((record) => record.uploads?.length)
+        .map((record) => [
+          record.note.id,
+          record.uploads!.map((file) => file.id),
+        ]),
     ),
     errors: Object.values(records)
       .filter((record) => record.error)
@@ -71,6 +82,7 @@ function emit(patch: Partial<State> = {}) {
 }
 async function refresh(ids?: string[]) {
   if (!database) return;
+  const previous = snapshot.queuedUploads;
   if (!ids)
     records = Object.fromEntries(
       (await database.all()).map((record) => [record.note.id, record]),
@@ -83,6 +95,10 @@ async function refresh(ids?: string[]) {
     });
   }
   emit();
+  for (const id of ids || Object.keys(previous)) {
+    for (const fileID of previous[id] || [])
+      if (!snapshot.queuedUploads[id]?.includes(fileID)) forgetUpload(fileID);
+  }
 }
 async function changed(ids: string[]) {
   if (!ids.length) return;
@@ -143,7 +159,12 @@ export function initStore(): Promise<void> {
         void refresh().then(() => sync());
       });
       window.setInterval(() => {
-        if (document.visibilityState === "visible") void sync();
+        if (document.visibilityState === "visible") {
+          for (const [id, files] of Object.entries(snapshot.queuedUploads))
+            if (files.some((file) => uploadState(file).status === "queued"))
+              retryUploads(id);
+          void sync();
+        }
       }, 20_000);
     } catch (error) {
       track("storage.failed", { operation: "read", ...errorProperties(error) });
@@ -209,35 +230,48 @@ export function retryUploads(noteID?: string) {
       const [current] = await local.read([id]);
       if (!current?.uploads?.length) return;
       for (const file of current.uploads) {
-        if (!records[id]?.uploads?.some((upload) => upload.attachment.id === file.attachment.id))
+        const data = await local.uploadData(file);
+        if (
+          !data ||
+          !records[id]?.uploads?.some((upload) => upload.id === file.id)
+        )
           continue;
+        const attachment = await uploadQuickFile({
+          attachment: file,
+          data,
+        }).catch(() => undefined);
+        if (!attachment) continue;
         try {
-          const attachment = await uploadQuickFile(file);
           await changed(await local.finishUpload(id, attachment));
-          forgetUpload(attachment.id);
         } catch {
-          // Retain the file for another attempt and continue with other files.
+          markUploadFailed(attachment.id);
         }
       }
       if (!records[id]?.uploads?.length) void sync(false);
     };
     const task = navigator.locks
-      ? navigator.locks.request(accountDatabaseName(`doompile-upload-${id}`), send)
+      ? navigator.locks.request(
+          accountDatabaseName(`doompile-upload-${id}`),
+          { ifAvailable: true },
+          (lock) => (lock ? send() : undefined),
+        )
       : send();
     void task.catch(() => {}).finally(() => transferring.delete(id));
   }
 }
 export async function discardUploads(noteID: string) {
   if (!database) return false;
-  const uploads = records[noteID]?.uploads;
   const removed = await database.discardUploads(noteID);
   if (!removed.length) return false;
-  for (const file of uploads || []) forgetUpload(file.attachment.id);
   await changed(removed);
   return true;
 }
 export async function sync(pull = true) {
-  if (syncing || !snapshot.ready || !database) return;
+  if (!snapshot.ready || !database) return;
+  if (syncing) {
+    if (!pull) syncRequested = true;
+    return;
+  }
   if (!navigator.onLine) {
     emit({ status: "offline" });
     return;
@@ -322,6 +356,10 @@ export async function sync(pull = true) {
   } finally {
     syncing = false;
     void flushTelemetry();
+    if (syncRequested) {
+      syncRequested = false;
+      void sync(false);
+    }
   }
 }
 export async function clearLocalData() {

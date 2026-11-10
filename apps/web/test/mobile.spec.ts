@@ -2,6 +2,8 @@ import { createNote } from "../../../packages/core/src/index";
 import {
   test,
   expect,
+  mockMicrophone,
+  microphoneWAV,
   type Page,
 } from "../../../packages/editor/test/web-test";
 const id = "d3d0daa0-cc18-4bbf-b8c2-2837b3324ef3";
@@ -47,7 +49,7 @@ async function setup(page: Page, populated = true) {
   await page.goto("/");
   await expect(
     page.getByRole("textbox", { name: "Быстрая заметка" }),
-  ).toBeVisible();
+  ).toBeVisible({ timeout: 15_000 });
   return notes;
 }
 async function swipe(page: Page, selector: string, dx: number, dy = 0) {
@@ -317,7 +319,7 @@ test("Safari keyboard geometry updates in the same frame and restores after dism
     fullHeight,
   );
   await page
-    .getByRole("button", { name: "Новая заметка", exact: true })
+    .getByRole("button", { name: "Развернуть редактор", exact: true })
     .click();
   await expect(
     page.getByRole("textbox", { name: "Текст заметки" }),
@@ -349,7 +351,7 @@ test("mobile capture, document tools, keyboard viewport and save on close", asyn
   await expect(input).toHaveValue("Непустой быстрый черновик\n");
   expect(notes).toHaveLength(0);
   await page
-    .getByRole("button", { name: "Новая заметка", exact: true })
+    .getByRole("button", { name: "Развернуть редактор", exact: true })
     .click();
   const text = page.getByRole("textbox", { name: "Текст заметки" });
   await expect(text).toBeVisible();
@@ -437,7 +439,7 @@ test("desktop retains its composer and side editor without mobile controls", asy
 }, info) => {
   test.skip(info.project.name !== "desktop-chromium");
   await setup(page);
-  await expect(page.locator(".mobile-compose-plus")).toBeHidden();
+  await expect(page.getByRole("button", { name: "Прикрепить файл", exact: true })).toBeVisible();
   await page.locator(".note-main").click();
   await expect(
     page.getByRole("textbox", { name: "Текст заметки" }),
@@ -555,7 +557,7 @@ test("offline notes saved in separate tabs remain durable", async ({
   await page.close();
   const durable = await second.evaluate(async () => {
     const db = await new Promise<IDBDatabase>((resolve, reject) => {
-      const request = indexedDB.open("doompile-v1:user:11111111-1111-4111-8111-111111111111", 2);
+      const request = indexedDB.open("doompile-v1:user:11111111-1111-4111-8111-111111111111");
       request.onsuccess = () => resolve(request.result);
       request.onerror = () => reject(request.error);
     });
@@ -625,7 +627,7 @@ test("legacy IndexedDB pending notes migrate atomically and only once", async ({
   ).toBeVisible();
   const result = await page.evaluate(async () => {
     const db = await new Promise<IDBDatabase>((resolve, reject) => {
-      const request = indexedDB.open("doompile-v1:user:11111111-1111-4111-8111-111111111111", 2);
+      const request = indexedDB.open("doompile-v1:user:11111111-1111-4111-8111-111111111111");
       request.onsuccess = () => resolve(request.result);
       request.onerror = () => reject(request.error);
     });
@@ -646,4 +648,236 @@ test("legacy IndexedDB pending notes migrate atomically and only once", async ({
   expect(result[0].note.id).toBe(legacy.id);
   expect(result[0].dirty).toBe(true);
   expect(result[0].baseRevision).toBe(0);
+});
+
+test("compact composer sends a visible note before its file finishes uploading", async ({
+  page,
+}, info) => {
+  test.setTimeout(60_000);
+  await page.emulateMedia({ colorScheme: info.project.name === "iphone-webkit" ? "dark" : "light" });
+  const notes = await setup(page);
+  const quick = page.locator(".quick-composer");
+  const input = quick.getByRole("textbox");
+  const clip = quick.getByRole("button", { name: "Прикрепить файл" });
+  const expand = quick.getByRole("button", { name: "Развернуть редактор" });
+  const mic = quick.getByRole("button", { name: "Записать голосовую заметку" });
+  const send = quick.getByRole("button", { name: "Сохранить заметку" });
+  const capture = (state: string) => page.screenshot({
+    path: info.outputPath(`composer-${state}.png`),
+  });
+  await expect(mic).toBeVisible();
+  await expect(send).toHaveCount(0);
+  const bounds = await Promise.all([clip, input, expand, mic].map((item) => item.boundingBox()));
+  expect(bounds.map((rect) => rect!.x)).toEqual([...bounds].map((rect) => rect!.x).sort((a, b) => a - b));
+  expect(Math.max(...bounds.map((rect) => rect!.y)) - Math.min(...bounds.map((rect) => rect!.y))).toBeLessThan(3);
+  await capture("empty");
+  await input.fill("Отчёт по проекту");
+  await expect(send).toBeVisible();
+  await expect(mic).toHaveCount(0);
+  await capture("text");
+  const file = {
+    name: "Материалы проекта.zip",
+    mimeType: "application/zip",
+    buffer: Buffer.alloc(186 * 1024, 65),
+  };
+  let release!: () => void;
+  const gate = new Promise<void>((resolve) => { release = resolve; });
+  await page.route("**/api/attachments", async (route) => {
+    const id = route.request().headers()["x-doompile-upload-id"];
+    await gate;
+    await route.fulfill({
+      json: { attachment: { id, name: file.name, mimeType: file.mimeType, size: file.buffer.length, url: `/api/attachments/${id}` } },
+    });
+  });
+  // Playwright buffers requests for interception. Supply a progress event
+  // while the response is gated so the capture includes an intermediate frame.
+  await page.evaluate(() => {
+    const send = XMLHttpRequest.prototype.send;
+    XMLHttpRequest.prototype.send = function (...args) {
+      if (args[0] instanceof FormData)
+        Object.assign(window, { captureTestUpload: this });
+      return send.apply(this, args);
+    };
+  });
+  const chooser = page.waitForEvent("filechooser");
+  await clip.click();
+  await (await chooser).setFiles(file);
+  try {
+    const draft = quick.locator(".draft-attachment");
+    await expect(draft).toContainText(file.name);
+    await expect.poll(() => page.evaluate(() => {
+      const request = (window as Window & { captureTestUpload?: XMLHttpRequest }).captureTestUpload;
+      if (!request) return false;
+      request.upload.dispatchEvent(new ProgressEvent("progress", { lengthComputable: true, loaded: 37, total: 100 }));
+      return true;
+    })).toBe(true);
+    await expect(draft).toContainText("Загружается · 37%");
+    expect(await draft.locator(".capture-attachment-status").evaluate((label) =>
+      label.getBoundingClientRect().right <= label.parentElement!.getBoundingClientRect().right + 1,
+    )).toBe(true);
+    const height = (await draft.boundingBox())!.height;
+    await capture("file-progress");
+    await expect(send).toBeEnabled();
+    await send.click();
+    const row = page.locator(".note-row").filter({ hasText: "Отчёт по проекту" });
+    await expect(row).toContainText(file.name);
+    await expect(row).toContainText("Загружается · 37%");
+    await expect(input).toHaveValue("");
+    await expect(draft).toHaveCount(0);
+    expect(notes).toHaveLength(1);
+    await capture("optimistic-feed");
+    release();
+    const ready = row.getByRole("link", { name: `Открыть ${file.name}` });
+    await expect(ready).toBeVisible();
+    expect((await ready.boundingBox())!.height).toBe(height);
+    await expect.poll(() => notes.length).toBe(2);
+    await capture("ready-feed");
+  } finally {
+    release();
+  }
+});
+
+test("a failed attachment remains on the same note after reload and can be retried or discarded", async ({
+  page,
+}, info) => {
+  test.setTimeout(60_000);
+  const notes = await setup(page, false);
+  const requestIDs: string[] = [];
+  const bytes = "Данные тестового вложения";
+  const fileName = "Список.txt";
+  let fail = true;
+  await page.route("**/api/attachments", async (route) => {
+    const id = route.request().headers()["x-doompile-upload-id"];
+    requestIDs.push(id);
+    await route.fulfill(fail ? { status: 503, json: { error: "fixture" } } : {
+      json: { attachment: { id, name: fileName, mimeType: "text/plain", size: Buffer.byteLength(bytes), url: `/api/attachments/${id}` } },
+    });
+  });
+  const attach = () => page.locator('input[type=file]').setInputFiles({
+    name: fileName,
+    mimeType: "text/plain",
+    buffer: Buffer.from(bytes),
+  });
+  const send = page.getByRole("button", { name: "Сохранить заметку" });
+  const row = page.locator(".note-row").filter({ hasText: fileName });
+  const retry = row.getByRole("button", { name: `Повторить загрузку ${fileName}` });
+  await attach();
+  await send.click();
+  await expect(retry).toBeVisible();
+  await expect(row).toContainText("Не удалось загрузить");
+  await page.screenshot({ path: info.outputPath("composer-failed-feed.png") });
+  expect(notes).toHaveLength(0);
+  await page.reload();
+  await expect(row).toContainText("Не удалось загрузить");
+  await expect(retry).toBeVisible();
+  expect(new Set(requestIDs).size).toBe(1);
+  expect(await page.evaluate(async () => {
+    const request = indexedDB.open("doompile-v1:user:11111111-1111-4111-8111-111111111111");
+    const db = await new Promise<IDBDatabase>((resolve, reject) => {
+      request.onsuccess = () => resolve(request.result);
+      request.onerror = () => reject(request.error);
+    });
+    try {
+      const request = db.transaction("uploadBytes").objectStore("uploadBytes").getAll();
+      const files = await new Promise<ArrayBuffer[]>((resolve, reject) => {
+        request.onsuccess = () => resolve(request.result);
+        request.onerror = () => reject(request.error);
+      });
+      return new TextDecoder().decode(files[0]);
+    } finally {
+      db.close();
+    }
+  })).toBe(bytes);
+  fail = false;
+  await retry.click();
+  await expect(row.getByRole("link", { name: `Открыть ${fileName}` })).toBeVisible();
+  await expect.poll(() => notes.length).toBe(1);
+  expect(notes[0].attachments[0].id).toBe(requestIDs[0]);
+
+  fail = true;
+  await attach();
+  await send.click();
+  const queued = page.locator(".note-row").filter({ has: page.getByRole("button", { name: `Повторить загрузку ${fileName}` }) });
+  await queued.getByRole("button", { name: `Удалить заметку ${fileName}` }).click();
+  await expect(queued).toHaveCount(0);
+  await page.reload();
+  await expect(row).toHaveCount(1);
+});
+
+test("voice tap can stop or send and holding sends on release", async ({ page }, info) => {
+  test.setTimeout(60_000);
+  const mobile = info.project.name === "iphone-webkit";
+  await page.emulateMedia({ colorScheme: mobile ? "light" : "dark" });
+  await mockMicrophone(page, true);
+  const wav = microphoneWAV(2);
+  await page.route("**/api/attachments", (route) => {
+    const id = route.request().headers()["x-doompile-upload-id"];
+    return route.fulfill({
+      json: { attachment: { id, name: "Голосовая заметка.wav", mimeType: "audio/wav", size: wav.length, url: `/api/attachments/${id}` } },
+    });
+  });
+  await page.route("**/api/attachments/*", (route) => {
+    const range = /^bytes=(\d+)-(\d*)$/.exec(route.request().headers().range || "");
+    const headers = { "content-type": "audio/wav", "accept-ranges": "bytes" };
+    if (!range) return route.fulfill({ headers, body: wav });
+    const start = Number(range[1]);
+    const end = range[2] ? Math.min(Number(range[2]), wav.length - 1) : wav.length - 1;
+    return route.fulfill({
+      status: 206,
+      headers: { ...headers, "content-range": `bytes ${start}-${end}/${wav.length}` },
+      body: wav.subarray(start, end + 1),
+    });
+  });
+  const notes = await setup(page, false);
+  const quick = page.locator(".quick-composer");
+  const mic = quick.getByRole("button", { name: "Записать голосовую заметку" });
+  const stop = quick.getByRole("button", { name: "Остановить запись" });
+  const send = quick.getByRole("button", { name: "Сохранить заметку" });
+  const capture = (state: string) => page.screenshot({ path: info.outputPath(`voice-${state}.png`) });
+  const tapMic = () => mobile ? mic.tap() : mic.click();
+
+  await tapMic();
+  await expect(stop).toBeVisible();
+  await expect(send).toBeEnabled();
+  await expect(quick.locator(".recording-waveform")).toHaveAttribute("data-signal", "audible");
+  await capture("active");
+  await stop.click();
+  await expect(quick.locator("audio")).toBeAttached();
+  expect(notes).toHaveLength(0);
+  await capture("staged");
+  await quick.getByRole("button", { name: "Убрать голосовую запись" }).click();
+  await expect(mic).toBeVisible();
+
+  await tapMic();
+  await expect(stop).toBeVisible();
+  await send.click();
+  await expect(mic).toBeVisible();
+  await expect.poll(() => notes.length).toBe(1);
+  expect(notes[0]).toMatchObject({ kind: "audio", plainText: "" });
+  await expect(page.locator(".note-row audio")).toHaveJSProperty("duration", 2);
+
+  const center = (await mic.boundingBox())!;
+  await page.mouse.move(center.x + center.width / 2, center.y + center.height / 2);
+  await page.mouse.down();
+  await expect(stop).toBeVisible();
+  await expect(quick.locator(".recording-waveform")).toHaveAttribute("data-signal", "audible");
+  await page.waitForTimeout(400);
+  expect(notes).toHaveLength(1);
+  await expect(page.locator(".toast").filter({ hasText: "Заметка сохранена на устройстве" })).toHaveCount(0);
+  await capture("hold-mid");
+  await page.mouse.up();
+  await expect(mic).toBeVisible();
+  await expect.poll(() => notes.length).toBe(2);
+  expect(notes[1]).toMatchObject({ kind: "audio", plainText: "" });
+  await capture("hold-released");
+
+  await page.mouse.move(center.x + center.width / 2, center.y + center.height / 2);
+  await page.mouse.down();
+  await expect(stop).toBeVisible();
+  await page.waitForTimeout(400);
+  await page.mouse.move(center.x - 80, center.y + center.height / 2);
+  await page.mouse.up();
+  await expect(quick.locator("audio")).toBeAttached();
+  expect(notes).toHaveLength(2);
+  await capture("hold-cancelled");
 });

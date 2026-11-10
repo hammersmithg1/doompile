@@ -1215,10 +1215,13 @@ html[data-theme="dark"] .note-preview-more {
 .draft-remove:focus-visible {
   background: var(--surface);
 }
-.capture-attachment-status {
-  color: var(--text);
+.attachment-transfer-details {
   overflow: hidden;
   text-overflow: ellipsis;
+}
+.capture-attachment-status {
+  flex-shrink: 0;
+  color: var(--text);
 }
 .note-row > .queued-note-delete {
   display: inline-flex;
@@ -1626,6 +1629,28 @@ html[data-theme="dark"] .note-preview-more {
 .quick-recording:has(.draft-remove) {
   padding-right: 32px;
 }
+.quick-attachments .quick-recording .attachment-audio {
+  background: var(--surface);
+  color: var(--text);
+  border: 1px solid var(--line);
+}
+.quick-attachments .quick-recording .audio-play,
+.quick-attachments .quick-recording .audio-download {
+  background: var(--tool);
+  color: var(--text);
+}
+.quick-attachments .quick-recording .recording-stop {
+  color: var(--orange);
+}
+.quick-attachments .quick-recording .audio-waveform i {
+  background: color-mix(in srgb, var(--muted) 54%, transparent);
+}
+.quick-attachments .quick-recording .audio-waveform i.played {
+  background: var(--text);
+}
+.quick-attachments .quick-recording .recording-waveform i {
+  background: color-mix(in srgb, var(--orange) 60%, transparent);
+}
 .editor-capture-attachments {
   margin-bottom: 8px;
 }
@@ -1719,10 +1744,10 @@ html[data-theme="dark"] {
 }
 .draft-attachment {
   width: fit-content;
-  max-width: min(290px, 100%);
+  max-width: min(310px, 100%);
 }
 .draft-attachment > .attachment-card {
-  width: 260px;
+  width: 310px;
 }
 .draft-attachment > .attachment-audio {
   width: 280px;
@@ -1771,17 +1796,6 @@ html[data-theme="dark"] {
   padding: 12px 10px;
 }
 
-/* A quiet strip below media keeps the note itself easy to open. */
-.attachment-note-open {
-  display: flex;
-  justify-content: flex-end;
-  align-items: center;
-  min-height: 24px;
-  max-width: 360px;
-  color: var(--muted);
-  font-size: 10px;
-  cursor: pointer;
-}
 .note-copy .snippet-attachments {
   max-width: 360px;
 }
