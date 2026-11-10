@@ -76,7 +76,7 @@ struct QuickVoiceControl: UIViewRepresentable {
 
     func updateUIView(_ view: Control, context: Context) {
         view.configuration = self
-        view.accessibilityLabel = showsSend ? "Сохранить заметку" : "Записать голосовую заметку"
+        view.accessibilityLabel = showsSend ? "Отправить заметку" : "Записать голосовую заметку"
         view.accessibilityIdentifier = showsSend ? "quick-send" : "quick-microphone"
         view.accessibilityTraits = enabled ? [.button] : [.button, .notEnabled]
         if !showsSend {

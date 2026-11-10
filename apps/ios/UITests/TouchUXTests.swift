@@ -480,6 +480,7 @@ final class TouchUXTests: XCTestCase {
         screenshot("composer-collapsed-text-draft")
 
         app.buttons["expand-editor"].tap()
+        XCTAssertTrue(collapse.waitForExistence(timeout: 5))
         XCTAssertTrue(editor.waitForExistence(timeout: 5))
         XCTAssertTrue((editor.value as? String ?? "").contains("Draft before expanding"))
         XCTAssertTrue((editor.value as? String ?? "").contains("Edit kept in draft"))

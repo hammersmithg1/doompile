@@ -619,7 +619,7 @@ struct Home: View {
             TextField(UICopy.capturePlaceholder, text: Binding(get: { draft }, set: updateQuickText),
                 prompt: Text(UICopy.capturePlaceholder).foregroundColor(Palette.muted), axis: .vertical)
                 .lineLimit(1...lineLimit).focused($focused).onTapGesture { focused = true }.font(.system(size: 16))
-                .foregroundStyle(Palette.text).padding(.vertical, 8)
+                .foregroundStyle(Palette.text).padding(.vertical, 8).padding(.horizontal, 4)
                 .frame(maxWidth: .infinity, minHeight: 44).accessibilityIdentifier("quick-input")
         }
     }
