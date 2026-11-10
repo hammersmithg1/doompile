@@ -211,7 +211,8 @@ export default function Doompile({
   const submitting = useRef(false);
   const [toast, setToast] = useState("");
   const [demo, setDemo] = useState(false);
-  const [undoNote, setUndoNote] = useState<Note | null>(null);
+  const [undo, setUndo] = useState<{ note: Note; uploads?: QuickUpload[] } | null>(null);
+  const restoring = useRef(false);
   const [editor, setEditor] = useState<Note | null>(null);
   const editorBaseline = useRef<{ id: string; content: string } | null>(null);
   const [editorDocumentVersion, setEditorDocumentVersion] = useState(0);
@@ -416,8 +417,7 @@ export default function Doompile({
   useEffect(() => {
     if (!toast) return;
     const id = setTimeout(() => {
-      setToast("");
-      setUndoNote(null);
+      dismissToast();
     }, 8000);
     return () => clearTimeout(id);
   }, [toast]);
@@ -1046,9 +1046,25 @@ export default function Doompile({
       ...(filter === "tag" ? { tags: [selectedTag] } : {}),
     });
   }
-  function notify(message: string) {
-    setUndoNote(null);
+  function notify(message: string, restore: typeof undo = null) {
+    setUndo(restore);
     setToast(message);
+  }
+  function dismissToast() {
+    notify("");
+  }
+  async function restoreDeletedNote() {
+    if (!undo || restoring.current) return;
+    restoring.current = true;
+    try {
+      if (undo.uploads) await store.saveNote(undo.note, undo.uploads);
+      else await update(undo.note, { deletedAt: null });
+      notify("Заметка восстановлена");
+    } catch {
+      setToast("Не удалось восстановить заметку. Повтори попытку.");
+    } finally {
+      restoring.current = false;
+    }
   }
   function navigate(next: Filter, tag = "") {
     track("screen.viewed", {
@@ -1358,10 +1374,13 @@ export default function Doompile({
   }
   async function discardQueuedNote(note: Note) {
     try {
-      if (await store.discardUploads(note.id)) notify("Заметка удалена");
+      const discarded = await store.discardUploads(note.id);
+      if (discarded) notify("Заметка удалена", discarded);
       else {
         const ready = store.getSnapshot().notes.find((item) => item.id === note.id);
-        if (ready) await update(ready, { deletedAt: new Date().toISOString() });
+        if (!ready) return;
+        await store.saveNote({ ...ready, deletedAt: new Date().toISOString(), updatedAt: new Date().toISOString() });
+        notify("Заметка удалена", { note: ready });
       }
     } catch {
       notify("Не удалось удалить заметку. Попробуй ещё раз.");
@@ -1466,8 +1485,7 @@ export default function Doompile({
             setEditor(null);
             setSelected(null);
             setDetailExpanded(false);
-            notify("Заметка удалена");
-            setUndoNote(current);
+            notify("Заметка удалена", { note: current });
           } catch {
             notify("Не удалось удалить заметку. Попробуй ещё раз.");
           }
@@ -1760,8 +1778,7 @@ export default function Doompile({
                       onUrgent={() => void update(n, { urgent: !n.urgent })}
                       onDelete={() => {
                         void update(n, { deletedAt: new Date().toISOString() });
-                        notify("Заметка удалена");
-                        setUndoNote(n);
+                        notify("Заметка удалена", { note: n });
                       }}
                     >
                       {" "}
@@ -1863,7 +1880,7 @@ export default function Doompile({
                 <button
                   onClick={() => {
                     openEditor();
-                    setToast("В редакторе нажми «Голос», чтобы начать запись");
+                    notify("В редакторе нажми «Голос», чтобы начать запись");
                   }}
                 >
                   <Mic size={20} />
@@ -1927,8 +1944,7 @@ export default function Doompile({
                               void update(n, {
                                 deletedAt: new Date().toISOString(),
                               });
-                              notify("Заметка удалена");
-                              setUndoNote(n);
+                              notify("Заметка удалена", { note: n });
                             }}
                           >
                             <article
@@ -1993,7 +2009,7 @@ export default function Doompile({
                                           key={attachment.id}
                                           attachment={attachment}
                                           pending={pending?.includes(attachment.id)}
-                                          onRetry={() => store.retryUploads(n.id)}
+                                          onRetry={() => store.retryUploads(n.id, true)}
                                         />
                                       ))}
                                       {links.map((url) => (
@@ -2209,8 +2225,7 @@ export default function Doompile({
                   action(() => {
                     void update(note, { deletedAt: new Date().toISOString() });
                     if (selected === note.id) setSelected(null);
-                    notify("Заметка удалена");
-                    setUndoNote(note);
+                    notify("Заметка удалена", { note });
                   })
                 }
               >
@@ -2224,21 +2239,16 @@ export default function Doompile({
         <div className="toast" role="status">
           <Check size={16} />
           <span>{toast}</span>
-          {undoNote && (
-            <button
-              className="toast-undo"
-              onClick={() => {
-                void update(undoNote, { deletedAt: null });
-                notify("Заметка восстановлена");
-              }}
-            >
+          {undo && (
+            <button className="toast-undo" onClick={() => void restoreDeletedNote()}>
+
               Отменить
             </button>
           )}
           <button
             className="icon-button"
             aria-label="Скрыть уведомление"
-            onClick={() => setToast("")}
+            onClick={dismissToast}
           >
             <X size={14} />
           </button>

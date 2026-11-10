@@ -49,6 +49,7 @@ let syncing = false;
 let syncRequested = false;
 let channel: BroadcastChannel | undefined;
 const transferring = new Set<string>();
+const requestedRetries = new Set<string>();
 const writer =
   typeof crypto !== "undefined" && crypto.randomUUID
     ? crypto.randomUUID()
@@ -212,19 +213,22 @@ export async function saveNote(input: Note, uploads: QuickUpload[] = []) {
       JSON.stringify([...parsed.data.tags].sort())
     )
       track("editor.action", { action: "tag" });
-    if (uploads.length) retryUploads(parsed.data.id);
+    if (uploads.length) retryUploads(parsed.data.id, true);
     else void sync(false);
   } catch (error) {
     track("storage.failed", { operation: "update", ...errorProperties(error) });
     throw error;
   }
 }
-export function retryUploads(noteID?: string) {
+export function retryUploads(noteID?: string, afterCurrent = false) {
   if (!database || !navigator.onLine) return;
   const local = database;
   const ids = noteID ? [noteID] : Object.keys(snapshot.queuedUploads);
   for (const id of ids) {
-    if (transferring.has(id)) continue;
+    if (transferring.has(id)) {
+      if (afterCurrent) requestedRetries.add(id);
+      continue;
+    }
     transferring.add(id);
     const send = async () => {
       const [current] = await local.read([id]);
@@ -256,15 +260,18 @@ export function retryUploads(noteID?: string) {
           (lock) => (lock ? send() : undefined),
         )
       : send();
-    void task.catch(() => {}).finally(() => transferring.delete(id));
+    void task
+      .catch(() => {})
+      .finally(() => {
+        transferring.delete(id);
+        if (requestedRetries.delete(id)) retryUploads(id);
+      });
   }
 }
 export async function discardUploads(noteID: string) {
-  if (!database) return false;
-  const removed = await database.discardUploads(noteID);
-  if (!removed.length) return false;
-  await changed(removed);
-  return true;
+  const discarded = await database?.discardUploads(noteID);
+  if (discarded) await changed([noteID]);
+  return discarded;
 }
 export async function sync(pull = true) {
   if (!snapshot.ready || !database) return;

@@ -158,14 +158,27 @@ export class LocalNotes {
     const tx = this.db.transaction(["records", "uploadBytes"], "readwrite");
     const records = tx.objectStore("records");
     const current = await records.get(noteID);
-    if (!current?.uploads?.length) return [];
+    if (!current?.uploads?.length) return;
     const data = tx.objectStore("uploadBytes");
+    const bytes = await Promise.all(
+      current.uploads.map((file) => data.get(file.id)),
+    );
+    if (bytes.some((buffer) => !buffer)) {
+      await tx.done;
+      throw new Error("Не удалось прочитать вложения для отмены удаления.");
+    }
     await Promise.all([
       records.delete(noteID),
       ...current.uploads.map((file) => data.delete(file.id)),
       tx.done,
     ]);
-    return [noteID];
+    return {
+      note: current.note,
+      uploads: current.uploads.map((attachment, index) => ({
+        attachment,
+        data: new Blob([bytes[index]!], { type: attachment.mimeType }),
+      })),
+    };
   }
   async accept(sent: Note, server: Note): Promise<string[]> {
     const tx = this.db.transaction("records", "readwrite");

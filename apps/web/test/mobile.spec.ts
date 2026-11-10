@@ -788,6 +788,11 @@ test("a failed attachment remains on the same note after reload and can be retri
       db.close();
     }
   })).toBe(bytes);
+  await row.getByRole("button", { name: `Удалить заметку ${fileName}` }).click();
+  await expect(row).toHaveCount(0);
+  await page.getByRole("button", { name: "Отменить", exact: true }).click();
+  await expect(row).toContainText("Не удалось загрузить");
+  expect(new Set(requestIDs).size).toBe(1);
   fail = false;
   await retry.click();
   await expect(row.getByRole("link", { name: `Открыть ${fileName}` })).toBeVisible();
