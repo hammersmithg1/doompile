@@ -1351,7 +1351,7 @@ export default function Doompile({
       if (uploadState(file.attachment.id).status === "ready") startDraftUpload(file);
   }, [composing]);
   function attachQuick(files: File[]) {
-    if (submitting.current || closing.current || latestComposer.current) return;
+    if (submitting.current || latestComposer.current) return;
     const hasVoice = recordingSession.getSnapshot().draft?.target === "quick";
     const available = NOTE_LIMITS.attachments - draftAttachmentsRef.current.length -
       draftUploadsRef.current.length - Number(hasVoice);

@@ -557,7 +557,9 @@ test("reload restores checkpointed audio without sending and a failed upload can
     exact: true,
   });
   await send.click();
-  const retry = page.locator(".note-main").getByRole("button", { name: /Повторить загрузку/ });
+  const row = page.locator(".note-main");
+  await expect(row).toContainText("Не удалось загрузить");
+  const retry = row.getByRole("button", { name: /Повторить загрузку/ });
   await expect(retry).toBeVisible();
   expect(app.uploads).toHaveLength(1);
   expect(app.writes).toHaveLength(0);
@@ -667,16 +669,46 @@ test("image resize keeps aspect ratio, autosaves dimensions and survives reopeni
 test("editor padding/header drops go to the note; quick drops stay in the quick composer", async ({
   page,
 }) => {
+  await page.emulateMedia({ reducedMotion: "no-preference" });
   const app = await setup(page, [paragraph("Медиа")]);
+  await page.route("**/api/attachments", (route) => {
+    const id = route.request().headers()["x-doompile-upload-id"];
+    return route.fulfill({
+      json: { attachment: file(id ? "quick.txt" : "note.txt", "text/plain", id) },
+    });
+  });
   await drop(page, ".note-editor-header", "note.txt");
   await expect(
-    page.locator(".note-editor-surface .attachment-audio"),
-  ).toBeVisible();
+    page.locator(".note-editor-surface .attachment-card"),
+  ).toContainText("note.txt");
   await expect(page.locator(".draft-attachment")).toHaveCount(0);
   await expect.poll(() => app.writes.at(-1)?.attachments.length).toBe(1);
+  const pane = page.getByRole("complementary", { name: "Просмотр заметки" });
+  await pane.evaluate((element) => {
+    const animate = element.animate.bind(element);
+    element.animate = (...args) => {
+      const animation = animate(...args);
+      animation.pause();
+      animation.currentTime = 120;
+      element.setAttribute("data-close-paused", "");
+      return animation;
+    };
+  });
   await page.getByRole("button", { name: "Закрыть редактор" }).click();
-  await drop(page, ".quick-composer", "quick.txt");
-  await expect(page.locator(".draft-attachment")).toHaveCount(1);
+  await expect(pane).toHaveAttribute("data-close-paused", "");
+  try {
+    await drop(page, ".quick-composer", "quick.txt");
+    await expect(page.locator(".draft-attachment")).toContainText("quick.txt");
+    await page.screenshot({
+      path: test.info().outputPath("drop-during-editor-close.png"),
+    });
+  } finally {
+    await pane.evaluate((element) =>
+      element.getAnimations().forEach((animation) => animation.finish()),
+    );
+  }
+  await expect(pane).toHaveCount(0);
+  await expect(page.locator(".draft-attachment")).toContainText("quick.txt");
 });
 test("a quick attachment finishing upload after expansion stays in the expanded document", async ({
   page,
