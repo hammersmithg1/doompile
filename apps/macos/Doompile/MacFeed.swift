@@ -69,8 +69,20 @@ struct MacFileSnippet: View {
     var transfer: AttachmentUploadState? = nil
     var onRemove: (() -> Void)? = nil
     var onOpen: (() -> Void)? = nil
+    var opensDraft = false
+    @StateObject private var audio = MacInlineAudio()
+    @State private var previewError: String?
+    @State private var openingDraft = false
+
+    private var playsDraft: Bool { opensDraft && attachment.mimeType.hasPrefix("audio/") }
+    private var openAction: (() -> Void)? { onOpen ?? (opensDraft ? previewDraft : nil) }
+    private var openLabel: String {
+        if playsDraft { return audio.playing ? "Пауза" : "Слушать \(attachment.name)" }
+        return "Открыть \(attachment.name)"
+    }
 
     private var icon: String {
+        if playsDraft { return audio.playing ? "pause.fill" : "play.fill" }
         if attachment.mimeType.hasPrefix("image/") { return "photo" }
         if attachment.mimeType.hasPrefix("audio/") { return "waveform" }
         if attachment.mimeType == "application/zip" { return "doc.zipper" }
@@ -87,14 +99,16 @@ struct MacFileSnippet: View {
 
     var body: some View {
         HStack(spacing: 6) {
-            if let onOpen {
-                Button(action: onOpen) {
+            if let openAction {
+                Button(action: openAction) {
                     HStack(spacing: 6) {
                         details
-                        DoompileSymbol(systemName: "arrow.up.right", size: 11).foregroundStyle(MacPalette.muted)
-                            .frame(width: 24, height: 32)
+                        if !opensDraft {
+                            DoompileSymbol(systemName: "arrow.up.right", size: 11).foregroundStyle(MacPalette.muted)
+                                .frame(width: 24, height: 32)
+                        }
                     }
-                }.buttonStyle(.plain).help("Открыть \(attachment.name)").accessibilityLabel("Открыть \(attachment.name)")
+                }.buttonStyle(.plain).help(openLabel).accessibilityLabel(openLabel)
             } else {
                 details
             }
@@ -108,23 +122,41 @@ struct MacFileSnippet: View {
         .padding(6)
         .background(MacPalette.surface, in: RoundedRectangle(cornerRadius: 12))
         .overlay(RoundedRectangle(cornerRadius: 12).strokeBorder(MacPalette.line))
+        .onDisappear { audio.pause() }
     }
 
     private var details: some View {
         HStack(spacing: 8) {
             Group {
                 if let transfer { AttachmentTransferBadge(state: transfer, compact: true) }
+                else if openingDraft || audio.loading { ProgressView().controlSize(.mini) }
                 else { DoompileSymbol(systemName: icon, size: 16).foregroundStyle(MacPalette.muted) }
             }
             .frame(width: 32, height: 32)
             .background(MacPalette.tool, in: RoundedRectangle(cornerRadius: 8))
             VStack(alignment: .leading, spacing: 2) {
                 Text(attachment.name).font(.system(size: 13, weight: .medium)).lineLimit(1).truncationMode(.middle)
-                Text(transfer?.label ?? metadata).font(.system(size: 11))
+                Text(transfer?.label ?? previewError ?? audio.error ?? metadata).font(.system(size: 11))
                     .foregroundStyle(transfer == .failed ? MacPalette.orange : MacPalette.muted).monospacedDigit().lineLimit(1)
                     .accessibilityHidden(transfer != nil)
             }
             .frame(minWidth: 88, maxWidth: 192, alignment: .leading)
+        }
+    }
+
+    private func previewDraft() {
+        Task {
+            if playsDraft { await audio.toggle(attachment); return }
+            guard !openingDraft else { return }
+            openingDraft = true
+            defer { openingDraft = false }
+            do {
+                let file = try await AttachmentFiles.resolve(attachment)
+                guard NSWorkspace.shared.open(file) else { throw DoompileError.message("Не удалось открыть вложение.") }
+                previewError = nil
+            } catch {
+                previewError = "Не удалось открыть вложение"
+            }
         }
     }
 }

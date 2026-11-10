@@ -369,7 +369,7 @@ struct QuickCaptureRoot: View {
                     MacComposerButton(icon: "arrow.up.left.and.arrow.down.right", label: "Развернуть редактор", disabled: capture.busy, identifier: "quick-composer-expand") { capture.setExpanded(true) }
                     MacComposerPrimaryButton(canSend: voice.recording || capture.hasContent, starting: capture.startingVoice, busy: capture.busy,
                                              onStart: { capture.action("voice") }, onSend: submit,
-                                             onHoldRelease: { if voice.recording { submit() } })
+                                             onHoldRelease: releaseVoiceHold, onVoiceCancel: cancelVoicePress)
                 }
             }
         }.padding(capture.expanded ? 0 : 6).frame(maxHeight: capture.expanded ? .infinity : nil)
@@ -399,6 +399,13 @@ struct QuickCaptureRoot: View {
         }.padding(12)
     }
     private func submit() { Task { await capture.submit() } }
+    private func releaseVoiceHold() {
+        guard voice.recording else { return }
+        if voice.elapsed >= 0.12 { submit() } else { capture.action("stopVoice") }
+    }
+    private func cancelVoicePress() {
+        if capture.startingVoice { voice.cancel() } else { capture.action("stopVoice") }
+    }
     private func editorReadinessChanged(from _: Bool, to ready: Bool) {
         if ready { capture.editorReady() }
     }

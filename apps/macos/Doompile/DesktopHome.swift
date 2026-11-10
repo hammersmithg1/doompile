@@ -248,7 +248,7 @@ struct DesktopHome: View {
                     MacComposerButton(icon: "arrow.up.left.and.arrow.down.right", label: "Развернуть редактор", disabled: quick.busy, identifier: "quick-composer-expand") { compose() }
                     MacComposerPrimaryButton(canSend: quick.voice.recording || quick.hasContent, starting: quick.startingVoice, busy: quick.busy,
                                              onStart: { Task { await quick.startRecording() } }, onSend: saveQuick,
-                                             onHoldRelease: { if quick.voice.recording { saveQuick() } })
+                                             onHoldRelease: releaseVoiceHold, onVoiceCancel: cancelVoicePress)
                 }
             }
         }
@@ -260,6 +260,13 @@ struct DesktopHome: View {
     private func pasteQuickImage(_ data: Data) {
         do { try quick.addFile(data, name: "Изображение.png", mime: "image/png") }
         catch { quick.error = error.localizedDescription }
+    }
+    private func releaseVoiceHold() {
+        guard quick.voice.recording else { return }
+        if quick.voice.elapsed >= 0.12 { saveQuick() } else { quick.stopRecording() }
+    }
+    private func cancelVoicePress() {
+        if quick.startingVoice { quick.voice.cancel() } else { quick.stopRecording() }
     }
     private var richComposerInput: some View {
         MacRichEditorView(document: $quick.note.body, plainText: $quick.note.plainText, height: $quickEditorHeight, attachments: $quick.note.attachments, noteID: quick.note.id, notes: library.notes, focusOnLoad: true, captureCompact: !quickExpanded, bridge: quick.bridge, onReference: { id in

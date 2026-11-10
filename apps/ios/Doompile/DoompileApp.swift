@@ -239,6 +239,7 @@ struct Home: View {
     @State private var settings = false
     @State private var quickError: String?
     @State private var quickHolding = false
+    @State private var quickRecordingStart: Task<Void, Never>?
     @State private var quickImporter = false
     @State private var quickPhotoPicker = false
     @State private var quickPhoto: PhotosPickerItem?
@@ -417,7 +418,7 @@ struct Home: View {
         })
     }
     private func expandQuickComposer() {
-        guard !quickTransitioning else { return }
+        guard !quickTransitioning, !quickImportInProgress else { return }
         quickTransitioning = true
         Task {
             defer { quickTransitioning = false }
@@ -545,7 +546,8 @@ struct Home: View {
                     HStack(spacing: 8) {
                         ForEach(attachments) { file in
                             CaptureAttachmentSnippet(attachment: file, remove: { removeQuickAttachment(file) })
-                                .frame(width: 210).accessibilityIdentifier("quick-attachment")
+                                .frame(width: 210)
+                                .accessibilityElement(children: .contain).accessibilityIdentifier("quick-attachment")
                         }
                         ForEach(quickPreparing) { file in
                             CaptureAttachmentSnippet(attachment: file, transfer: .uploading(nil))
@@ -562,8 +564,7 @@ struct Home: View {
                 quickAttachmentMenu
                 quickInput
                 Button(action: expandQuickComposer) {
-                    DoompileSymbol(systemName: "arrow.up.left.and.arrow.down.right", size: 18)
-                        .frame(width: 44, height: 44).contentShape(Rectangle())
+                    quickToolIcon("arrow.up.left.and.arrow.down.right")
                 }
                 .disabled(quickTransitioning || quickImportInProgress)
                 .accessibilityLabel("Развернуть редактор").accessibilityIdentifier("expand-editor")
@@ -585,11 +586,17 @@ struct Home: View {
                 DoompileLabel("Фото", systemImage: "photo")
             }
         } label: {
-            DoompileSymbol(systemName: "paperclip", size: 19)
-                .frame(width: 44, height: 44).contentShape(Rectangle())
+            quickToolIcon("paperclip")
         }
         .disabled(quickTransitioning || quickImportInProgress)
         .accessibilityLabel("Прикрепить файл").accessibilityIdentifier("quick-attach")
+    }
+    private func quickToolIcon(_ symbol: String, send: Bool = false) -> some View {
+        DoompileSymbol(systemName: symbol, size: 19)
+            .frame(width: 38, height: 38)
+            .foregroundStyle(send ? Palette.onLime : Palette.muted)
+            .background(send ? DesignTokens.send : DesignTokens.tool, in: RoundedRectangle(cornerRadius: 11))
+            .frame(width: 44, height: 44).contentShape(Rectangle())
     }
     @ViewBuilder private var quickInput: some View {
         if quickUsesRichEditor, !quickEditorOpen, let quickNote {
@@ -611,13 +618,13 @@ struct Home: View {
         QuickVoiceControl(showsSend: quickHasPayload,
             enabled: !recorder.starting && !quickTransitioning && !quickImportInProgress,
             onActivate: { if quickHasPayload { sendQuickDraft() } else { startQuickRecording() } },
-            onHoldStart: { startQuickRecording(held: true) }, onHoldEnd: finishQuickHold)
+            onVoicePress: startQuickRecording,
+            onHoldArmed: { quickHolding = recorder.starting || recorder.recording },
+            onVoiceRelease: finishQuickPress)
             .frame(width: 44, height: 44)
             .overlay {
-                DoompileSymbol(systemName: quickHasPayload ? "arrow.up" : "mic", size: 19)
-                    .frame(width: 40, height: 40)
-                    .background(quickHasPayload ? Palette.lime : .clear, in: RoundedRectangle(cornerRadius: 14))
-                    .foregroundStyle(quickHasPayload ? Palette.onLime : Palette.muted)
+                quickToolIcon(quickHasPayload ? "arrow.up" : "mic", send: quickHasPayload)
+                    .opacity(recorder.starting || quickTransitioning || quickImportInProgress ? 0.55 : 1)
                     .allowsHitTesting(false).accessibilityHidden(true)
             }
     }
@@ -640,7 +647,7 @@ struct Home: View {
             }.accessibilityIdentifier("quick-recording")
             Spacer(minLength: 0)
             Button {
-                if recorder.starting { quickHolding = false; recorder.cancel() }
+                if recorder.starting { cancelQuickRecording() }
                 else { finishQuickRecording() }
             } label: {
                 DoompileSymbol(systemName: recorder.starting ? "xmark" : recorder.hasPendingRecording ? "arrow.clockwise" : "stop.fill", size: 14)
@@ -756,30 +763,35 @@ struct Home: View {
         Button { togglePinned(note) } label: { DoompileLabel(note.pinned ? "Открепить" : "Закрепить", systemImage: "pin") }
         Button(role: .destructive) { library.remove(note) } label: { DoompileLabel("Удалить", systemImage: "trash") }
     }
-    private func startQuickRecording(held: Bool = false) {
-        guard !quickTransitioning, !quickImportInProgress,
+    private func startQuickRecording() {
+        guard !quickTransitioning, !quickImportInProgress, quickRecordingStart == nil,
               !recorder.starting, !recorder.recording, !recorder.hasPendingRecording else { return }
-        guard (quickNote?.attachments.count ?? 0) < NoteLimits.attachments else {
+        guard quickAttachmentSlots > 0 else {
             quickError = "В заметке уже \(NoteLimits.attachments) вложений."
             return
         }
-        quickHolding = held
-        Task {
+        quickRecordingStart = Task {
+            defer { quickRecordingStart = nil }
+            guard !Task.isCancelled else { return }
             do { try await recorder.start() }
             catch { quickHolding = false; quickError = error.localizedDescription }
         }
     }
-    private func finishQuickHold(_ release: QuickVoiceControl.Release) {
-        guard quickHolding else { return }
+    private func cancelQuickRecording() {
         quickHolding = false
-        if recorder.recording {
-            if release == .inside && recorder.elapsed >= 0.12 { sendQuickDraft() }
-            else { finishQuickRecording() }
+        quickRecordingStart?.cancel()
+        recorder.cancel()
+    }
+    private func finishQuickPress(_ release: QuickVoiceControl.Release, held: Bool) {
+        quickHolding = false
+        if release == .inside {
+            if held && recorder.recording && recorder.elapsed >= 0.12 { sendQuickDraft() }
+        } else if recorder.recording {
+            finishQuickRecording()
         } else if release == .outside {
-            recorder.cancel()
+            cancelQuickRecording()
         }
-        // A first-run permission prompt can outlast the press. That recording
-        // stays in the composer until the user stops or sends it explicitly.
+        // If permission interrupts the first hold, leave the recording in the composer.
     }
     private func finishQuickRecording() {
         quickHolding = false
@@ -860,7 +872,7 @@ struct Home: View {
                             if let size = try url.resourceValues(forKeys: [.fileSizeKey]).fileSize, size > 30 * 1024 * 1024 {
                                 throw DoompileError.message("Максимальный размер вложения — 30 МБ.")
                             }
-                            return try Data(contentsOf: url, options: .mappedIfSafe)
+                            return try Data(contentsOf: url)
                         }.value
                         let file = try storeQuickFile(data, name: item.name, mime: item.mimeType)
                         if quickBridge.ready { quickBridge.insertAttachment(file) }

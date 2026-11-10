@@ -33,7 +33,7 @@ final class TouchUXTests: XCTestCase {
     private func createNote(_ text: String) {
         let input = app.textFields["quick-input"]
         input.tap(); input.typeText(text)
-        app.buttons["Сохранить заметку"].tap()
+        app.buttons["quick-send"].tap()
         XCTAssertTrue(noteRow(text).waitForExistence(timeout: 5), app.debugDescription)
     }
     private func openSidebar(over row: XCUIElement? = nil) {
@@ -181,10 +181,24 @@ final class TouchUXTests: XCTestCase {
         XCTAssertTrue(uploaded.exists)
         screenshot("feed-audio-uploaded")
 
+        let voiceNotes = app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH 'note-'"))
+        let beforeHold = voiceNotes.count
         mic.press(forDuration: 1.3)
-        XCTAssertTrue(noteRow("Голосовая заметка").waitForExistence(timeout: 5), "Releasing a held microphone must send its voice note")
+        let autoSent = XCTNSPredicateExpectation(predicate: NSPredicate { _, _ in voiceNotes.count == beforeHold + 1 }, object: nil)
+        XCTAssertEqual(XCTWaiter.wait(for: [autoSent], timeout: 5), .completed, "Releasing a held microphone must send its voice note")
         XCTAssertFalse(app.buttons["quick-stop-recording"].exists)
         screenshot("composer-hold-sent")
+
+        let sentCount = voiceNotes.count
+        let hold = mic.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5))
+        let outside = app.coordinate(withNormalizedOffset: CGVector(dx: 0.6, dy: 0.5))
+        hold.press(forDuration: 0.9, thenDragTo: outside)
+        let remove = app.buttons["quick-remove-attachment"]
+        XCTAssertTrue(remove.waitForExistence(timeout: 5), "Dragging outside the hold must keep the audio as a draft")
+        XCTAssertEqual(voiceNotes.count, sentCount)
+        screenshot("composer-hold-kept-as-draft")
+        remove.tap()
+        XCTAssertTrue(mic.waitForExistence(timeout: 3))
 
         attach.tap()
         XCTAssertTrue(app.buttons["Файл"].waitForExistence(timeout: 3))
@@ -205,7 +219,7 @@ final class TouchUXTests: XCTestCase {
         startQuickRecording()
         XCTAssertFalse(app.buttons["close-editor"].exists, "Microphone must never open the editor")
         screenshot("quick-inline-recording")
-        app.buttons["Сохранить заметку"].tap()
+        app.buttons["quick-send"].tap()
         XCTAssertTrue(noteRow("Голосовая заметка").waitForExistence(timeout: 5))
     }
     func testVoiceCaptureSurvivesExpandAndCollapseAndStopsWithoutSending() {
@@ -226,7 +240,7 @@ final class TouchUXTests: XCTestCase {
         XCTAssertTrue(stop.waitForNonExistence(timeout: 5))
         XCTAssertTrue(app.descendants(matching: .any)["quick-attachment"].firstMatch.waitForExistence(timeout: 5), app.debugDescription)
         XCTAssertFalse(noteRow("Voice draft").exists)
-        app.buttons["Сохранить заметку"].tap()
+        app.buttons["quick-send"].tap()
         let row = noteRow("Voice draft")
         XCTAssertTrue(row.waitForExistence(timeout: 5), app.debugDescription)
         XCTAssertTrue(row.label.contains("Expanded edit"))

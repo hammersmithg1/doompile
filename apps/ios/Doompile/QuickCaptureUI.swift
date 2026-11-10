@@ -18,7 +18,12 @@ struct CaptureAttachmentSnippet: View {
         let size = ByteCountFormatter.string(fromByteCount: Int64(attachment.size), countStyle: .file)
         let details = transfer == .uploading(nil) && attachment.size == 0 ? "Подготовка…" : size
         var pieces = [fileExtension, details].filter { !$0.isEmpty }
-        if case .uploading(let progress?) = transfer { pieces.append("\(Int((progress * 100).rounded()))%") }
+        switch transfer {
+        case .queued: pieces.append("В очереди")
+        case .uploading(let progress?): pieces.append("\(Int((progress * 100).rounded()))%")
+        case .failed: pieces.append("Ошибка")
+        case .uploading(nil), nil: break
+        }
         return pieces.joined(separator: " · ")
     }
 
@@ -58,8 +63,9 @@ struct QuickVoiceControl: UIViewRepresentable {
     let showsSend: Bool
     let enabled: Bool
     let onActivate: () -> Void
-    let onHoldStart: () -> Void
-    let onHoldEnd: (Release) -> Void
+    let onVoicePress: () -> Void
+    let onHoldArmed: () -> Void
+    let onVoiceRelease: (Release, Bool) -> Void
 
     enum Release: Equatable { case inside, outside, interrupted }
 
@@ -82,8 +88,9 @@ struct QuickVoiceControl: UIViewRepresentable {
     final class Control: UIControl {
         var configuration: QuickVoiceControl?
         private var holdTimer: Timer?
-        private var holding = false
+        private var voicePressTime: TimeInterval?
         private var trackingPress = false
+        private let holdThreshold: TimeInterval = 0.35
 
         override init(frame: CGRect) {
             super.init(frame: frame)
@@ -96,24 +103,16 @@ struct QuickVoiceControl: UIViewRepresentable {
             guard let configuration, configuration.enabled else { return false }
             trackingPress = true
             if !configuration.showsSend {
-                let timer = Timer(timeInterval: 0.35, repeats: false) { [weak self] _ in
+                voicePressTime = ProcessInfo.processInfo.systemUptime
+                configuration.onVoicePress()
+                let timer = Timer(timeInterval: holdThreshold, repeats: false) { [weak self] _ in
                     MainActor.assumeIsolated {
-                        guard let self, self.trackingPress, self.configuration?.enabled == true,
-                              self.configuration?.showsSend == false else { return }
-                        self.holding = true
-                        self.configuration?.onHoldStart()
+                        guard let self, self.voicePressTime != nil else { return }
+                        self.configuration?.onHoldArmed()
                     }
                 }
                 holdTimer = timer
                 RunLoop.main.add(timer, forMode: .common)
-            }
-            return true
-        }
-
-        override func continueTracking(_ touch: UITouch, with event: UIEvent?) -> Bool {
-            if !bounds.insetBy(dx: -12, dy: -12).contains(touch.location(in: self)) {
-                finishPress(.outside)
-                return false
             }
             return true
         }
@@ -140,9 +139,9 @@ struct QuickVoiceControl: UIViewRepresentable {
             holdTimer = nil
             guard trackingPress else { return }
             trackingPress = false
-            if holding {
-                holding = false
-                configuration?.onHoldEnd(release)
+            if let start = voicePressTime {
+                voicePressTime = nil
+                configuration?.onVoiceRelease(release, ProcessInfo.processInfo.systemUptime - start >= holdThreshold)
             } else if release == .inside && configuration?.enabled == true {
                 configuration?.onActivate()
             }

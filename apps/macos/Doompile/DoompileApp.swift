@@ -470,6 +470,7 @@ struct NoteWorkspace: View {
     private var recorder: AVAudioRecorder?
     private var timer: Timer?
     private var startedAt = Date()
+    var elapsed: TimeInterval { Date().timeIntervalSince(startedAt) }
     private var url: URL?
     private var startRequest = UUID()
     private let directory = Storage.shared.directory.appendingPathComponent("voice-drafts", isDirectory: true)

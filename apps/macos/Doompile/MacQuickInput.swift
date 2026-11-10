@@ -128,6 +128,7 @@ struct MacComposerPrimaryButton: View {
     let onStart: () -> Void
     let onSend: () -> Void
     let onHoldRelease: () -> Void
+    let onVoiceCancel: () -> Void
 
     private func activate() {
         if canSend { onSend() } else { onStart() }
@@ -142,62 +143,64 @@ struct MacComposerPrimaryButton: View {
             action: activate
         )
         .overlay {
-            MacComposerPointer(allowsHold: !canSend && !starting && !busy, enabled: !starting && !busy,
-                               onTap: activate, onHold: onStart, onRelease: onHoldRelease)
+            MacComposerPointer(startsVoice: !canSend, enabled: !starting && !busy, onSend: onSend,
+                               onStart: onStart, onHoldRelease: onHoldRelease, onVoiceCancel: onVoiceCancel)
                 .accessibilityHidden(true)
         }
     }
 }
 
 private struct MacComposerPointer: NSViewRepresentable {
-    let allowsHold: Bool
+    let startsVoice: Bool
     let enabled: Bool
-    let onTap: () -> Void
-    let onHold: () -> Void
-    let onRelease: () -> Void
+    let onSend: () -> Void
+    let onStart: () -> Void
+    let onHoldRelease: () -> Void
+    let onVoiceCancel: () -> Void
 
     func makeNSView(context: Context) -> PointerView { PointerView() }
     func updateNSView(_ view: PointerView, context: Context) { view.control = self }
 
     final class PointerView: NSView {
-        var control: MacComposerPointer?
-        private var hold: Task<Void, Never>?
-        private var held = false
-        private var pressed = false
+        private enum Press {
+            case voice(time: TimeInterval, bounds: NSRect)
+            case send
+        }
 
+        var control: MacComposerPointer?
+        private var press: Press?
+
+        override var mouseDownCanMoveWindow: Bool { false }
         override func acceptsFirstMouse(for event: NSEvent?) -> Bool { true }
 
         override func mouseDown(with event: NSEvent) {
-            guard control?.enabled == true else { return }
-            pressed = true
-            held = false
-            hold?.cancel()
-            guard control?.allowsHold == true else { return }
-            hold = Task { @MainActor [weak self] in
-                try? await Task.sleep(for: .milliseconds(350))
-                guard !Task.isCancelled, let self, control?.allowsHold == true else { return }
-                held = true
-                control?.onHold()
+            guard let control, control.enabled, let window else { return }
+            if control.startsVoice {
+                // The recording snippet can resize the global panel while pressed.
+                let originalBounds = window.convertToScreen(convert(bounds, to: nil)).insetBy(dx: -12, dy: -12)
+                press = .voice(time: event.timestamp, bounds: originalBounds)
+                control.onStart()
+            } else {
+                press = .send
             }
         }
 
-        override func mouseDragged(with event: NSEvent) {
-            guard !held, !bounds.insetBy(dx: -8, dy: -8).contains(convert(event.locationInWindow, from: nil)) else { return }
-            hold?.cancel()
-            pressed = false
-        }
-
         override func mouseUp(with event: NSEvent) {
-            hold?.cancel()
-            guard pressed else { return }
-            pressed = false
-            if held { control?.onRelease() }
-            else if control?.enabled == true, bounds.contains(convert(event.locationInWindow, from: nil)) { control?.onTap() }
+            defer { press = nil }
+            guard let press, let control, let window else { return }
+            switch press {
+            case let .voice(time, originalBounds):
+                let release = window.convertPoint(toScreen: event.locationInWindow)
+                if !originalBounds.contains(release) { control.onVoiceCancel() }
+                else if event.timestamp - time >= 0.35 { control.onHoldRelease() }
+            case .send:
+                if control.enabled, bounds.contains(convert(event.locationInWindow, from: nil)) { control.onSend() }
+            }
         }
 
         override func viewWillMove(toWindow newWindow: NSWindow?) {
             super.viewWillMove(toWindow: newWindow)
-            if newWindow == nil { hold?.cancel(); pressed = false }
+            if newWindow == nil { press = nil }
         }
     }
 }
@@ -243,7 +246,7 @@ struct MacComposerAttachmentStrip: View {
             HStack(spacing: 8) {
                 if starting || recording { MacRecordingSnippet(starting: starting, seconds: seconds, onStop: onStop) }
                 ForEach(attachments) { file in
-                    MacFileSnippet(attachment: file, onRemove: onRemove.map { remove in { remove(file.id) } })
+                    MacFileSnippet(attachment: file, onRemove: onRemove.map { remove in { remove(file.id) } }, opensDraft: true)
                         .accessibilityElement(children: .contain)
                         .accessibilityIdentifier("quick-composer-attachment")
                 }
