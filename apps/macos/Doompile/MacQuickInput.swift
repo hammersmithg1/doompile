@@ -4,15 +4,18 @@ import SwiftUI
 /// Native first keystroke; no web view or network needs to finish loading.
 struct MacQuickInput: NSViewRepresentable {
     static let height: CGFloat = 39
+    private static let lineHeight: CGFloat = 22
+    static let maximumHeight = height + 14 * lineHeight
 
     @Binding var text: String
     @Binding var focused: Bool
+    @Binding var contentHeight: CGFloat
     var placeholder = "Добавь что-нибудь в кучу…"
     var onSubmit: () -> Void
     var onPasteImage: (Data) -> Void
 
     func makeCoordinator() -> Coordinator { Coordinator(self) }
-    func makeNSView(context: Context) -> NSScrollView {
+    func makeNSView(context: Context) -> QuickInputScrollView {
         let scroll = QuickInputScrollView()
         let input = QuickTextView(frame: NSRect(x: 0, y: 0, width: 300, height: Self.height))
         input.delegate = context.coordinator
@@ -20,32 +23,47 @@ struct MacQuickInput: NSViewRepresentable {
         input.drawsBackground = false
         input.isAutomaticQuoteSubstitutionEnabled = false
         input.isAutomaticDashSubstitutionEnabled = false
-        input.font = .systemFont(ofSize: 13)
+        input.font = .systemFont(ofSize: 14)
         input.textColor = .labelColor
         input.insertionPointColor = .labelColor
-        input.textContainerInset = NSSize(width: 0, height: 9)
+        input.textContainerInset = NSSize(width: 0, height: 8)
         input.textContainer?.lineFragmentPadding = 0
         input.textContainer?.widthTracksTextView = true
+        input.textContainer?.heightTracksTextView = false
         input.isVerticallyResizable = true
         input.isHorizontallyResizable = false
         input.minSize = NSSize(width: 0, height: Self.height)
         input.maxSize = NSSize(width: CGFloat.greatestFiniteMagnitude, height: CGFloat.greatestFiniteMagnitude)
         input.autoresizingMask = [.width]
-        input.string = text; input.placeholder = placeholder
+        let paragraph = NSMutableParagraphStyle()
+        paragraph.minimumLineHeight = Self.lineHeight
+        paragraph.maximumLineHeight = Self.lineHeight
+        input.defaultParagraphStyle = paragraph
+        input.typingAttributes[.paragraphStyle] = paragraph
+        input.setPlainText(text)
+        input.placeholder = placeholder
         input.onPasteImage = { [weak coordinator = context.coordinator] in coordinator?.parent.onPasteImage($0) }
         input.setAccessibilityLabel("Быстрая заметка")
         input.setAccessibilityIdentifier("quick-composer-input")
         scroll.documentView = input
         scroll.drawsBackground = false
+        scroll.scrollerStyle = .overlay
         scroll.hasVerticalScroller = false
         scroll.borderType = .noBorder
+        scroll.onHeightChange = { [weak coordinator = context.coordinator] height in
+            guard let coordinator, coordinator.parent.contentHeight != height else { return }
+            coordinator.parent.contentHeight = height
+        }
         context.coordinator.input = input
         return scroll
     }
-    func updateNSView(_ scroll: NSScrollView, context: Context) {
+    func updateNSView(_ scroll: QuickInputScrollView, context: Context) {
         context.coordinator.parent = self
         guard let input = context.coordinator.input else { return }
-        if input.string != text { input.string = text; input.needsDisplay = true }
+        if input.string != text {
+            input.setPlainText(text)
+            scroll.scheduleMeasurement()
+        }
         input.placeholder = placeholder
         if focused, scroll.window?.firstResponder !== input {
             DispatchQueue.main.async { [weak input] in
@@ -54,11 +72,19 @@ struct MacQuickInput: NSViewRepresentable {
             }
         }
     }
+    static func dismantleNSView(_ scroll: QuickInputScrollView, coordinator: Coordinator) {
+        scroll.onHeightChange = nil
+    }
     final class Coordinator: NSObject, NSTextViewDelegate {
         var parent: MacQuickInput
         weak var input: QuickTextView?
         init(_ parent: MacQuickInput) { self.parent = parent }
-        func textDidChange(_ notification: Notification) { guard let input else { return }; parent.text = input.string; input.needsDisplay = true }
+        func textDidChange(_ notification: Notification) {
+            guard let input else { return }
+            parent.text = input.string
+            input.needsDisplay = true
+            (input.enclosingScrollView as? QuickInputScrollView)?.scheduleMeasurement(revealSelection: true)
+        }
         func textDidBeginEditing(_ notification: Notification) { DispatchQueue.main.async { self.parent.focused = true } }
         func textDidEndEditing(_ notification: Notification) { DispatchQueue.main.async { self.parent.focused = false } }
         func textView(_ textView: NSTextView, doCommandBy commandSelector: Selector) -> Bool {
@@ -74,15 +100,52 @@ struct MacQuickInput: NSViewRepresentable {
 }
 
 final class QuickInputScrollView: NSScrollView {
+    var onHeightChange: ((CGFloat) -> Void)?
+    private var measurementScheduled = false
+    private var revealSelection = false
+
     override func layout() {
         super.layout()
-        if let input = documentView as? NSTextView, abs(input.frame.width - contentSize.width) > 0.5 { input.setFrameSize(NSSize(width: contentSize.width, height: max(MacQuickInput.height, input.frame.height))) }
+        scheduleMeasurement()
+    }
+
+    func scheduleMeasurement(revealSelection: Bool = false) {
+        self.revealSelection = self.revealSelection || revealSelection
+        guard !measurementScheduled else { return }
+        measurementScheduled = true
+        DispatchQueue.main.async { [weak self] in self?.measureContent() }
+    }
+
+    private func measureContent() {
+        measurementScheduled = false
+        guard let input = documentView as? QuickTextView, contentSize.width > 0,
+              let layout = input.layoutManager, let container = input.textContainer else { return }
+        if abs(input.frame.width - contentSize.width) > 0.5 {
+            input.setFrameSize(NSSize(width: contentSize.width, height: input.frame.height))
+        }
+        layout.ensureLayout(for: container)
+        let textBottom = max(layout.usedRect(for: container).maxY, layout.extraLineFragmentRect.maxY)
+        let contentHeight = max(MacQuickInput.height, ceil(textBottom + 2 * input.textContainerInset.height))
+        if abs(input.frame.height - contentHeight) > 0.5 {
+            input.setFrameSize(NSSize(width: contentSize.width, height: contentHeight))
+        }
+        let viewportHeight = min(MacQuickInput.maximumHeight, contentHeight)
+        hasVerticalScroller = contentHeight > viewportHeight
+        onHeightChange?(viewportHeight)
+        if revealSelection {
+            revealSelection = false
+            input.scrollRangeToVisible(input.selectedRange())
+        }
     }
 }
 
 final class QuickTextView: NSTextView {
     var placeholder = "" { didSet { needsDisplay = true } }
     var onPasteImage: ((Data) -> Void)?
+    func setPlainText(_ value: String) {
+        textStorage?.setAttributedString(NSAttributedString(string: value, attributes: typingAttributes))
+        needsDisplay = true
+    }
     override func paste(_ sender: Any?) {
         let board = NSPasteboard.general
         if let onPasteImage {

@@ -15,7 +15,8 @@ struct DesktopHome: View {
     @State private var noteExpanded = false
     @State private var quickExpanded = false
     @State private var quickFocused = true
-    @State private var quickEditorHeight: CGFloat = 300
+    @State private var quickInputHeight = MacQuickInput.height
+    @State private var quickEditorHeight = MacQuickInput.height
     @State private var quickFiles = false
     @State private var quickDrawing = false
     @State private var quickLink = false
@@ -209,6 +210,7 @@ struct DesktopHome: View {
                     Spacer()
                     Button { setComposerExpanded(false) } label: { DoompileSymbol(systemName: "arrow.down.right.and.arrow.up.left").frame(width: 28, height: 28) }
                         .buttonStyle(.plain).help("Свернуть редактор").accessibilityLabel("Свернуть редактор")
+                        .accessibilityIdentifier("quick-composer-collapse")
                 }.padding(.horizontal, 12).frame(height: 42)
                 MacNoteTags(selected: $quick.note.tags, available: library.tags)
             }
@@ -222,7 +224,7 @@ struct DesktopHome: View {
                     Spacer()
                     attachButton
                     MacComposerButton(icon: "mic", label: "Записать голосовую заметку", disabled: quick.startingVoice || quick.voice.recording || quick.busy) { Task { await quick.startRecording() } }
-                    MacComposerButton(icon: "arrow.up", label: "Отправить заметку", send: true, disabled: quick.startingVoice || quick.busy || (!quick.voice.recording && !quick.hasContent), action: saveQuick)
+                    MacComposerButton(icon: "arrow.up", label: "Отправить заметку", send: true, disabled: quick.startingVoice || quick.busy || (!quick.voice.recording && !quick.hasContent), identifier: "quick-composer-send", action: saveQuick)
                 }.padding(.vertical, 5)
             }
         }.padding(.horizontal, 14).padding(.top, 8).padding(.bottom, 12)
@@ -237,12 +239,12 @@ struct DesktopHome: View {
                 MacComposerAttachmentStrip(attachments: quick.attachments, starting: quick.startingVoice, recording: quick.voice.recording,
                                            seconds: quick.voice.seconds, onRemove: quick.removeFile, onStop: quick.stopRecording)
             }
-            HStack(alignment: .center, spacing: 5) {
+            HStack(alignment: .bottom, spacing: 5) {
                 if !quickExpanded { attachButton }
                 if quick.richMounted { richComposerInput }
                 else {
-                    MacQuickInput(text: Binding(get: { quick.note.plainText }, set: quick.updateText), focused: $quickFocused, onSubmit: saveQuick, onPasteImage: pasteQuickImage)
-                        .frame(height: MacQuickInput.height).padding(.horizontal, 4)
+                    MacQuickInput(text: Binding(get: { quick.note.plainText }, set: quick.updateText), focused: $quickFocused, contentHeight: $quickInputHeight, onSubmit: saveQuick, onPasteImage: pasteQuickImage)
+                        .frame(height: quickInputHeight).padding(.horizontal, 4)
                 }
                 if !quickExpanded {
                     MacComposerButton(icon: "arrow.up.left.and.arrow.down.right", label: "Развернуть редактор", disabled: quick.busy, identifier: "quick-composer-expand") { compose() }
@@ -274,7 +276,7 @@ struct DesktopHome: View {
         }, onRequestLink: { quickLinkValue = $0; quickLink = true }, onAction: composerAction, onPasteImage: quick.storeFile)
         .id(quick.note.id)
         .accessibilityIdentifier("quick-composer-input")
-        .frame(maxWidth: .infinity, minHeight: quickExpanded ? 180 : MacQuickInput.height, maxHeight: quickExpanded ? .infinity : MacQuickInput.height)
+        .frame(maxWidth: .infinity, minHeight: quickExpanded ? 180 : quickEditorHeight, maxHeight: quickExpanded ? .infinity : quickEditorHeight)
         .onReceive(quick.bridge.$ready) { ready in if ready { quick.editorReady() } }
     }
     private var attachButton: some View {
@@ -357,6 +359,8 @@ struct DesktopHome: View {
         let tag = filter.hasPrefix("tag:") ? String(filter.dropFirst(4)) : nil
         Task { @MainActor in
             if await quick.submit(in: library, tag: tag) {
+                quickInputHeight = MacQuickInput.height
+                quickEditorHeight = MacQuickInput.height
                 withAnimation(motion) { quickExpanded = false }
                 quickFocused = !noteExpanded
             }

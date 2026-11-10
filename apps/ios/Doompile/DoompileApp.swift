@@ -198,6 +198,7 @@ struct Home: View {
     @State private var quickNote: Note?
     @State private var quickUsesRichEditor: Bool
     @State private var quickTransitioning = false
+    @State private var quickEditorHeight: CGFloat = 44
     @StateObject private var quickBridge = RichEditorBridge()
     private let quickComposerKey: String
     init() {
@@ -320,8 +321,7 @@ struct Home: View {
             Task { @MainActor in
                 guard await NoteLinkEditors.prepare() else { return }
                 closeDrawer(); settings = false; focused = false
-                if recorder.recordingID != nil || quickNote != nil { expandQuickComposer() }
-                else { openComposer(draft) }
+                expandQuickComposer()
             }
         }
         .fileImporter(isPresented: $quickImporter, allowedContentTypes: [.item], allowsMultipleSelection: true, onCompletion: importQuickFiles)
@@ -344,7 +344,7 @@ struct Home: View {
                     .disabled(drawerDragOrigin != nil)
                     .allowsHitTesting(drawer)
                     .accessibilityHidden(!drawer)
-                homeForeground(width: width)
+                homeForeground(width: width, availableHeight: geometry.size.height)
                 Button(action: closeDrawer) { Color.clear.contentShape(Rectangle()) }
                     .buttonStyle(.plain)
                     .frame(width: geometry.size.width - drawerProgress * width)
@@ -361,7 +361,7 @@ struct Home: View {
                 onCancelled: cancelDrawerDrag))
         }
     }
-    private func homeForeground(width: CGFloat) -> some View {
+    private func homeForeground(width: CGFloat, availableHeight: CGFloat) -> some View {
         let progress = min(1, max(0, drawerProgress))
         let shape = RoundedRectangle(cornerRadius: 32 * min(1, progress * 2.5), style: .continuous)
         return feed
@@ -371,7 +371,7 @@ struct Home: View {
                 onEnded: { translation, predicted in finishDrawer(translation: translation, predicted: predicted, width: width) },
                 onCancelled: cancelDrawerDrag))
             .safeAreaInset(edge: .top, spacing: 0) { sidebarButton }
-            .safeAreaInset(edge: .bottom, spacing: 0) { composer }
+            .safeAreaInset(edge: .bottom, spacing: 0) { composer(availableHeight: availableHeight) }
             .background(Palette.ink, ignoresSafeAreaEdges: [])
             .clipShape(shape)
             .compositingGroup()
@@ -418,7 +418,7 @@ struct Home: View {
         })
     }
     private func expandQuickComposer() {
-        guard !quickTransitioning, !quickImportInProgress else { return }
+        guard !quickEditorOpen, !quickTransitioning, !quickImportInProgress else { return }
         quickTransitioning = true
         Task {
             defer { quickTransitioning = false }
@@ -534,14 +534,21 @@ struct Home: View {
             || quickNote.map({ EditorLifecycle.shouldSave($0, existing: false) }) == true
     }
     private var quickImportInProgress: Bool { !quickPreparing.isEmpty || preparingPhoto }
-    private var composer: some View {
-        VStack(alignment: .leading, spacing: 4) {
-            if recorder.recording || recorder.starting || recorder.hasPendingRecording {
+    private func composer(availableHeight: CGFloat) -> some View {
+        let showsRecording = recorder.recording || recorder.starting || recorder.hasPendingRecording
+        let attachments = quickNote?.attachments ?? []
+        let showsAttachments = !attachments.isEmpty || quickImportInProgress
+        // Keep the top bar, card padding and snippet rows above the keyboard on short screens.
+        let inputRoom = availableHeight - 68 - (showsRecording ? 52 : 0) - (showsAttachments ? 52 : 0)
+        // The compact editor uses 22 points per line and 22 points of vertical padding.
+        let lineLimit = min(15, max(1, Int((inputRoom - 22) / 22)))
+        let heightLimit = CGFloat((lineLimit + 1) * 22)
+        return VStack(alignment: .leading, spacing: 4) {
+            if showsRecording {
                 quickRecordingSnippet
                     .padding(.horizontal, 6).padding(.top, 4)
             }
-            let attachments = quickNote?.attachments ?? []
-            if !attachments.isEmpty || quickImportInProgress {
+            if showsAttachments {
                 ScrollView(.horizontal, showsIndicators: false) {
                     HStack(spacing: 8) {
                         ForEach(attachments) { file in
@@ -559,9 +566,9 @@ struct Home: View {
                     }.padding(.horizontal, 6)
                 }.padding(.top, 4)
             }
-            HStack(spacing: 2) {
+            HStack(alignment: .bottom, spacing: 2) {
                 quickAttachmentMenu
-                quickInput
+                quickInput(lineLimit: lineLimit, heightLimit: heightLimit)
                 Button(action: expandQuickComposer) {
                     quickToolIcon("arrow.up.left.and.arrow.down.right")
                 }
@@ -574,7 +581,7 @@ struct Home: View {
         .padding(4).background(Palette.card, in: RoundedRectangle(cornerRadius: 21))
         .overlay { RoundedRectangle(cornerRadius: 21).strokeBorder(Palette.line) }
         .shadow(color: .black.opacity(0.04), radius: 12, y: 3)
-        .padding(.horizontal, 14).padding(.vertical, 8).background(Palette.ink)
+        .padding(.horizontal, 14).padding(.vertical, 8)
     }
     private var quickAttachmentMenu: some View {
         Menu {
@@ -597,21 +604,23 @@ struct Home: View {
             .background(send ? DesignTokens.send : DesignTokens.tool, in: RoundedRectangle(cornerRadius: 11))
             .frame(width: 44, height: 44).contentShape(Rectangle())
     }
-    @ViewBuilder private var quickInput: some View {
+    @ViewBuilder private func quickInput(lineLimit: Int, heightLimit: CGFloat) -> some View {
         if quickUsesRichEditor, !quickEditorOpen, let quickNote {
             let binding = compactQuickNote(quickNote)
-            RichEditorView(document: binding.body, plainText: binding.plainText, height: .constant(0),
+            RichEditorView(document: binding.body, plainText: binding.plainText, height: $quickEditorHeight,
                 attachments: binding.attachments, notes: library.notes, bridge: quickBridge,
                 onReference: { id in
                     if let note = library.notes.first(where: { $0.id == id }) { editor = note }
                 }, onRequestLink: { _ in expandQuickComposer() }, onAction: handleCompactCaptureAction, captureCompact: true,
+                captureHeightLimit: heightLimit,
                 onPasteImage: { data, name, mime in try storeQuickImage(data, name: name, mime: mime, noteID: quickNote.id) })
-                .id(quickNote.id).frame(height: 44).accessibilityIdentifier("quick-rich-input")
+                .id(quickNote.id).frame(height: min(quickEditorHeight, heightLimit)).accessibilityIdentifier("quick-rich-input")
         } else {
             TextField(UICopy.capturePlaceholder, text: Binding(get: { draft }, set: updateQuickText),
                 prompt: Text(UICopy.capturePlaceholder).foregroundColor(Palette.muted), axis: .vertical)
-                .lineLimit(1).focused($focused).onTapGesture { focused = true }.font(.system(size: 16))
-                .foregroundStyle(Palette.text).frame(maxWidth: .infinity).accessibilityIdentifier("quick-input")
+                .lineLimit(1...lineLimit).focused($focused).onTapGesture { focused = true }.font(.system(size: 16))
+                .foregroundStyle(Palette.text).padding(.vertical, 8)
+                .frame(maxWidth: .infinity, minHeight: 44).accessibilityIdentifier("quick-input")
         }
     }
     private var quickVoiceAction: some View {
@@ -945,6 +954,7 @@ struct Home: View {
         }
         quickNote = nil
         quickUsesRichEditor = false
+        quickEditorHeight = 44
         draft = ""
         focused = false
         UserDefaults.standard.removeObject(forKey: quickComposerKey)
@@ -1191,8 +1201,8 @@ struct NoteEditor: View {
             if capture == nil { recorder.cancel() }
         }
     }
-    private var voiceCapture: Bool {
-        capture != nil && (recorder.starting || recorder.recordingID != nil || note.attachments.contains { $0.mimeType.hasPrefix("audio/") })
+    private var captureHasPayload: Bool {
+        recorder.recordingID != nil || EditorLifecycle.shouldSave(EditorLifecycle.prepared(note, plainText: text), existing: false)
     }
     private var metadata: some View {
         HStack(spacing: 2) {
@@ -1214,19 +1224,23 @@ struct NoteEditor: View {
                 DoompileSymbol(systemName: note.urgent ? "flame.fill" : "flame").foregroundStyle(note.urgent ? Palette.orange : Palette.muted).frame(width: 44, height: 44).contentShape(Rectangle())
             }.accessibilityLabel(note.urgent ? "Убрать из важного" : "Сделать важной").accessibilityValue(note.urgent ? "Да" : "Нет")
             Button {
-                if voiceCapture {
+                if capture != nil {
                     Task { if await preserveCapture() { dismiss() } }
                 } else {
                     save()
                 }
-            } label: { DoompileSymbol(systemName: "xmark").foregroundStyle(Palette.muted).frame(width: 44, height: 44).contentShape(Rectangle()) }
+            } label: {
+                DoompileSymbol(systemName: capture == nil ? "xmark" : "arrow.down.right.and.arrow.up.left")
+                    .foregroundStyle(Palette.muted).frame(width: 44, height: 44).contentShape(Rectangle())
+            }
                 .disabled(saving || (capture == nil && recorder.starting))
-                .accessibilityLabel(voiceCapture ? "Свернуть редактор" : "Сохранить и закрыть").accessibilityIdentifier("close-editor")
-            if voiceCapture {
+                .accessibilityLabel(capture == nil ? "Сохранить и закрыть" : "Свернуть редактор").accessibilityIdentifier("close-editor")
+            if capture != nil {
                 Button { save() } label: {
                     DoompileSymbol(systemName: "arrow.up", size: 18).font(.system(size: 18, weight: .semibold))
                         .frame(width: 40, height: 40).background(Palette.lime, in: RoundedRectangle(cornerRadius: 14)).foregroundStyle(Palette.onLime)
-                }.disabled(saving || recorder.starting).accessibilityLabel("Сохранить заметку").accessibilityIdentifier("send-expanded-capture")
+                }.disabled(saving || recorder.starting || !captureHasPayload)
+                    .accessibilityLabel("Отправить заметку").accessibilityIdentifier("send-expanded-capture")
             }
         }.font(.system(size: 17)).buttonStyle(.plain).padding(.leading, 14).padding(.trailing, 8).padding(.top, 14)
     }

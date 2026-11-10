@@ -9,8 +9,11 @@ test.beforeEach(async ({ page }) => {
   await page.waitForFunction(() => !!(window as any).doompileEditor);
 });
 
-test("compact Enter sends once, Shift Enter keeps a line break", async ({ page }) => {
-  await page.evaluate(() => (window as any).doompileEditor.setCaptureMode(true));
+test("Mac compact Enter sends once, Shift Enter keeps a line break", async ({ page }) => {
+  await page.evaluate(() => {
+    document.documentElement.dataset.nativeDesktop = "true";
+    window.doompileEditor.setCaptureMode(true);
+  });
   const input = page.getByRole("textbox", { name: "Текст заметки" });
   await input.fill("Первая строка");
   await input.press("Shift+Enter");
@@ -21,8 +24,42 @@ test("compact Enter sends once, Shift Enter keeps a line break", async ({ page }
   expect(result.state.plainText).toContain("Первая строка\nВторая строка");
 });
 
+test("touch compact input grows to 15 lines and scrolls the rest", async ({ page }) => {
+  await page.setViewportSize({ width: 390, height: 650 });
+  await page.evaluate(() => window.doompileEditor.setCaptureMode(true));
+  const input = page.getByRole("textbox", { name: "Текст заметки" });
+  const latestHeight = () => page.evaluate(() => (window as any).nativeMessages.findLast((message: any) => message.type === "height"));
+  await expect.poll(latestHeight).toMatchObject({ compact: true, height: 44 });
+  await input.fill("Первая строка");
+  await input.press("Enter");
+  await page.keyboard.insertText("Вторая строка");
+  await expect.poll(latestHeight).toMatchObject({ compact: true, height: 66 });
+  expect(await page.evaluate(() => (window as any).nativeMessages.filter((message: any) => message.action === "sendCapture"))).toHaveLength(0);
+
+  await input.fill("Длинная строка ".repeat(14));
+  await expect.poll(async () => (await latestHeight()).height).toBeGreaterThan(66);
+
+  await input.fill(Array.from({ length: 18 }, (_, index) => `Строка ${index + 1}`).join("\n"));
+  await expect.poll(latestHeight).toMatchObject({ compact: true, height: 352 });
+  await expect.poll(() => input.evaluate(element => element.scrollHeight - element.clientHeight)).toBe(66);
+  await input.press("End");
+  await input.evaluate(element => { element.scrollTop = element.scrollHeight; });
+  await expect.poll(() => input.evaluate(element => element.scrollTop)).toBe(66);
+
+  await page.evaluate(() => window.doompileEditor.setCaptureHeightLimit(154));
+  await expect.poll(latestHeight).toMatchObject({ compact: true, height: 154 });
+  await page.evaluate(() => window.doompileEditor.setCaptureHeightLimit(null));
+  await expect.poll(latestHeight).toMatchObject({ compact: true, height: 352 });
+  await page.evaluate(() => window.doompileEditor.setCaptureMode(false));
+  await expect.poll(latestHeight).toMatchObject({ compact: false });
+  expect(await page.evaluate(() => window.doompileEditor.getState().plainText)).toContain("Строка 18");
+});
+
 test("compact Enter selects a slash command before sending", async ({ page }) => {
-  await page.evaluate(() => (window as any).doompileEditor.setCaptureMode(true));
+  await page.evaluate(() => {
+    document.documentElement.dataset.nativeDesktop = "true";
+    window.doompileEditor.setCaptureMode(true);
+  });
   await page.getByRole("textbox").click();
   await page.keyboard.type("/h2");
   await expect(page.getByRole("listbox")).toBeVisible();
@@ -104,6 +141,21 @@ test("removing a compact attachment removes each instance and remains undoable",
   expect(after.plainText).toContain("Черновик");
   await page.keyboard.press("ControlOrMeta+z");
   expect(await page.evaluate(() => window.doompileEditor.getState().body)).toEqual(original);
+});
+
+test("compact attachment snippets do not add empty text rows", async ({ page }) => {
+  await page.evaluate(() => {
+    const attachment = { type: "attachment", attrs: { url: "local:00000000-0000-0000-0000-000000000001", name: "archive.zip" } };
+    window.doompileEditor.setDocument({ type: "doc", content: [
+      { type: "paragraph", content: [{ type: "text", text: "Черновик" }] },
+      { type: "paragraph", content: [attachment] },
+    ] });
+    window.doompileEditor.setCaptureMode(true);
+  });
+  const input = page.getByRole("textbox");
+  await expect.poll(() => input.evaluate(element => element.offsetHeight)).toBe(22);
+  await page.evaluate(() => window.doompileEditor.setCaptureMode(false));
+  await expect(page.locator("[data-attachment]")).toBeVisible();
 });
 
 test("expanded Enter edits rather than submitting and composition never submits", async ({ page }) => {

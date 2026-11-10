@@ -39,19 +39,20 @@ function mediaURL(value: unknown): string {
 }
 let frame = 0;
 const pasteFeedback = document.getElementById("paste-feedback")!;
+const editorElement = document.getElementById("editor")!;
 function height() {
   cancelAnimationFrame(frame);
-  frame = requestAnimationFrame(() =>
+  frame = requestAnimationFrame(() => {
+    const compact = document.documentElement.dataset.nativeCapture === "compact";
+    const height = editorElement.getBoundingClientRect().height;
     post({
       type: "height",
-      height: Math.max(
-        280,
-        document.getElementById("editor")!.getBoundingClientRect().height,
-      ),
-    }),
-  );
+      height: compact ? height : Math.max(280, height),
+      compact,
+    });
+  });
 }
-const controller = createBlockEditor(document.getElementById("editor")!, {
+const controller = createBlockEditor(editorElement, {
   onTelemetry: (name, properties) => post({ type: "telemetry", name, properties }),
   mediaURL,
   onChange: (body, plainText) => {
@@ -122,7 +123,7 @@ async function pasteImages(store: ImagePasteHandler, images: File[], source: str
 editor.view.dom.addEventListener("keydown", (event) => {
   if (document.documentElement.dataset.nativeCapture !== "compact" || event.isComposing) return;
   if (event.key === "/" || event.key === "@") post({ type: "action", action: "expandCapture" });
-  if (event.key === "Enter" && !event.shiftKey && !event.altKey && !event.ctrlKey && !document.querySelector(".command-menu:not([hidden])")) {
+  if (document.documentElement.dataset.nativeDesktop === "true" && event.key === "Enter" && !event.shiftKey && !event.altKey && !event.ctrlKey && !document.querySelector(".command-menu:not([hidden])")) {
     event.preventDefault();
     event.stopImmediatePropagation();
     post({ type: "action", action: "sendCapture" });
@@ -132,6 +133,11 @@ const api = {
   setCaptureMode(compact: boolean) {
     document.documentElement.dataset.nativeCapture = compact ? "compact" : "expanded";
     height();
+  },
+  setCaptureHeightLimit(height: number | null) {
+    const style = document.documentElement.style;
+    if (height === null) style.removeProperty("--capture-height-limit");
+    else style.setProperty("--capture-height-limit", `${height}px`);
   },
   setNoteURL(value: string) {
     controller.setNoteURL(value);
@@ -347,7 +353,7 @@ document.addEventListener("click", (event) => {
     api.focus();
 });
 window.doompileEditor = api;
-new ResizeObserver(height).observe(document.getElementById("editor")!);
+new ResizeObserver(height).observe(editorElement);
 window.addEventListener("load", height);
 post({ type: "ready" });
 height();

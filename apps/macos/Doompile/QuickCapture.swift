@@ -14,6 +14,8 @@ import UniformTypeIdentifiers
     @Published var expanded = false
     @Published var richMounted = false
     @Published var focused = true
+    @Published var nativeInputHeight = MacQuickInput.height
+    @Published var compactEditorHeight = MacQuickInput.height
     @Published var busy = false
     @Published private(set) var startingVoice = false
     @Published var error: String?
@@ -75,6 +77,8 @@ import UniformTypeIdentifiers
         voice.cancel(); voice = MacVoiceRecorder()
         draftTask?.cancel(); panel?.orderOut(nil); panel = nil
         bridge.reset()
+        nativeInputHeight = MacQuickInput.height
+        compactEditorHeight = MacQuickInput.height
         drafts = MacCaptureDraftStore(directory:Storage.shared.directory)
         note = (try? drafts.load()) ?? Note(); error = nil; richMounted = MacQuickDocument.needsRichEditor(note)
     }
@@ -104,7 +108,8 @@ import UniformTypeIdentifiers
         DispatchQueue.main.async { [weak self] in self?.focused = true; if self?.richMounted == true { self?.bridge.focus() } }
     }
     var compactHeight: CGFloat {
-        54 + (error == nil ? 0 : 44) + (showsCompactAttachments ? 52 : 0)
+        let inputHeight = richMounted ? compactEditorHeight : nativeInputHeight
+        return inputHeight + 15 + (error == nil ? 0 : 44) + (showsCompactAttachments ? 52 : 0)
     }
     var compactAttachments: [Attachment] {
         richMounted && bridge.ready ? MacQuickDocument.referencedFiles(in: note) : note.attachments
@@ -191,6 +196,8 @@ import UniformTypeIdentifiers
             panel?.orderOut(nil)
             note = Note(); draftTask?.cancel()
             richMounted = false; expanded = false; error = nil
+            nativeInputHeight = MacQuickInput.height
+            compactEditorHeight = MacQuickInput.height
             library.notice = "Сохранено"
         } catch { Telemetry.shared.failure(.runtimeError, error); self.error = error.localizedDescription; resizeForContent() }
     }
@@ -306,7 +313,6 @@ struct QuickCaptureRoot: View {
     @ObservedObject var capture: QuickCaptureController
     @ObservedObject var bridge: MacRichEditorBridge
     @ObservedObject var voice: MacVoiceRecorder
-    @State private var editorHeight: CGFloat = 300
     private var sendDisabled: Bool { capture.busy || capture.startingVoice || (!voice.recording && !capture.hasContent) }
     var body: some View {
         panel
@@ -350,8 +356,8 @@ struct QuickCaptureRoot: View {
             Spacer()
             Button { capture.note.pinned.toggle() } label: { DoompileSymbol(systemName: capture.note.pinned ? "pin.fill" : "pin").frame(width: 28, height: 28) }.help(capture.note.pinned ? "Открепить" : "Закрепить")
             Button { capture.note.urgent.toggle() } label: { DoompileSymbol(systemName: capture.note.urgent ? "flame.fill" : "flame").foregroundStyle(capture.note.urgent ? MacPalette.orange : MacPalette.muted).frame(width: 28, height: 28) }.help("Важное")
-            Button { capture.setExpanded(false) } label: { DoompileSymbol(systemName: "arrow.down.right.and.arrow.up.left").frame(width: 28, height: 28) }.help("Свернуть панель").accessibilityLabel("Свернуть панель")
-            Button { Task { await capture.dismiss() } } label: { DoompileSymbol(systemName: "xmark").frame(width: 28, height: 28) }.help("Скрыть панель · Esc").accessibilityLabel("Скрыть панель")
+            Button { capture.setExpanded(false) } label: { DoompileSymbol(systemName: "arrow.down.right.and.arrow.up.left").frame(width: 28, height: 28) }
+                .help("Свернуть редактор").accessibilityLabel("Свернуть редактор").accessibilityIdentifier("quick-composer-collapse")
         }.buttonStyle(.plain).foregroundStyle(MacPalette.muted).padding(.horizontal, 18).frame(height: 50)
     }
     private var composerInput: some View {
@@ -360,7 +366,7 @@ struct QuickCaptureRoot: View {
                 MacComposerAttachmentStrip(attachments: capture.compactAttachments, starting: capture.startingVoice, recording: voice.recording,
                                            seconds: voice.seconds, onRemove: capture.removeCompactAttachment) { capture.action("stopVoice") }
             }
-            HStack(alignment: .center, spacing: 5) {
+            HStack(alignment: .bottom, spacing: 5) {
                 if !capture.expanded {
                     MacComposerButton(icon: "paperclip", label: "Прикрепить файл", disabled: capture.busy, identifier: "quick-composer-attach") { capture.action("file") }
                 }
@@ -376,16 +382,16 @@ struct QuickCaptureRoot: View {
         }.padding(capture.expanded ? 0 : 6).frame(maxHeight: capture.expanded ? .infinity : nil)
     }
     private var richInput: some View {
-        MacRichEditorView(document: $capture.note.body, plainText: $capture.note.plainText, height: $editorHeight, attachments: $capture.note.attachments, noteID: capture.note.id, notes: library.notes, focusOnLoad: true, captureCompact: !capture.expanded, bridge: bridge, onReference: { id in
+        MacRichEditorView(document: $capture.note.body, plainText: $capture.note.plainText, height: $capture.compactEditorHeight, attachments: $capture.note.attachments, noteID: capture.note.id, notes: library.notes, focusOnLoad: true, captureCompact: !capture.expanded, bridge: bridge, onReference: { id in
             Task { await capture.dismiss(); if let url = NoteLinks.appURL(id: id) { NSWorkspace.shared.open(url) } }
         }, onRequestLink: { capture.link = $0; capture.showLink = true }, onAction: capture.action, onPasteImage: capture.storeFile)
         .id(capture.note.id)
         .accessibilityIdentifier("quick-composer-input")
-        .frame(maxWidth: .infinity, minHeight: capture.expanded ? 240 : MacQuickInput.height, maxHeight: capture.expanded ? .infinity : MacQuickInput.height)
+        .frame(maxWidth: .infinity, minHeight: capture.expanded ? 240 : capture.compactEditorHeight, maxHeight: capture.expanded ? .infinity : capture.compactEditorHeight)
     }
     private var nativeInput: some View {
-        MacQuickInput(text: Binding(get: { capture.note.plainText }, set: capture.updateText), focused: $capture.focused, onSubmit: submit, onPasteImage: pasteQuickImage)
-            .frame(height: MacQuickInput.height).padding(.horizontal, 4)
+        MacQuickInput(text: Binding(get: { capture.note.plainText }, set: capture.updateText), focused: $capture.focused, contentHeight: $capture.nativeInputHeight, onSubmit: submit, onPasteImage: pasteQuickImage)
+            .frame(height: capture.nativeInputHeight).padding(.horizontal, 4)
     }
     private func pasteQuickImage(_ data: Data) {
         do { try capture.addFile(data, name: "Изображение.png", mime: "image/png") }
@@ -396,7 +402,7 @@ struct QuickCaptureRoot: View {
             Text("Esc — скрыть · черновик останется на Mac").font(.system(size: 10)).foregroundStyle(MacPalette.muted)
             Spacer()
             Text("⌘ ↵").font(.system(size: 10)).foregroundStyle(MacPalette.muted)
-            MacComposerButton(icon: "arrow.up", label: "Отправить заметку", send: true, disabled: sendDisabled, action: submit)
+            MacComposerButton(icon: "arrow.up", label: "Отправить заметку", send: true, disabled: sendDisabled, identifier: "quick-composer-send", action: submit)
         }.padding(12)
     }
     private func submit() { Task { await capture.submit() } }

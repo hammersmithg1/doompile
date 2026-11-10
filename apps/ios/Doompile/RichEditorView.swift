@@ -108,6 +108,7 @@ struct RichEditorView: UIViewRepresentable {
     var onAction: (String) -> Void
     var openPreferencesOnLoad = false
     var captureCompact = false
+    var captureHeightLimit: CGFloat? = nil
     var onPasteImage: EditorImagePaste.Store? = nil
 
     func makeCoordinator() -> Coordinator { Coordinator(parent: self) }
@@ -131,7 +132,7 @@ struct RichEditorView: UIViewRepresentable {
         webView.scrollView.backgroundColor = .clear
         webView.scrollView.isScrollEnabled = true
         webView.scrollView.keyboardDismissMode = .interactive
-        webView.scrollView.alwaysBounceVertical = true
+        webView.scrollView.alwaysBounceVertical = !captureCompact
         webView.scrollView.showsHorizontalScrollIndicator = false
         webView.scrollView.contentInsetAdjustmentBehavior = .never
         webView.accessibilityLabel = captureCompact ? UICopy.capturePlaceholder : "Редактор заметки"
@@ -144,7 +145,10 @@ struct RichEditorView: UIViewRepresentable {
     }
     func updateUIView(_ uiView: WKWebView, context: Context) {
         context.coordinator.parent = self
-        if bridge.ready { context.coordinator.applyTheme() }
+        if bridge.ready {
+            context.coordinator.applyTheme()
+            context.coordinator.applyCaptureHeightLimit()
+        }
         // Native state receives every transaction. Never setDocument here: it would reset the caret.
     }
     static func dismantleUIView(_ uiView: WKWebView, coordinator: Coordinator) {
@@ -160,6 +164,7 @@ struct RichEditorView: UIViewRepresentable {
         var parent: RichEditorView
         let media = MediaSchemeHandler()
         private var appliedTheme: String?
+        private var appliedCaptureHeightLimit: CGFloat?
         private var initialFocusScheduled = false
         func focusAfterPresentation() {
             guard !initialFocusScheduled, parent.focusOnLoad, parent.bridge.ready,
@@ -186,6 +191,13 @@ struct RichEditorView: UIViewRepresentable {
             guard theme != appliedTheme else { return }
             appliedTheme = theme
             parent.bridge.webView?.evaluateJavaScript("window.doompileEditor.setTheme?.('\(theme)')")
+        }
+        func applyCaptureHeightLimit() {
+            guard parent.captureCompact, let webView = parent.bridge.webView,
+                  parent.captureHeightLimit != appliedCaptureHeightLimit else { return }
+            appliedCaptureHeightLimit = parent.captureHeightLimit
+            let limit = appliedCaptureHeightLimit.map { String(Double($0)) } ?? "null"
+            webView.evaluateJavaScript("window.doompileEditor.setCaptureHeightLimit?.(\(limit))")
         }
         init(parent: RichEditorView) { self.parent = parent }
 
@@ -215,11 +227,13 @@ struct RichEditorView: UIViewRepresentable {
                     ? "; window.doompileEditor.setEditable(false); window.doompileEditor.openPreferences()"
                     : ""
                 let presentation = parent.captureCompact ? "setCaptureMode?.(true)" : "setTouchMode?.(true)"
+                applyCaptureHeightLimit()
                 webView.evaluateJavaScript("window.doompileEditor.setDocument(\(json)); window.doompileEditor.setAttachments?.(\(attachmentsJSON)); window.doompileEditor.setNoteURL?.(\(noteURLJSON)); window.doompileEditor.setNotes?.(\(referencesJSON)); window.doompileEditor.setTheme?.('\(theme)'); window.doompileEditor.\(presentation)\(preferences)") { [weak self, weak webView] _, error in
                     guard error == nil else { if let error { Telemetry.shared.failure(.editorFailed, error) }; return }
                     guard let self, let webView else { return }
                     appliedTheme = theme
                     parent.bridge.markReady(webView)
+                    applyCaptureHeightLimit()
                     focusAfterPresentation()
                 }
             case "change":
@@ -236,7 +250,11 @@ struct RichEditorView: UIViewRepresentable {
                     parent.attachments.append(contentsOf: attachments.filter { incoming in !parent.attachments.contains(where: { $0.id == incoming.id }) })
                 }
             case "height":
-                if let height = payload["height"] as? Double, height.isFinite { parent.height = max(280, min(100_000, height)) }
+                guard message.webView === parent.bridge.webView,
+                      (payload["compact"] as? Bool ?? false) == parent.captureCompact,
+                      let height = payload["height"] as? Double, height.isFinite else { return }
+                let measured = parent.captureCompact ? max(44, height) : max(280, min(100_000, height))
+                if parent.height != measured { parent.height = measured }
             case "openAttachment": if let url = payload["url"] as? String { parent.onAction("openAttachment:" + url) }
             case "reference":
                 if let id = payload["id"] as? String { parent.onReference(id) }

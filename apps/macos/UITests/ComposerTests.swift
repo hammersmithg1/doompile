@@ -1,3 +1,4 @@
+import AppKit
 import XCTest
 
 @MainActor final class ComposerTests: XCTestCase {
@@ -31,6 +32,116 @@ import XCTest
     private func wait(_ format: String, for element: XCUIElement, timeout: TimeInterval = 8) {
         let condition = XCTNSPredicateExpectation(predicate: NSPredicate(format: format), object: element)
         XCTAssertEqual(XCTWaiter.wait(for: [condition], timeout: timeout), .completed, format)
+    }
+
+    private func waitForLayout(_ condition: @escaping () -> Bool) {
+        let layout = XCTNSPredicateExpectation(predicate: NSPredicate { _, _ in condition() }, object: nil)
+        XCTAssertEqual(XCTWaiter.wait(for: [layout], timeout: 8), .completed)
+    }
+
+    private func paste(_ text: String, in app: XCUIApplication) {
+        NSPasteboard.general.clearContents()
+        XCTAssertTrue(NSPasteboard.general.setString(text, forType: .string))
+        app.typeKey("v", modifierFlags: .command)
+    }
+
+    func testMainComposerGrowthAndCollapse() {
+        let app = launch()
+        let window = app.windows.firstMatch
+        let feed = app.scrollViews["Лента заметок"]
+        let input = element(window, "quick-composer-input")
+        let expand = element(window, "quick-composer-expand")
+        let collapse = element(window, "quick-composer-collapse")
+        let send = element(window, "quick-composer-send")
+        XCTAssertTrue(input.waitForExistence(timeout: 8))
+        let idleHeight = feed.frame.height
+        capture("mac-main-growth-idle-light", in: window)
+
+        input.click()
+        input.typeText("Main growth review")
+        XCTAssertEqual(feed.frame.height, idleHeight, accuracy: 1)
+        paste(String(repeating: " wrapped text", count: 24), in: app)
+        waitForLayout { feed.frame.height < idleHeight - 20 }
+        capture("mac-main-growth-wrapped-light", in: window)
+
+        app.typeKey("a", modifierFlags: .command)
+        let lines = ["Main growth review"] + (2...15).map { "Line \($0)" }
+        paste(lines.joined(separator: "\n"), in: app)
+        wait("value CONTAINS 'Line 15'", for: input)
+        waitForLayout { feed.frame.height < idleHeight - 300 }
+        let cappedHeight = feed.frame.height
+        XCTAssertEqual(idleHeight - cappedHeight, 308, accuracy: 4)
+        capture("mac-main-growth-15-lines-light", in: window)
+
+        paste("\nLine 16\nEnd of draft", in: app)
+        wait("value CONTAINS 'End of draft'", for: input)
+        XCTAssertEqual(feed.frame.height, cappedHeight, accuracy: 2)
+        capture("mac-main-growth-scroll-end-light", in: window)
+        app.typeKey(.upArrow, modifierFlags: .command)
+        capture("mac-main-growth-scroll-start-light", in: window)
+
+        expand.click()
+        XCTAssertTrue(collapse.waitForExistence(timeout: 8))
+        XCTAssertTrue(send.exists)
+        capture("mac-main-growth-expanded-light", in: window)
+        collapse.click()
+        XCTAssertTrue(expand.waitForExistence(timeout: 8))
+        waitForLayout { abs(feed.frame.height - cappedHeight) < 5 }
+        XCTAssertFalse(feed.staticTexts.matching(NSPredicate(format: "label BEGINSWITH 'Main growth review'")).firstMatch.exists)
+        capture("mac-main-growth-collapsed-light", in: window)
+
+        expand.click()
+        XCTAssertTrue(collapse.waitForExistence(timeout: 8))
+        send.click()
+        XCTAssertTrue(feed.staticTexts.matching(NSPredicate(format: "label BEGINSWITH 'Main growth review'")).firstMatch.waitForExistence(timeout: 8))
+        XCTAssertEqual(feed.frame.height, idleHeight, accuracy: 1)
+    }
+
+    func testGlobalComposerGrowthAndCollapse() {
+        let app = launch(dark: true, global: true, attachment: true)
+        let panel = element(app, "quick-capture-panel")
+        XCTAssertTrue(panel.waitForExistence(timeout: 8))
+        let input = element(panel, "quick-composer-input")
+        let expand = element(panel, "quick-composer-expand")
+        let collapse = element(panel, "quick-composer-collapse")
+        let send = element(panel, "quick-composer-send")
+        let file = element(panel, "quick-composer-attachment")
+        XCTAssertTrue(input.waitForExistence(timeout: 8))
+        XCTAssertTrue(file.exists)
+        let idleHeight = panel.frame.height
+        capture("mac-global-growth-attachment-dark", in: panel)
+
+        input.click()
+        input.typeText("Global growth review")
+        app.typeKey(.return, modifierFlags: .shift)
+        input.typeText("Second line")
+        waitForLayout { panel.frame.height > idleHeight + 18 }
+        XCTAssertEqual(panel.frame.height - idleHeight, 22, accuracy: 4)
+        capture("mac-global-growth-multiline-dark", in: panel)
+
+        paste("\n" + (3...15).map { "Line \($0)" }.joined(separator: "\n"), in: app)
+        waitForLayout { panel.frame.height > idleHeight + 300 }
+        let cappedHeight = panel.frame.height
+        XCTAssertEqual(cappedHeight - idleHeight, 308, accuracy: 4)
+        paste("\nLine 16\nEnd of global draft", in: app)
+        wait("value CONTAINS 'End of global draft'", for: input)
+        XCTAssertEqual(panel.frame.height, cappedHeight, accuracy: 2)
+        capture("mac-global-growth-scroll-end-dark", in: panel)
+
+        expand.click()
+        XCTAssertTrue(collapse.waitForExistence(timeout: 8))
+        XCTAssertTrue(send.exists)
+        capture("mac-global-growth-expanded-dark", in: panel)
+        collapse.click()
+        XCTAssertTrue(expand.waitForExistence(timeout: 8))
+        waitForLayout { abs(panel.frame.height - cappedHeight) < 5 }
+        XCTAssertTrue(file.exists)
+        capture("mac-global-growth-collapsed-dark", in: panel)
+        send.click()
+        wait("exists == false", for: panel)
+        let feed = app.scrollViews["Лента заметок"]
+        XCTAssertTrue(feed.staticTexts.matching(NSPredicate(format: "label BEGINSWITH 'Global growth review'")).firstMatch.waitForExistence(timeout: 8))
+        XCTAssertTrue(feed.staticTexts["review-archive.zip"].exists)
     }
 
     func testMainComposerAndUpload() {
@@ -73,6 +184,14 @@ import XCTest
         let stop = element(panel, "quick-composer-stop")
         XCTAssertTrue(stop.waitForExistence(timeout: 8))
         capture("mac-global-recording-dark", in: panel)
+        let expand = element(panel, "quick-composer-expand")
+        let collapse = element(panel, "quick-composer-collapse")
+        expand.click()
+        XCTAssertTrue(collapse.waitForExistence(timeout: 8))
+        capture("mac-global-recording-expanded-dark", in: panel)
+        collapse.click()
+        XCTAssertTrue(stop.waitForExistence(timeout: 8))
+        capture("mac-global-recording-collapsed-dark", in: panel)
         stop.click()
         wait("exists == false", for: stop)
         XCTAssertTrue(element(panel, "quick-composer-attachment").exists)

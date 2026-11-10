@@ -179,7 +179,14 @@ struct MacRichEditorView: NSViewRepresentable {
                     parent.attachments.append(contentsOf: attachments.filter { incoming in !parent.attachments.contains(where: { $0.id == incoming.id }) })
                 }
             case "height":
-                if let height = payload["height"] as? Double, height.isFinite { parent.height = max(300, min(100_000, height)) }
+                guard let height = payload["height"] as? Double, height.isFinite else { return }
+                if let compact = parent.captureCompact {
+                    if compact, payload["compact"] as? Bool == true {
+                        parent.height = max(MacQuickInput.height, ceil(height))
+                    }
+                } else {
+                    parent.height = max(300, min(100_000, height))
+                }
             case "openAttachment":
                 if let url = payload["url"] as? String, let attachment = parent.attachments.first(where: { $0.url == url }) {
                     Task { @MainActor in if let file = try? await AttachmentFiles.resolve(attachment) { NSWorkspace.shared.open(file) } }

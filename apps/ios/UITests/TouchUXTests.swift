@@ -9,6 +9,9 @@ final class TouchUXTests: XCTestCase {
         if name.contains("testCompactComposerAttachmentAndVoiceStates") {
             app.launchEnvironment["DOOMPILE_UI_COMPOSER_FIXTURE"] = "1"
         }
+        if name.contains("testQuickComposerGrowsToFifteenLinesThenScrolls") {
+            app.launchEnvironment["DOOMPILE_UI_SCROLL_FIXTURE"] = "1"
+        }
         app.launch()
         XCTAssertTrue(app.textFields["quick-input"].waitForExistence(timeout: 10))
     }
@@ -60,6 +63,7 @@ final class TouchUXTests: XCTestCase {
     func testExpandedDraftFocusesAndToolbarFollowsKeyboard() {
         app.buttons["expand-editor"].tap()
         XCTAssertTrue(app.buttons["close-editor"].waitForExistence(timeout: 5), app.debugDescription)
+        XCTAssertFalse(app.buttons["send-expanded-capture"].isEnabled)
         XCTAssertTrue(app.keyboards.firstMatch.waitForExistence(timeout: 5), "New notes focus without another tap")
         let editor = app.webViews.textViews.firstMatch
         XCTAssertTrue(editor.waitForExistence(timeout: 5), app.debugDescription)
@@ -79,7 +83,7 @@ final class TouchUXTests: XCTestCase {
         }
         XCTAssertTrue(app.buttons["Вставить таблицу"].isHittable)
         screenshot("editor-controls-scrolled")
-        app.buttons["close-editor"].tap()
+        app.buttons["send-expanded-capture"].tap()
         XCTAssertTrue(noteRow("One document").waitForExistence(timeout: 5), app.debugDescription)
         noteRow("One document").tap()
         XCTAssertTrue(app.buttons["close-editor"].waitForExistence(timeout: 5))
@@ -238,9 +242,12 @@ final class TouchUXTests: XCTestCase {
         XCTAssertTrue(app.keyboards.firstMatch.waitForExistence(timeout: 5))
         XCTAssertTrue((editor.value as? String ?? "").contains("Voice draft"))
         editor.typeText("\nExpanded edit")
+        XCTAssertEqual(app.buttons["close-editor"].label, "Свернуть редактор")
+        screenshot("composer-expanded-recording")
         app.buttons["close-editor"].tap()
         let stop = app.buttons["quick-stop-recording"]
         XCTAssertTrue(stop.waitForExistence(timeout: 5), app.debugDescription)
+        screenshot("composer-collapsed-recording")
         stop.tap()
         XCTAssertTrue(stop.waitForNonExistence(timeout: 5))
         XCTAssertTrue(app.descendants(matching: .any)["quick-attachment"].firstMatch.waitForExistence(timeout: 5), app.debugDescription)
@@ -360,7 +367,7 @@ final class TouchUXTests: XCTestCase {
         XCTAssertTrue(app.buttons["close-editor"].waitForExistence(timeout: 5))
         XCTAssertTrue(app.keyboards.firstMatch.waitForExistence(timeout: 5))
         app.webViews.textViews.firstMatch.typeText("Action capture")
-        app.buttons["close-editor"].tap()
+        app.buttons["send-expanded-capture"].tap()
         XCTAssertTrue(noteRow("Action capture").waitForExistence(timeout: 5))
     }
 
@@ -412,7 +419,7 @@ final class TouchUXTests: XCTestCase {
         screenshot("editor-block-actions")
         duplicate.tap()
         XCTAssertEqual((editor.value as? String ?? "").components(separatedBy: "Task one").count - 1, 2)
-        app.buttons["close-editor"].tap()
+        app.buttons["send-expanded-capture"].tap()
         XCTAssertTrue(noteRow("Task one").waitForExistence(timeout: 5))
     }
 
@@ -427,20 +434,61 @@ final class TouchUXTests: XCTestCase {
         XCTAssertTrue(app.navigationBars["Настройки"].waitForExistence(timeout: 3))
     }
 
-    func testExpandedQuickDraftSurvivesCloseWithoutFurtherTyping() {
+    func testQuickComposerGrowsToFifteenLinesThenScrolls() {
+        let input = app.textFields["quick-input"]
+        let send = app.buttons["quick-send"]
+        let idleHeight = input.frame.height
+        XCTAssertLessThanOrEqual(idleHeight, 44)
+        app.scrollViews["note-feed"].swipeUp()
+        screenshot("composer-idle-over-scrolled-feed")
+
+        input.tap()
+        let keyboard = app.keyboards.firstMatch
+        XCTAssertTrue(keyboard.waitForExistence(timeout: 5))
+        let lines = (1...18).map { "Line \($0)" }
+        input.typeText(lines[0..<4].joined(separator: "\n"))
+        XCTAssertGreaterThan(input.frame.height, idleHeight + 35)
+        screenshot("composer-four-lines-keyboard")
+
+        input.typeText("\n" + lines[4..<15].joined(separator: "\n"))
+        let atLimit = input.frame.height
+        XCTAssertGreaterThan(atLimit, 15 * 16)
+        XCTAssertLessThanOrEqual(send.frame.maxY, keyboard.frame.minY + 1)
+        input.typeText("\n" + lines[15..<18].joined(separator: "\n"))
+        XCTAssertTrue((input.value as? String ?? "").contains("Line 18"))
+        XCTAssertEqual(input.frame.height, atLimit, accuracy: 1, "More text scrolls inside the input")
+        XCTAssertTrue(send.isHittable)
+        screenshot("composer-fifteen-line-limit-scrolled")
+    }
+
+    func testExpandedQuickDraftSurvivesCollapseWithoutSending() {
         let input = app.textFields["quick-input"]
         input.tap(); input.typeText("Draft before expanding")
         app.buttons["expand-editor"].tap()
         let editor = app.webViews.textViews.firstMatch
         XCTAssertTrue(editor.waitForExistence(timeout: 8))
         XCTAssertTrue((editor.value as? String ?? "").contains("Draft before expanding"), app.debugDescription)
-        app.buttons["close-editor"].tap()
-        XCTAssertTrue(noteRow("Draft before expanding").waitForExistence(timeout: 5), app.debugDescription)
-        XCTAssertEqual(app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH 'note-'")).count, 1)
-        XCTAssertFalse((app.textFields["quick-input"].value as? String ?? "").contains("Draft before expanding"))
-        noteRow("Draft before expanding").tap()
+        let collapse = app.buttons["close-editor"]
+        XCTAssertEqual(collapse.label, "Свернуть редактор")
+        editor.typeText("\nEdit kept in draft")
+        screenshot("composer-expanded-text-draft")
+        collapse.tap()
+        XCTAssertTrue(collapse.waitForNonExistence(timeout: 5))
+        XCTAssertTrue(editor.waitForExistence(timeout: 5))
+        XCTAssertTrue((editor.value as? String ?? "").contains("Edit kept in draft"))
+        XCTAssertFalse(noteRow("Draft before expanding").exists)
+        screenshot("composer-collapsed-text-draft")
+
+        app.buttons["expand-editor"].tap()
         XCTAssertTrue(editor.waitForExistence(timeout: 5))
         XCTAssertTrue((editor.value as? String ?? "").contains("Draft before expanding"))
+        XCTAssertTrue((editor.value as? String ?? "").contains("Edit kept in draft"))
+        app.buttons["send-expanded-capture"].tap()
+        let row = noteRow("Draft before expanding")
+        XCTAssertTrue(row.waitForExistence(timeout: 5), app.debugDescription)
+        XCTAssertTrue(row.label.contains("Edit kept in draft"))
+        XCTAssertTrue(app.buttons["quick-microphone"].exists)
+        screenshot("composer-sent-expanded-text-draft")
     }
 
     func testUnpinAndRemoveUrgencyRestoreCreationOrder() {
@@ -481,7 +529,7 @@ final class TouchUXTests: XCTestCase {
         app.buttons["Тег Research"].tap()
         screenshot("editor-tags")
         app.buttons["editor-tags-done"].tap()
-        app.buttons["close-editor"].tap()
+        app.buttons["send-expanded-capture"].tap()
         noteRow("Tagged note").tap()
         app.buttons["Теги заметки"].tap()
         XCTAssertTrue(app.buttons["Убрать тег Research"].waitForExistence(timeout: 3))
@@ -603,7 +651,7 @@ final class TouchUXTests: XCTestCase {
         editor.typeText("Autosaved expanded note")
         XCUIDevice.shared.press(.home)
         app.activate()
-        app.buttons["close-editor"].tap()
+        app.buttons["send-expanded-capture"].tap()
         XCTAssertTrue(noteRow("Autosaved expanded note").waitForExistence(timeout: 5))
     }
 

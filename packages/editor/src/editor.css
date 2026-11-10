@@ -51,20 +51,23 @@ button {
 /* Compact native hosts render media as snippets outside the editor. The
    document keeps its original nodes for expansion and saving. */
 :root[data-native-capture="compact"] .block-editor {
+  --capture-padding: 7px;
+  --capture-line: 22px;
   min-height: 36px;
-  padding: 7px 4px;
+  padding: var(--capture-padding) 4px;
   font-size: 14px;
-  line-height: 22px;
+  line-height: var(--capture-line);
 }
 :root[data-native-capture="compact"]:not([data-native-desktop="true"]) .block-editor {
+  --capture-padding: 11px;
   min-height: 44px;
-  padding-block: 11px;
   font-size: 16px;
 }
 :root[data-native-capture="compact"] .block-editor .tiptap {
-  min-height: 22px;
-  max-height: 22px;
+  min-height: var(--capture-line);
+  max-height: min(calc(15 * var(--capture-line)), calc(var(--capture-height-limit, 10000px) - 2 * var(--capture-padding)));
   overflow-y: auto;
+  overscroll-behavior-y: contain;
   scrollbar-width: none;
 }
 :root[data-native-capture="compact"] .tiptap :is(h1, h2, h3) {
@@ -73,6 +76,13 @@ button {
   margin: 0;
 }
 :root[data-native-capture="compact"] :is(.block-handle, .editor-outline, .selection-toolbar, .recording-block, [data-attachment], [data-resize-container]:has(img[data-original-src])) {
+  display: none !important;
+}
+:root[data-native-capture="compact"] .tiptap :is(
+  .ProseMirror-separator:has(+ :is([data-attachment], [data-resize-container]:has(img[data-original-src]))),
+  :is([data-attachment], [data-resize-container]:has(img[data-original-src])) + .ProseMirror-separator,
+  :is([data-attachment], [data-resize-container]:has(img[data-original-src])) + .ProseMirror-separator + .ProseMirror-trailingBreak
+) {
   display: none !important;
 }
 
