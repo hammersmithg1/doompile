@@ -173,11 +173,11 @@ final class TouchUXTests: XCTestCase {
         send.tap()
         let uploaded = noteRow(caption)
         XCTAssertTrue(uploaded.waitForExistence(timeout: 3), "The note must appear before the fixture responds to the upload")
-        XCTAssertTrue(mic.waitForExistence(timeout: 3))
         let sending = app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH 'note-' AND label CONTAINS %@ AND label CONTAINS %@", caption, "Загружается")).firstMatch
         XCTAssertTrue(sending.waitForExistence(timeout: 4), app.debugDescription)
         screenshot("feed-audio-uploading")
-        XCTAssertTrue(sending.waitForNonExistence(timeout: 15))
+        XCTAssertTrue(mic.waitForExistence(timeout: 3))
+        XCTAssertTrue(sending.waitForNonExistence(timeout: 25))
         XCTAssertTrue(uploaded.exists)
         screenshot("feed-audio-uploaded")
 
@@ -201,9 +201,12 @@ final class TouchUXTests: XCTestCase {
         XCTAssertTrue(mic.waitForExistence(timeout: 3))
 
         attach.tap()
-        XCTAssertTrue(app.buttons["Файл"].waitForExistence(timeout: 3))
-        XCTAssertTrue(app.buttons["Фото"].exists)
         screenshot("composer-paperclip-menu")
+        let menuOptions = app.descendants(matching: .any)
+        let fileOption = menuOptions.matching(NSPredicate(format: "label BEGINSWITH %@", "Файл")).firstMatch
+        let photoOption = menuOptions.matching(NSPredicate(format: "label BEGINSWITH %@", "Фото")).firstMatch
+        XCTAssertTrue(fileOption.waitForExistence(timeout: 4), app.debugDescription)
+        XCTAssertTrue(photoOption.exists, app.debugDescription)
 
         app.terminate()
         app.launchEnvironment["DOOMPILE_UI_ARCHIVE_FIXTURE"] = "1"

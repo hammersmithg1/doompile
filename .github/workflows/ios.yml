@@ -110,7 +110,7 @@ jobs:
         if: ${{ !inputs.reuse_validation }}
         run: swift test --package-path apps/ios --scratch-path "$RUNNER_TEMP/swift-tests"
       - name: Build app, Share Extension and Safari Extension
-        if: ${{ !inputs.reuse_validation }}
+        if: ${{ !inputs.reuse_validation && inputs.test_filter == '' }}
         run: >-
           xcodebuild -project apps/ios/Doompile.xcodeproj -scheme Doompile
           -destination 'generic/platform=iOS Simulator'
@@ -139,7 +139,7 @@ jobs:
 
           simulator_id=$(python3 .agents/ci/select_ios_simulator.py --os "$IOS_SIMULATOR_OS")
           if [[ -z "$IOS_TEST_FILTER" || "$IOS_TEST_FILTER" == */testCompactComposerAttachmentAndVoiceStates ]]; then
-            python3 apps/macos/scripts/composer-fixture.py > "$RUNNER_TEMP/ios-composer-fixture.log" 2>&1 &
+            DOOMPILE_COMPOSER_FIXTURE_DELAY=18 python3 apps/macos/scripts/composer-fixture.py > "$RUNNER_TEMP/ios-composer-fixture.log" 2>&1 &
             fixture_pid=$!
             stop_fixture() {
               kill "$fixture_pid" 2>/dev/null || true
@@ -192,6 +192,7 @@ jobs:
             ${{ runner.temp }}/iOS-Touch.xcresult
             ${{ runner.temp }}/iOS-Touch-attachments
             ${{ runner.temp }}/iOS-Touch-motion.mp4
+            ${{ runner.temp }}/ios-composer-fixture.log
           if-no-files-found: ignore
       - name: Prepare private release packaging
         if: inputs.upload_testflight

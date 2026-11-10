@@ -2,6 +2,7 @@
 """Local-only API for reviewing native composer uploads with synthetic data."""
 
 import json
+import os
 import re
 import time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -37,7 +38,7 @@ class Fixture(BaseHTTPRequestHandler):
             if name is None or mime is None or attachment_id is None:
                 self.json_response({}, 400)
                 return
-            time.sleep(8)
+            time.sleep(float(os.environ.get("DOOMPILE_COMPOSER_FIXTURE_DELAY", "8")))
             self.json_response({"attachment": {
                 "id": attachment_id,
                 "name": name[1].decode(),
