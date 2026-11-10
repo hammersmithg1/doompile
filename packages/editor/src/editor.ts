@@ -342,7 +342,8 @@ editor.on("transaction", formats);
 // Padding and the bottom of a short native note are capture targets too.
 // A click listener preserves selection, links, media controls and scroll gestures.
 document.addEventListener("click", (event) => {
-  if (document.documentElement.dataset.nativeTouch !== "true") return;
+  const { nativeCapture, nativeDesktop, nativeTouch } = document.documentElement.dataset;
+  if (nativeTouch !== "true" && !(nativeCapture === "compact" && nativeDesktop !== "true")) return;
   const target = event.target as HTMLElement;
   if (
     target === document.body ||

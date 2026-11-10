@@ -339,7 +339,7 @@ test("Safari keyboard geometry updates in the same frame and restores after dism
   });
 });
 
-test("mobile capture, document tools, keyboard viewport and save on close", async ({
+test("mobile capture, document tools, keyboard viewport and explicit send", async ({
   page,
 }, info) => {
   test.skip(info.project.name !== "iphone-webkit");
@@ -375,7 +375,7 @@ test("mobile capture, document tools, keyboard viewport and save on close", asyn
     path: "test-results/mobile-web/iphone-editor.png",
   });
   await page
-    .getByRole("button", { name: "Закрыть редактор", exact: true })
+    .getByRole("button", { name: "Отправить заметку", exact: true })
     .click();
   await expect(text).toHaveCount(0);
   await expect.poll(() => notes.length).toBe(1);
@@ -649,6 +649,144 @@ test("legacy IndexedDB pending notes migrate atomically and only once", async ({
   expect(result[0].note.id).toBe(legacy.id);
   expect(result[0].dirty).toBe(true);
   expect(result[0].baseRevision).toBe(0);
+});
+
+test("quick composer grows through fifteen lines and scrolls additional content", async ({
+  page,
+}, info) => {
+  const mobile = info.project.name === "iphone-webkit";
+  await page.emulateMedia({ colorScheme: mobile ? "dark" : "light" });
+  await setup(page);
+  const quick = page.locator(".quick-composer");
+  const dock = page.locator(".composer-dock");
+  const input = quick.getByRole("textbox");
+  const capture = (state: string) => page.screenshot({ path: info.outputPath(`${state}.png`) });
+  const measure = () => input.evaluate((element: HTMLTextAreaElement) => {
+    const style = getComputedStyle(element);
+    return {
+      height: element.clientHeight,
+      contentHeight: element.scrollHeight,
+      line: Number.parseFloat(style.lineHeight),
+      padding: Number.parseFloat(style.paddingTop) + Number.parseFloat(style.paddingBottom),
+    };
+  });
+  if (mobile) {
+    await expect(dock).toHaveCSS("background-color", "rgba(0, 0, 0, 0)");
+    await expect(dock).toHaveCSS("background-image", "none");
+    await expect(quick).not.toHaveCSS("background-color", "rgba(0, 0, 0, 0)");
+    const originalViewport = page.viewportSize()!;
+    await page.setViewportSize({ width: 820, height: 844 });
+    expect(await page.evaluate(() => matchMedia("(pointer: coarse)").matches)).toBe(true);
+    await expect(dock).toHaveCSS("background-color", "rgba(0, 0, 0, 0)");
+    await page.setViewportSize(originalViewport);
+  }
+  const resting = await measure();
+  expect(resting.height).toBe(42);
+  await capture("01-quick-empty");
+  await input.fill("Короткая мысль");
+  expect((await measure()).height).toBe(resting.height);
+  await input.fill("Текст переносится по ширине ".repeat(15));
+  expect((await measure()).height).toBeGreaterThan(resting.height);
+  const lines = Array.from({ length: 20 }, (_, index) => `Строка ${index + 1}`);
+  await input.fill(lines.slice(0, 5).join("\n"));
+  expect((await measure()).height).toBe(resting.line * 5 + resting.padding);
+  await capture("02-quick-five-lines");
+  await input.fill(lines.slice(0, 15).join("\n"));
+  const full = resting.line * 15 + resting.padding;
+  expect((await measure()).height).toBe(full);
+  expect((await measure()).contentHeight).toBe(full);
+  await input.fill(lines.join("\n"));
+  const capped = await measure();
+  expect(capped.height).toBe(full);
+  expect(capped.contentHeight).toBeGreaterThan(full);
+  expect(await input.evaluate((element: HTMLTextAreaElement) => {
+    element.scrollTop = element.scrollHeight;
+    return element.scrollTop;
+  })).toBeGreaterThan(0);
+  await capture("03-quick-fifteen-lines-scrolled");
+  await input.fill("");
+  expect((await measure()).height).toBe(resting.height);
+});
+
+test("expanded composer collapses text and formatting into a draft until sent", async ({
+  page,
+}, info) => {
+  await page.emulateMedia({
+    colorScheme: info.project.name === "iphone-webkit" ? "dark" : "light",
+    reducedMotion: "no-preference",
+  });
+  const notes = await setup(page);
+  const quick = page.getByRole("textbox", { name: "Быстрая заметка" });
+  const open = page.getByRole("button", { name: "Развернуть редактор", exact: true });
+  const expanded = page.getByRole("region", { name: "Редактор заметки" });
+  const collapse = expanded.getByRole("button", { name: "Свернуть редактор", exact: true });
+  const send = expanded.getByRole("button", { name: "Отправить заметку", exact: true });
+  const rich = expanded.getByRole("textbox", { name: "Текст заметки" });
+  const capture = (state: string) => page.screenshot({ path: info.outputPath(`${state}.png`) });
+  const draftText = "План на неделю\nСледующие шаги\nЗаписать важную мысль\nДописать черновик";
+
+  await open.click();
+  await expect(collapse.locator('svg polyline[points="4 14 10 14 10 20"]')).toHaveCount(1);
+  await expect(send).toBeDisabled();
+  await collapse.click();
+  await expect(quick).toHaveValue("");
+
+  await quick.fill("План на неделю");
+  await open.click();
+  await expect(rich).toHaveText("План на неделю");
+  await rich.press("End");
+  await rich.press("Enter");
+  await rich.evaluate((element) => {
+    const data = new DataTransfer();
+    data.setData("text/html", "<p>Следующие шаги</p><h2>Записать <strong>важную мысль</strong></h2><p>Дописать черновик</p>");
+    element.dispatchEvent(new ClipboardEvent("paste", {
+      clipboardData: data,
+      bubbles: true,
+      cancelable: true,
+    }));
+  });
+  await expect(rich.locator("strong")).toHaveText("важную мысль");
+  await expect(send).toBeEnabled();
+  expect(notes).toHaveLength(1);
+  await expect.poll(() => page.locator(".composer-expanded").evaluate((element) => element.getAnimations().length)).toBe(0);
+  await capture("04-expanded-rich-draft");
+  const dock = page.locator(".composer-expanded");
+  await dock.evaluate((element) => {
+    const animate = element.animate.bind(element);
+    element.animate = (...args) => {
+      const animation = animate(...args);
+      animation.pause();
+      animation.currentTime = 120;
+      element.setAttribute("data-collapse-paused", "");
+      return animation;
+    };
+  });
+  await collapse.click();
+  await expect(dock).toHaveAttribute("data-collapse-paused", "");
+  const arrivingCard = page.locator(".quick-composer");
+  const arrivingFrame = await arrivingCard.boundingBox();
+  try {
+    await expect(page.locator(".main-scroll")).toHaveCSS("visibility", "visible");
+    expect(arrivingFrame!.height).toBeGreaterThan(100);
+    await capture("05-collapse-intermediate");
+  } finally {
+    await dock.evaluate((element) => element.getAnimations().forEach((animation) => animation.finish()));
+  }
+  await expect(quick).toHaveValue(draftText);
+  expect(await arrivingCard.boundingBox()).toEqual(arrivingFrame);
+  expect(notes).toHaveLength(1);
+  await capture("06-collapsed-rich-draft");
+  await page.reload();
+  await expect(quick).toHaveValue(draftText);
+  await open.click();
+  await expect(rich.locator("h2")).toHaveText("Записать важную мысль");
+  await expect(rich.locator("strong")).toHaveText("важную мысль");
+  await send.click();
+  await expect(expanded).toHaveCount(0);
+  await expect(quick).toHaveValue("");
+  await expect.poll(() => notes.length).toBe(2);
+  expect(notes.at(-1).plainText).toContain("Дописать черновик");
+  await capture("07-sent-note");
 });
 
 test("compact composer sends a visible note before its file finishes uploading", async ({

@@ -30,6 +30,8 @@ test("touch compact input grows to 15 lines and scrolls the rest", async ({ page
   const input = page.getByRole("textbox", { name: "Текст заметки" });
   const latestHeight = () => page.evaluate(() => (window as any).nativeMessages.findLast((message: any) => message.type === "height"));
   await expect.poll(latestHeight).toMatchObject({ compact: true, height: 44 });
+  await page.locator("#editor").click({ position: { x: 10, y: 5 } });
+  await expect(input).toBeFocused();
   await input.fill("Первая строка");
   await input.press("Enter");
   await page.keyboard.insertText("Вторая строка");

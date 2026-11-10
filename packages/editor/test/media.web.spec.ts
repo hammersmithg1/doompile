@@ -251,6 +251,7 @@ test("rich HTML copies media into another note without upload hints or missing a
     "report.pdf",
   );
   await expect(page.locator(".editor-feedback")).toHaveCount(0);
+  await page.getByRole("button", { name: "Отправить заметку", exact: true }).click();
   await expect
     .poll(
       () => app.writes.find((note) => note.id !== firstID)?.attachments.length,
@@ -285,7 +286,7 @@ test("pasting an embedded image saves a readable attachment and feed preview", a
   }, png);
   await expect.poll(() => editor.getByRole("img", { name: image.name }).evaluate((element: HTMLImageElement) => element.naturalWidth)).toBe(1);
   await expect.poll(() => page.evaluate(() => (window as any).uploadedImage)).toBe(`data:image/png;base64,${png}`);
-  await page.getByRole("button", { name: "Закрыть редактор" }).click();
+  await page.getByRole("button", { name: "Отправить заметку", exact: true }).click();
   await expect.poll(() => app.writes.at(-1)?.attachments).toEqual([image]);
   await expect(page.locator(".snippet-attachments").getByRole("img", { name: image.name })).toBeVisible();
 });
@@ -343,7 +344,7 @@ test("first-line toolbar stays clear of text in sidebar and expanded note", asyn
   await checkPlacement();
 });
 
-test("a source-only note autosaves and reopens with its card and metadata", async ({
+test("a source-only draft collapses and sends with its card and metadata", async ({
   page,
 }, info) => {
   const app = await setup(page);
@@ -362,12 +363,16 @@ test("a source-only note autosaves and reopens with its card and metadata", asyn
     .fill("Сохранённая цитата");
   await page.screenshot({ path: info.outputPath("source-dialog.png") });
   await dialog.getByRole("button", { name: "Добавить источник" }).click();
+  await page.getByRole("button", { name: "Свернуть редактор", exact: true }).click();
+  const quick = page.locator(".quick-composer");
+  await expect(quick).toBeVisible();
+  expect(app.writes).toHaveLength(0);
+  await quick.getByRole("button", { name: "Сохранить заметку", exact: true }).click();
   await expect
     .poll(() => app.writes.at(-1)?.source?.quote)
     .toBe("Сохранённая цитата");
   expect(app.notes).toHaveLength(1);
   expect(app.writes.at(-1).title).toBe("Источник");
-  await page.getByRole("button", { name: "Закрыть редактор" }).click();
   await expect(page.locator(".note-row .source-snippet")).toHaveCount(1);
   await page
     .locator(".note-main")
@@ -734,6 +739,11 @@ test("a quick attachment finishing upload after expansion stays in the expanded 
   await expect(
     page.locator(".note-editor-surface .attachment-card"),
   ).toContainText("pending.pdf");
+  await page.getByRole("button", { name: "Свернуть редактор", exact: true }).click();
+  const quick = page.locator(".quick-composer");
+  await expect(quick.locator(".draft-attachment")).toContainText("pending.pdf");
+  expect(app.writes).toHaveLength(0);
+  await quick.getByRole("button", { name: "Сохранить заметку", exact: true }).click();
   await expect.poll(() => app.writes.at(-1)?.attachments.length).toBe(1);
 });
 
@@ -789,7 +799,7 @@ test("expanded send saves text, a pending file and active voice in one note", as
   ).toBe(0);
   await page
     .locator(".note-editor-surface")
-    .getByRole("button", { name: "Сохранить заметку", exact: true })
+    .getByRole("button", { name: "Отправить заметку", exact: true })
     .click();
   await expect(page.locator(".note-main .attachment-audio")).toBeVisible();
   await expect.poll(() => app.writes.at(-1)?.attachments.length).toBe(2);

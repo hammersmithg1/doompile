@@ -13,6 +13,7 @@ import {
   useLayoutEffect,
   type CSSProperties,
 } from "react";
+import { flushSync } from "react-dom";
 import {
   ArrowUp,
   ArrowUpRight,
@@ -103,6 +104,15 @@ import { useMobileViewport } from "./mobile-viewport";
 import { useMobileSidebar } from "./mobile-sidebar";
 type Filter = "all" | "urgent" | "pinned" | "media" | "tag";
 const collapsedCaptureKey = "doompile-collapsed-capture";
+function compactComposerFrame(dock: HTMLDivElement | null) {
+  const card = dock?.querySelector(".quick-composer");
+  return card && { rect: card.getBoundingClientRect(), radius: getComputedStyle(card).borderRadius };
+}
+function composerClipPath(surface: HTMLDivElement, target: NonNullable<ReturnType<typeof compactComposerFrame>>) {
+  const area = surface.getBoundingClientRect();
+  const { rect, radius } = target;
+  return `inset(${rect.top - area.top}px ${area.right - rect.right}px ${area.bottom - rect.bottom}px ${rect.left - area.left}px round ${radius})`;
+}
 const localCaptureSaved = "Заметка сохранена на устройстве";
 const typeLabel = {
   note: "Заметка",
@@ -218,20 +228,20 @@ export default function Doompile({
   const [editorDocumentVersion, setEditorDocumentVersion] = useState(0);
   const [editorMode, setEditorMode] = useState<"compose" | "note">("compose");
   const composing = !!editor && editorMode === "compose";
+  const [closingComposer, setClosingComposer] = useState(false);
   latestEditor.current = editor;
   const latestComposer = useRef<Note | null>(null);
   latestComposer.current = composing ? editor : null;
   const [editTags, setEditTags] = useState("");
+  const latestEditTags = useRef(editTags);
+  latestEditTags.current = editTags;
   const [editorBusy, setEditorBusy] = useState(false);
   const [saveStatus, setSaveStatus] = useState("Сохранено");
   const autosave = useRef<Autosave<Note> | null>(null);
   if (!autosave.current)
     autosave.current = new Autosave(
       async (note) => {
-        if (
-          latestComposer.current?.id === note.id &&
-          (recordingSession.getSnapshot().draft?.target === "quick" || draftUploadsRef.current.length)
-        ) return;
+        if (latestComposer.current?.id === note.id) return;
         setSaveStatus("Сохраняем…");
         const stored = store
           .getSnapshot()
@@ -262,8 +272,9 @@ export default function Doompile({
   const [detailWidth, setDetailWidth] = useState(440);
   const [resizing, setResizing] = useState(false);
   const dock = useRef<HTMLDivElement>(null);
+  const expandedDock = useRef<HTMLDivElement>(null);
   const detailPane = useRef<HTMLElement>(null);
-  const composerOrigin = useRef<DOMRect | null>(null);
+  const composerOrigin = useRef<ReturnType<typeof compactComposerFrame>>(null);
   const closing = useRef(false);
   const input = useRef<HTMLTextAreaElement>(null);
   const search = useRef<HTMLInputElement>(null);
@@ -340,13 +351,10 @@ export default function Doompile({
       void (async () => {
         try {
           const current = latestEditor.current;
-          if (
-            current && latestComposer.current?.id === current.id &&
-            (recordingSession.getSnapshot().draft?.target === "quick" || draftUploadsRef.current.length)
-          ) {
+          if (current && latestComposer.current?.id === current.id) {
             if (!closing.current && !submitting.current) {
-              const stored = localStorage.getItem(collapsedCaptureKey);
-              keepCapture(stored ? JSON.parse(stored) : current);
+              keepCapture(noteForEditorSave(current, latestEditTags.current));
+              try { localStorage.removeItem("doompile-editor-draft"); } catch {}
             }
           } else if (current) await finishRecording(current.id);
           await autosave.current?.flush();
@@ -454,16 +462,17 @@ export default function Doompile({
     return () => window.removeEventListener("keydown", key, true);
   }, [editor, detailExpanded, noteMenu]);
   useLayoutEffect(() => {
-    if (!composing || !dock.current) return;
+    const surface = expandedDock.current;
+    if (!composing || !surface) return;
     const origin = composerOrigin.current;
     if (
       origin &&
       !window.matchMedia("(prefers-reduced-motion: reduce)").matches
     ) {
-      dock.current.animate(
+      surface.animate(
         [
           {
-            clipPath: `inset(${origin.top}px ${window.innerWidth - origin.right}px ${window.innerHeight - origin.bottom}px ${origin.left}px round 16px)`,
+            clipPath: composerClipPath(surface, origin),
           },
           { clipPath: "inset(0px 0px 0px 0px round 0px)" },
         ],
@@ -471,7 +480,7 @@ export default function Doompile({
       );
     }
     const frame = requestAnimationFrame(() =>
-      dock.current
+      surface
         ?.querySelector<HTMLElement>('[role="textbox"]')
         ?.focus({ preventScroll: true }),
     );
@@ -509,8 +518,6 @@ export default function Doompile({
   async function closeEditor() {
     if (closing.current || submitting.current || editorBusy) return false;
     closing.current = true;
-    const keepDraft = composing &&
-      (recordingSession.getSnapshot().draft?.target === "quick" || draftUploadsRef.current.length > 0);
     try {
       if (
         editor &&
@@ -520,7 +527,7 @@ export default function Doompile({
         await finishRecording(editor.id);
       }
       const current = latestEditor.current;
-      if (current && !keepDraft) {
+      if (current && !composing) {
         const note = noteForEditorSave(current, editTags);
         const stored = store
           .getSnapshot()
@@ -533,7 +540,7 @@ export default function Doompile({
           autosave.current?.schedule(note);
         }
       }
-      await autosave.current?.flush();
+      if (!composing) await autosave.current?.flush();
     } catch (error) {
       closing.current = false;
       notify(
@@ -543,13 +550,15 @@ export default function Doompile({
       );
       return false;
     }
+    const keepCurrentCapture = () => {
+      const current = latestComposer.current;
+      if (current) keepCapture(noteForEditorSave(current, latestEditTags.current));
+    };
     const finish = () => {
       closing.current = false;
       if (editorMode === "compose") {
-        writeNoteLocation(null);
-        const current = latestComposer.current;
-        if (keepDraft && current) keepCapture(noteForEditorSave(current, editTags));
-        else clearCapture();
+        writeNoteLocation(null, true);
+        setClosingComposer(false);
       } else {
         setSelected(null);
         setDetailExpanded(false);
@@ -579,26 +588,35 @@ export default function Doompile({
       finish();
       return true;
     }
-    const origin = composerOrigin.current;
-    if (
-      !origin ||
-      !dock.current ||
-      window.matchMedia("(prefers-reduced-motion: reduce)").matches
-    ) {
+    const surface = expandedDock.current;
+    if (!surface || window.matchMedia("(prefers-reduced-motion: reduce)").matches) {
+      keepCurrentCapture();
       finish();
       return true;
     }
-    try {
-      await dock.current.animate(
-        [
-          { clipPath: "inset(0px round 0px)" },
-          {
-            clipPath: `inset(${origin.top}px ${window.innerWidth - origin.right}px ${window.innerHeight - origin.bottom}px ${origin.left}px round 16px)`,
-          },
-        ],
-        { duration: 240, easing: "cubic-bezier(.4,0,.2,1)" },
-      ).finished;
-    } catch {}
+    flushSync(() => {
+      keepCurrentCapture();
+      setClosingComposer(true);
+    });
+    const target = compactComposerFrame(dock.current);
+    if (target) {
+      const from = getComputedStyle(surface).clipPath;
+      surface.getAnimations().forEach((animation) => animation.cancel());
+      try {
+        await surface.animate(
+          [
+            { clipPath: from === "none" ? "inset(0px round 0px)" : from, opacity: 1 },
+            { clipPath: composerClipPath(surface, target), opacity: 0 },
+          ],
+          { duration: 240, easing: "cubic-bezier(.4,0,.2,1)", fill: "forwards" },
+        ).finished;
+      } catch {}
+    }
+    if (latestComposer.current?.id !== editor?.id) {
+      closing.current = false;
+      setClosingComposer(false);
+      return false;
+    }
     finish();
     return true;
   }
@@ -847,21 +865,19 @@ export default function Doompile({
     )
       return;
     const note = noteForEditorSave(editor, editTags);
-    const voiceCapture = composing && recording.draft?.target === "quick";
     try {
-      localStorage.setItem(
-        editorMode === "compose"
-          ? "doompile-editor-draft"
-          : `doompile-note-draft-${editor.id}`,
-        JSON.stringify({ note, tags: editTags }),
-      );
-      if (voiceCapture)
+      if (composing) {
         localStorage.setItem(collapsedCaptureKey, JSON.stringify(note));
+      } else {
+        localStorage.setItem(
+          `doompile-note-draft-${editor.id}`,
+          JSON.stringify({ note, tags: editTags }),
+        );
+      }
     } catch {}
     if (
       !editorBusy &&
-      !voiceCapture &&
-      !(editorMode === "compose" && draftUploadsRef.current.length) &&
+      !composing &&
       !submitting.current &&
       (shouldPersistNote(
         note,
@@ -872,7 +888,7 @@ export default function Doompile({
       setSaveStatus("Сохраняем…");
       autosave.current?.schedule(note);
     }
-  }, [editor, editTags, editorBusy, editorMode, recording.draft?.target, draftUploads.length]);
+  }, [editor, editTags, editorBusy, composing, editorMode, recording.draft?.target]);
   useEffect(() => {
     if (recording.error && !recording.draft) notify(recording.error);
   }, [recording.error]);
@@ -1046,6 +1062,10 @@ export default function Doompile({
       ...(filter === "tag" ? { tags: [selectedTag] } : {}),
     });
   }
+  const quickHasContent = Boolean(
+    text.trim() || draftAttachments.length || draftUploads.length ||
+      (collapsedCapture && shouldPersistNote(compactNote())),
+  );
   function notify(message: string, restore: typeof undo = null) {
     setUndo(restore);
     setToast(message);
@@ -1113,7 +1133,8 @@ export default function Doompile({
     const files = draftUploadsRef.current;
     if (ownsRecording && ["starting", "stopping", "uploading"].includes(recordingState.status)) return;
     if (
-      (!expandedDraft && !text.trim() && !draftAttachments.length && !files.length && !ownsRecording) ||
+      (!ownsRecording && !files.length && !(expandedDraft ? shouldPersistNote(expandedDraft) : quickHasContent)) ||
+      (expanded && !expandedDraft) ||
       submitting.current || closing.current
     ) return;
     submitting.current = true;
@@ -1168,7 +1189,7 @@ export default function Doompile({
       clearCapture();
       if (expandedDraft) {
         setEditor(null);
-        writeNoteLocation(null);
+        writeNoteLocation(null, true);
         try { localStorage.removeItem("doompile-editor-draft"); } catch {}
       }
       setDemo(false);
@@ -1195,10 +1216,7 @@ export default function Doompile({
     if (editorMode === "note") void autosave.current?.flush().catch(() => {});
     setSelected(null);
     setEditorMode("compose");
-    const bounds = dock.current?.getBoundingClientRect();
-    composerOrigin.current = bounds?.height
-      ? bounds
-      : new DOMRect(14, window.innerHeight - 64, window.innerWidth - 28, 52);
+    composerOrigin.current = compactComposerFrame(dock.current);
     setDetailExpanded(false);
     if (collapsedCapture) {
       const draft = compactNote();
@@ -1442,8 +1460,7 @@ export default function Doompile({
         .map((tag) => tag.trim())
         .filter(Boolean)}
       availableTags={allTags}
-      status={composing && (draftUploads.length || recording.draft?.target === "quick")
-        ? "Черновик" : saveStatus}
+      status={composing ? "Черновик" : saveStatus}
       busy={editorBusy}
       captureAttachments={composing && draftUploads.length ? (
         <div className="quick-attachments editor-capture-attachments">
@@ -1464,8 +1481,8 @@ export default function Doompile({
       onClose={() => {
         void closeEditor();
       }}
-      onSendCapture={composing && (draftUploads.length || recording.draft?.target === "quick")
-        ? () => void send(true) : undefined}
+      onSendCapture={composing ? () => void send(true) : undefined}
+      canSendCapture={shouldPersistNote(editor) || draftUploads.length > 0 || recording.draft?.target === "quick"}
       sendingCapture={composing && sending}
       onExpand={() => setDetailExpanded((value) => !value)}
       onDelete={() => {
@@ -2096,14 +2113,8 @@ export default function Doompile({
             </div>
           )}
         </div>
-        <div
-          ref={dock}
-          className={`composer-dock ${composing ? "composer-expanded" : ""}`}
-        >
-          {composing ? (
-            editorSurface
-          ) : (
-            <>
+        {(!composing || closingComposer) && (
+          <div ref={dock} className="composer-dock" inert={composing}>
               <QuickComposer
                 recording={recording}
                 editorId={editor?.id}
@@ -2113,6 +2124,7 @@ export default function Doompile({
                 removeAttachment={removeDraftAttachment}
                 retryAttachment={retryDraftUpload}
                 text={text}
+                hasContent={quickHasContent}
                 setText={setText}
                 sending={sending}
                 input={input}
@@ -2123,9 +2135,13 @@ export default function Doompile({
                 attachQuick={attachQuick}
                 setSelected={setSelected}
               />
-            </>
-          )}
-        </div>
+          </div>
+        )}
+        {composing && (
+          <div ref={expandedDock} className="composer-dock composer-expanded">
+            {editorSurface}
+          </div>
+        )}
       </main>
       {activeNote && (
         <aside

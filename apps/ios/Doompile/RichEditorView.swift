@@ -131,7 +131,7 @@ struct RichEditorView: UIViewRepresentable {
         webView.backgroundColor = .clear
         webView.scrollView.backgroundColor = .clear
         webView.scrollView.isScrollEnabled = true
-        webView.scrollView.keyboardDismissMode = .interactive
+        webView.scrollView.keyboardDismissMode = captureCompact ? .none : .interactive
         webView.scrollView.alwaysBounceVertical = !captureCompact
         webView.scrollView.showsHorizontalScrollIndicator = false
         webView.scrollView.contentInsetAdjustmentBehavior = .never
@@ -230,7 +230,7 @@ struct RichEditorView: UIViewRepresentable {
                 applyCaptureHeightLimit()
                 webView.evaluateJavaScript("window.doompileEditor.setDocument(\(json)); window.doompileEditor.setAttachments?.(\(attachmentsJSON)); window.doompileEditor.setNoteURL?.(\(noteURLJSON)); window.doompileEditor.setNotes?.(\(referencesJSON)); window.doompileEditor.setTheme?.('\(theme)'); window.doompileEditor.\(presentation)\(preferences)") { [weak self, weak webView] _, error in
                     guard error == nil else { if let error { Telemetry.shared.failure(.editorFailed, error) }; return }
-                    guard let self, let webView else { return }
+                    guard let self, let webView, parent.bridge.webView === webView else { return }
                     appliedTheme = theme
                     parent.bridge.markReady(webView)
                     applyCaptureHeightLimit()

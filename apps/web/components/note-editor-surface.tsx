@@ -43,6 +43,7 @@ export default function NoteEditorSurface({
   expanded,
   onClose,
   onSendCapture,
+  canSendCapture,
   sendingCapture = false,
   captureAttachments,
   onCopyLink,
@@ -67,6 +68,7 @@ export default function NoteEditorSurface({
   expanded: boolean;
   onClose: () => void;
   onSendCapture?: () => void;
+  canSendCapture?: boolean;
   sendingCapture?: boolean;
   captureAttachments?: ReactNode;
   onCopyLink: () => void;
@@ -269,9 +271,11 @@ export default function NoteEditorSurface({
               <button
                 type="button"
                 className="send-button"
-                aria-label="Сохранить заметку"
+                aria-label="Отправить заметку"
+                title="Отправить заметку"
                 disabled={
-                  busy || sendingCapture || recording.status === "starting"
+                  !canSendCapture || busy || sendingCapture ||
+                  (ownsRecording && ["starting", "stopping", "uploading"].includes(recording.status))
                 }
                 onClick={onSendCapture}
               >

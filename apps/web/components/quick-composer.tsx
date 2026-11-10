@@ -1,11 +1,12 @@
 "use client";
 
 import { brandCopy, uiCopy } from "../../../packages/design/copy";
-import type {
-  Dispatch,
-  SetStateAction,
-  RefObject,
-  ClipboardEvent,
+import {
+  useLayoutEffect,
+  type Dispatch,
+  type SetStateAction,
+  type RefObject,
+  type ClipboardEvent,
 } from "react";
 import { X, Paperclip, Maximize2 } from "../../../packages/design/ui-icons";
 import type { Attachment } from "@doompile/core";
@@ -13,6 +14,15 @@ import { recordingSession, type RecordingState } from "@/lib/client/recording";
 import { RecordingPreview } from "../../../packages/editor/src/media-preview";
 import CaptureAttachment from "./capture-attachment";
 import VoiceCapture from "./voice-capture";
+
+function resizeComposerInput(input: HTMLTextAreaElement) {
+  const scrollTop = input.scrollTop;
+  input.style.overflowY = "hidden";
+  input.style.height = "0px";
+  input.style.height = `${input.scrollHeight}px`;
+  input.style.overflowY = "";
+  input.scrollTop = scrollTop;
+}
 
 export default function QuickComposer({
   recording,
@@ -23,6 +33,7 @@ export default function QuickComposer({
   removeAttachment,
   retryAttachment,
   text,
+  hasContent,
   setText,
   sending,
   input,
@@ -41,6 +52,7 @@ export default function QuickComposer({
   removeAttachment: (id: string) => void;
   retryAttachment: (id: string) => void;
   text: string;
+  hasContent: boolean;
   setText: Dispatch<SetStateAction<string>>;
   sending: boolean;
   input: RefObject<HTMLTextAreaElement | null>;
@@ -51,6 +63,23 @@ export default function QuickComposer({
   attachQuick: (files: File[]) => void;
   setSelected: (id: string) => void;
 }) {
+  useLayoutEffect(() => {
+    if (input.current) resizeComposerInput(input.current);
+  }, [input, text]);
+  useLayoutEffect(() => {
+    const textarea = input.current;
+    if (!textarea) return;
+    let width = textarea.getBoundingClientRect().width;
+    const observer = new ResizeObserver(() => {
+      const nextWidth = textarea.getBoundingClientRect().width;
+      if (nextWidth === width) return;
+      width = nextWidth;
+      resizeComposerInput(textarea);
+    });
+    observer.observe(textarea);
+    return () => observer.disconnect();
+  }, [input]);
+
   return (
     <>
       <form
@@ -181,7 +210,7 @@ export default function QuickComposer({
             </button>
             <VoiceCapture
               recording={recording}
-              hasContent={Boolean(text.trim() || attachments.length)}
+              hasContent={hasContent}
               sending={sending}
               send={send}
             />

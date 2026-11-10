@@ -55,7 +55,7 @@ async function openNote(page: Page) {
   ).toBeVisible();
 }
 
-test("new composer has only close in the header, with folders below it", async ({
+test("new composer has collapse and send in the header, with folders below it", async ({
   page,
 }) => {
   await setup(page);
@@ -63,11 +63,12 @@ test("new composer has only close in the header, with folders below it", async (
     .getByRole("button", { name: "Развернуть редактор", exact: true })
     .click();
   const editor = page.getByRole("region", { name: "Редактор заметки" });
-  await expect(editor.locator("header button:visible")).toHaveCount(1);
+  await expect(editor.locator("header button:visible")).toHaveCount(2);
   await expect(editor.locator("header")).not.toContainText("ЗАМЕТКА");
   await expect(
-    editor.getByRole("button", { name: "Закрыть редактор" }),
+    editor.getByRole("button", { name: "Свернуть редактор" }),
   ).toBeVisible();
+  await expect(editor.getByRole("button", { name: "Отправить заметку" })).toBeDisabled();
   const header = (await editor.locator("header").boundingBox())!,
     tags = (await editor.locator(".note-tags-editor").boundingBox())!;
   expect(tags.y).toBeGreaterThanOrEqual(header.y + header.height);
@@ -243,7 +244,7 @@ test("a mention in the new composer opens the same editable note surface after c
     page.getByRole("button", { name: "Развернуть заметку", exact: true }),
   ).toBeVisible();
 });
-test("new composer keeps its one-button header after autosave and renders tags like the note surface", async ({
+test("new composer keeps the header and tags while collapsing a draft", async ({
   page,
 }, testInfo) => {
   const { writes } = await setup(page);
@@ -252,10 +253,7 @@ test("new composer keeps its one-button header after autosave and renders tags l
     .click();
   await page.getByRole("textbox", { name: "Текст заметки" }).click();
   await page.keyboard.type("Новая мысль");
-  await expect
-    .poll(() => writes.some((note) => note.plainText === "Новая мысль"))
-    .toBe(true);
-  await expect(page.locator(".note-editor-header button:visible")).toHaveCount(1);
+  await expect(page.locator(".note-editor-header button:visible")).toHaveCount(2);
   await page.getByRole("button", { name: "Добавить тег", exact: true }).click();
   await page.getByRole("combobox").fill("Идеи");
   await page.keyboard.press("Enter");
@@ -267,6 +265,13 @@ test("new composer keeps its one-button header after autosave and renders tags l
     document.documentElement.dataset.theme = "dark";
   });
   await page.screenshot({ path: testInfo.outputPath("new-editor-dark.png") });
+  await page.getByRole("button", { name: "Свернуть редактор", exact: true }).click();
+  await expect(page.getByRole("textbox", { name: "Быстрая заметка" })).toHaveValue("Новая мысль");
+  expect(writes).toHaveLength(0);
+  await page.getByRole("button", { name: "Развернуть редактор", exact: true }).click();
+  await expect(page.locator(".note-tags-editor")).toContainText("Идеи");
+  await page.getByRole("button", { name: "Отправить заметку", exact: true }).click();
+  await expect.poll(() => writes.at(-1)?.tags).toEqual(["Идеи"]);
 });
 
 test("file insertion retains metadata and deleting the block does not recreate it on reopening", async ({

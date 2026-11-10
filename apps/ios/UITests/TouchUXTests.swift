@@ -459,6 +459,28 @@ final class TouchUXTests: XCTestCase {
         XCTAssertEqual(input.frame.height, atLimit, accuracy: 1, "More text scrolls inside the input")
         XCTAssertTrue(send.isHittable)
         screenshot("composer-fifteen-line-limit-scrolled")
+
+        app.buttons["expand-editor"].tap()
+        let collapse = app.buttons["close-editor"]
+        XCTAssertTrue(collapse.waitForExistence(timeout: 5))
+        collapse.tap()
+        XCTAssertTrue(collapse.waitForNonExistence(timeout: 5))
+        let rich = app.webViews.firstMatch
+        let reachedCap = expectation(for: NSPredicate { _, _ in
+            rich.exists && abs(rich.frame.height - 352) <= 1
+        }, evaluatedWith: rich)
+        wait(for: [reachedCap], timeout: 8)
+        XCTAssertTrue((rich.textViews.firstMatch.value as? String ?? "").contains("Line 18"))
+        screenshot("composer-rich-fifteen-line-limit")
+
+        rich.coordinate(withNormalizedOffset: CGVector(dx: 0.45, dy: 0.2)).tap()
+        XCTAssertTrue(keyboard.waitForExistence(timeout: 5))
+        let scrollStart = rich.coordinate(withNormalizedOffset: CGVector(dx: 0.45, dy: 0.82))
+        let scrollEnd = rich.coordinate(withNormalizedOffset: CGVector(dx: 0.45, dy: 0.24))
+        scrollStart.press(forDuration: 0.05, thenDragTo: scrollEnd)
+        XCTAssertTrue(keyboard.exists, "Scrolling inside the rich draft keeps the keyboard open")
+        XCTAssertTrue(send.isHittable)
+        screenshot("composer-rich-limit-scrolled-with-keyboard")
     }
 
     func testExpandedQuickDraftSurvivesCollapseWithoutSending() {

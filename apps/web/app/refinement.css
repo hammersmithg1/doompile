@@ -363,10 +363,6 @@ html[data-theme="dark"] .urgent-stack > .urgent-card {
   box-shadow: none;
   color: #25251f;
 }
-.send-button:disabled {
-  background: #eff5c2;
-  color: #8e9277;
-}
 .composer-footnote {
   display: none;
 }
@@ -536,13 +532,6 @@ html[data-theme="dark"] .urgent-stack > .urgent-card {
 }
 .expanded-editor .editor-content .tiptap {
   min-height: 45vh;
-}
-.composing > .sidebar,
-.composing > .detail-pane {
-  visibility: hidden;
-}
-.composing .main-scroll {
-  visibility: hidden;
 }
 .expanded-editor .editor-title {
   font-size: 32px;
@@ -1120,12 +1109,20 @@ html[data-theme="dark"] .note-preview-more {
 }
 .composer-input-row {
   display: flex;
-  align-items: center;
+  align-items: flex-end;
   gap: 5px;
   min-width: 0;
   width: 100%;
 }
 .quick-composer textarea {
+  --composer-input-padding: 8px;
+  height: 42px;
+  min-height: 42px;
+  max-height: calc(15lh + 2 * var(--composer-input-padding));
+  padding-block: var(--composer-input-padding);
+  overflow-y: auto;
+}
+.quick-composer .composer-tools {
   height: 42px;
 }
 .quick-composer .attachment-trigger,
@@ -1408,6 +1405,10 @@ html[data-theme="dark"] .note-preview-more {
   align-items: center;
   gap: 4px;
   flex-shrink: 0;
+}
+.note-editor-actions .send-button:disabled {
+  background: var(--input);
+  color: var(--muted);
 }
 .editor-action {
   display: inline-flex;
