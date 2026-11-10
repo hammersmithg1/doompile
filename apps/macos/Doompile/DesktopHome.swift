@@ -17,6 +17,7 @@ struct DesktopHome: View {
     @State private var quickFocused = true
     @State private var quickInputHeight = MacQuickInput.height
     @State private var quickEditorHeight = MacQuickInput.height
+    @State private var quickEditorReady = false
     @State private var quickFiles = false
     @State private var quickDrawing = false
     @State private var quickLink = false
@@ -31,6 +32,7 @@ struct DesktopHome: View {
     @FocusState private var searchFocused: Bool
 
     private var motion: Animation? { reduceMotion ? nil : .easeInOut(duration: 0.18) }
+    private var quickEditorLoading: Bool { quick.richMounted && !quickEditorReady }
     private var filtered: [Note] {
         library.notes.filter { note in
             let matches = filter == "all" || (filter == "urgent" && note.urgent) || (filter == "pinned" && note.pinned) || (filter == "media" && (!note.attachments.isEmpty || ["audio", "image", "video", "file"].contains(note.kind))) || (filter.hasPrefix("tag:") && note.tags.contains(String(filter.dropFirst(4))))
@@ -215,7 +217,7 @@ struct DesktopHome: View {
                 MacNoteTags(selected: $quick.note.tags, available: library.tags)
             }
             if let error = quick.error { Text(error).font(.system(size: 11)).foregroundStyle(MacPalette.orange).textSelection(.enabled) }
-            if quickExpanded && quick.startingVoice {
+            if quickExpanded && quick.startingVoice && !quickEditorLoading {
                 MacRecordingSnippet(starting: quick.startingVoice, seconds: quick.voice.seconds, onStop: quick.stopRecording)
             }
             composerInput
@@ -224,7 +226,7 @@ struct DesktopHome: View {
                     Spacer()
                     attachButton
                     MacComposerButton(icon: "mic", label: "Записать голосовую заметку", disabled: quick.startingVoice || quick.voice.recording || quick.busy) { Task { await quick.startRecording() } }
-                    MacComposerButton(icon: "arrow.up", label: "Отправить заметку", send: true, disabled: quick.startingVoice || quick.busy || (!quick.voice.recording && !quick.hasContent), identifier: "quick-composer-send", action: saveQuick)
+                    MacComposerButton(icon: "arrow.up", label: "Отправить заметку", send: true, disabled: quickEditorLoading || quick.startingVoice || quick.busy || (!quick.voice.recording && !quick.hasContent), identifier: "quick-composer-send", action: saveQuick)
                 }.padding(.vertical, 5)
             }
         }.padding(.horizontal, 14).padding(.top, 8).padding(.bottom, 12)
@@ -235,7 +237,7 @@ struct DesktopHome: View {
     }
     private var composerInput: some View {
         VStack(spacing: 6) {
-            if !quickExpanded && (quick.startingVoice || quick.voice.recording || !quick.attachments.isEmpty) {
+            if (!quickExpanded || quickEditorLoading) && (quick.startingVoice || quick.voice.recording || !quick.attachments.isEmpty) {
                 MacComposerAttachmentStrip(attachments: quick.attachments, starting: quick.startingVoice, recording: quick.voice.recording,
                                            seconds: quick.voice.seconds, onRemove: quick.removeFile, onStop: quick.stopRecording)
             }
@@ -248,7 +250,7 @@ struct DesktopHome: View {
                 }
                 if !quickExpanded {
                     MacComposerButton(icon: "arrow.up.left.and.arrow.down.right", label: "Развернуть редактор", disabled: quick.busy, identifier: "quick-composer-expand") { compose() }
-                    MacComposerPrimaryButton(canSend: quick.voice.recording || quick.hasContent, starting: quick.startingVoice, busy: quick.busy,
+                    MacComposerPrimaryButton(canSend: quick.voice.recording || quick.hasContent, starting: quick.startingVoice, busy: quick.busy || quickEditorLoading,
                                              onStart: { Task { await quick.startRecording() } }, onSend: saveQuick,
                                              onHoldRelease: releaseVoiceHold, onVoiceCancel: cancelVoicePress)
                 }
@@ -277,7 +279,14 @@ struct DesktopHome: View {
         .id(quick.note.id)
         .accessibilityIdentifier("quick-composer-input")
         .frame(maxWidth: .infinity, minHeight: quickExpanded ? 180 : quickEditorHeight, maxHeight: quickExpanded ? .infinity : quickEditorHeight)
-        .onReceive(quick.bridge.$ready) { ready in if ready { quick.editorReady() } }
+        .opacity(quickEditorReady ? 1 : 0)
+        .overlay {
+            if quickEditorLoading { MacQuickEditorPreview(text: quick.note.plainText, compact: !quickExpanded) }
+        }
+        .onReceive(quick.bridge.$ready) { ready in
+            quickEditorReady = ready
+            if ready { quick.editorReady() }
+        }
     }
     private var attachButton: some View {
         MacComposerButton(icon: "paperclip", label: "Прикрепить файл", disabled: quick.busy, identifier: "quick-composer-attach") { quickFiles = true }
@@ -350,7 +359,10 @@ struct DesktopHome: View {
     }
     private func setComposerExpanded(_ expanded: Bool) {
         guard !quick.busy else { return }
-        if expanded { quick.mountEditor() }
+        if expanded && !quick.richMounted {
+            quickEditorHeight = quickInputHeight
+            quick.mountEditor()
+        }
         withAnimation(motion) { quickExpanded = expanded }
         if expanded || !noteExpanded { quick.bridge.focus() }
     }
@@ -361,6 +373,7 @@ struct DesktopHome: View {
             if await quick.submit(in: library, tag: tag) {
                 quickInputHeight = MacQuickInput.height
                 quickEditorHeight = MacQuickInput.height
+                quickEditorReady = false
                 withAnimation(motion) { quickExpanded = false }
                 quickFocused = !noteExpanded
             }

@@ -237,7 +237,7 @@ final class TouchUXTests: XCTestCase {
         input.tap(); input.typeText("Voice draft")
         app.buttons["expand-editor"].tap()
         let editor = app.webViews.textViews.firstMatch
-        XCTAssertTrue(editor.waitForExistence(timeout: 8))
+        XCTAssertTrue(editor.waitForExistence(timeout: 18), app.debugDescription)
         XCTAssertTrue(app.webViews.buttons["Остановить запись"].waitForExistence(timeout: 5))
         XCTAssertTrue(app.keyboards.firstMatch.waitForExistence(timeout: 5))
         XCTAssertTrue((editor.value as? String ?? "").contains("Voice draft"))

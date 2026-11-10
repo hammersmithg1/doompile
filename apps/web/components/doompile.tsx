@@ -635,6 +635,7 @@ export default function Doompile({
         await surface.animate(
           [
             { clipPath: from === "none" ? "inset(0px round 0px)" : from, opacity: 1 },
+            { opacity: 1, offset: 0.45 },
             { opacity: 0, offset: 0.66 },
             { clipPath: composerClipPath(surface, target), opacity: 0 },
           ],

@@ -125,7 +125,12 @@ import UniformTypeIdentifiers
     func resizeForContent() { if !expanded { resize(to: NSSize(width: panel?.frame.width ?? 680, height: compactHeight)) } }
     func setExpanded(_ value: Bool) {
         guard !busy else { return }
-        if value && !richMounted { if !voice.recording, !MacPreview.hasContent(note) { note.createdAt = Note.now() }; note.body = note.editorDocument; richMounted = true }
+        if value && !richMounted {
+            if !voice.recording, !MacPreview.hasContent(note) { note.createdAt = Note.now() }
+            note.body = note.editorDocument
+            compactEditorHeight = nativeInputHeight
+            richMounted = true
+        }
         expanded = value
         let screen = panel?.screen?.visibleFrame ?? NSScreen.main?.visibleFrame ?? .zero
         resize(to: value ? NSSize(width: min(780, screen.width - 48), height: min(620, screen.height - 90)) : NSSize(width: min(680, screen.width - 40), height: compactHeight))
@@ -313,7 +318,8 @@ struct QuickCaptureRoot: View {
     @ObservedObject var capture: QuickCaptureController
     @ObservedObject var bridge: MacRichEditorBridge
     @ObservedObject var voice: MacVoiceRecorder
-    private var sendDisabled: Bool { capture.busy || capture.startingVoice || (!voice.recording && !capture.hasContent) }
+    private var editorLoading: Bool { capture.richMounted && !bridge.ready }
+    private var sendDisabled: Bool { editorLoading || capture.busy || capture.startingVoice || (!voice.recording && !capture.hasContent) }
     var body: some View {
         panel
             .fileImporter(isPresented: $capture.showFiles, allowedContentTypes: [.item], allowsMultipleSelection: true, onCompletion: importFiles)
@@ -342,7 +348,7 @@ struct QuickCaptureRoot: View {
                 header
                 MacNoteTags(selected: $capture.note.tags, available: library.tags)
             }
-            if capture.expanded && capture.startingVoice {
+            if capture.expanded && capture.startingVoice && !editorLoading {
                 MacRecordingSnippet(starting: capture.startingVoice, seconds: voice.seconds) { capture.action("stopVoice") }
             }
             composerInput
@@ -362,7 +368,7 @@ struct QuickCaptureRoot: View {
     }
     private var composerInput: some View {
         VStack(spacing: 6) {
-            if capture.showsCompactAttachments {
+            if capture.showsCompactAttachments || (capture.expanded && editorLoading && (capture.startingVoice || voice.recording || !capture.compactAttachments.isEmpty)) {
                 MacComposerAttachmentStrip(attachments: capture.compactAttachments, starting: capture.startingVoice, recording: voice.recording,
                                            seconds: voice.seconds, onRemove: capture.removeCompactAttachment) { capture.action("stopVoice") }
             }
@@ -374,7 +380,7 @@ struct QuickCaptureRoot: View {
                 else { nativeInput }
                 if !capture.expanded {
                     MacComposerButton(icon: "arrow.up.left.and.arrow.down.right", label: "Развернуть редактор", disabled: capture.busy, identifier: "quick-composer-expand") { capture.setExpanded(true) }
-                    MacComposerPrimaryButton(canSend: voice.recording || capture.hasContent, starting: capture.startingVoice, busy: capture.busy,
+                    MacComposerPrimaryButton(canSend: voice.recording || capture.hasContent, starting: capture.startingVoice, busy: capture.busy || editorLoading,
                                              onStart: { capture.action("voice") }, onSend: submit,
                                              onHoldRelease: releaseVoiceHold, onVoiceCancel: cancelVoicePress)
                 }
@@ -388,6 +394,10 @@ struct QuickCaptureRoot: View {
         .id(capture.note.id)
         .accessibilityIdentifier("quick-composer-input")
         .frame(maxWidth: .infinity, minHeight: capture.expanded ? 240 : capture.compactEditorHeight, maxHeight: capture.expanded ? .infinity : capture.compactEditorHeight)
+        .opacity(bridge.ready ? 1 : 0)
+        .overlay {
+            if editorLoading { MacQuickEditorPreview(text: capture.note.plainText, compact: !capture.expanded) }
+        }
     }
     private var nativeInput: some View {
         MacQuickInput(text: Binding(get: { capture.note.plainText }, set: capture.updateText), focused: $capture.focused, contentHeight: $capture.nativeInputHeight, onSubmit: submit, onPasteImage: pasteQuickImage)

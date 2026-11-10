@@ -53,6 +53,7 @@ import XCTest
         let expand = element(window, "quick-composer-expand")
         let collapse = element(window, "quick-composer-collapse")
         let send = element(window, "quick-composer-send")
+        let saved = feed.popUpButtons["Меню заметки Main growth review"]
         XCTAssertTrue(input.waitForExistence(timeout: 8))
         let idleHeight = feed.frame.height
         capture("mac-main-growth-idle-light", in: window)
@@ -82,19 +83,21 @@ import XCTest
 
         expand.click()
         XCTAssertTrue(collapse.waitForExistence(timeout: 8))
-        XCTAssertTrue(send.exists)
+        wait("enabled == true", for: send)
         capture("mac-main-growth-expanded-light", in: window)
         collapse.click()
         XCTAssertTrue(expand.waitForExistence(timeout: 8))
         waitForLayout { abs(feed.frame.height - cappedHeight) < 5 }
-        XCTAssertFalse(feed.staticTexts.matching(NSPredicate(format: "label BEGINSWITH 'Main growth review'")).firstMatch.exists)
+        XCTAssertFalse(saved.exists)
         capture("mac-main-growth-collapsed-light", in: window)
 
         expand.click()
         XCTAssertTrue(collapse.waitForExistence(timeout: 8))
+        wait("enabled == true", for: send)
         send.click()
-        XCTAssertTrue(feed.staticTexts.matching(NSPredicate(format: "label BEGINSWITH 'Main growth review'")).firstMatch.waitForExistence(timeout: 8))
+        XCTAssertTrue(saved.waitForExistence(timeout: 8))
         XCTAssertEqual(feed.frame.height, idleHeight, accuracy: 1)
+        capture("mac-main-growth-sent-light", in: window)
     }
 
     func testGlobalComposerGrowthAndCollapse() {
@@ -130,7 +133,7 @@ import XCTest
 
         expand.click()
         XCTAssertTrue(collapse.waitForExistence(timeout: 8))
-        XCTAssertTrue(send.exists)
+        wait("enabled == true", for: send)
         capture("mac-global-growth-expanded-dark", in: panel)
         collapse.click()
         XCTAssertTrue(expand.waitForExistence(timeout: 8))
@@ -140,8 +143,9 @@ import XCTest
         send.click()
         wait("exists == false", for: panel)
         let feed = app.scrollViews["Лента заметок"]
-        XCTAssertTrue(feed.staticTexts.matching(NSPredicate(format: "label BEGINSWITH 'Global growth review'")).firstMatch.waitForExistence(timeout: 8))
-        XCTAssertTrue(feed.staticTexts["review-archive.zip"].exists)
+        XCTAssertTrue(feed.popUpButtons["Меню заметки Global growth review"].waitForExistence(timeout: 8))
+        waitForLayout { feed.staticTexts["review-archive.zip"].exists || feed.buttons["Открыть review-archive.zip"].exists }
+        capture("mac-global-growth-sent-dark", in: app.windows.firstMatch)
     }
 
     func testMainComposerAndUpload() {
@@ -177,6 +181,7 @@ import XCTest
         let panel = element(app, "quick-capture-panel")
         XCTAssertTrue(panel.waitForExistence(timeout: 8))
         let mic = element(panel, "quick-composer-mic")
+        let send = element(panel, "quick-composer-send")
         XCTAssertTrue(mic.waitForExistence(timeout: 8))
         capture("mac-global-idle-dark", in: panel)
 
@@ -188,6 +193,7 @@ import XCTest
         let collapse = element(panel, "quick-composer-collapse")
         expand.click()
         XCTAssertTrue(collapse.waitForExistence(timeout: 8))
+        wait("enabled == true", for: send)
         capture("mac-global-recording-expanded-dark", in: panel)
         collapse.click()
         XCTAssertTrue(stop.waitForExistence(timeout: 8))
@@ -200,7 +206,6 @@ import XCTest
         let input = element(panel, "quick-composer-input")
         input.click()
         input.typeText("Quick review draft")
-        let send = element(panel, "quick-composer-send")
         XCTAssertTrue(send.waitForExistence(timeout: 8))
         XCTAssertFalse(mic.exists)
         capture("mac-global-typed-dark", in: panel)

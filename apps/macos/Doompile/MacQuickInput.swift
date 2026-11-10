@@ -4,13 +4,14 @@ import SwiftUI
 /// Native first keystroke; no web view or network needs to finish loading.
 struct MacQuickInput: NSViewRepresentable {
     static let height: CGFloat = 39
+    static let prompt = "Добавь что-нибудь в кучу…"
     private static let lineHeight: CGFloat = 22
     static let maximumHeight = height + 14 * lineHeight
 
     @Binding var text: String
     @Binding var focused: Bool
     @Binding var contentHeight: CGFloat
-    var placeholder = "Добавь что-нибудь в кучу…"
+    var placeholder = MacQuickInput.prompt
     var onSubmit: () -> Void
     var onPasteImage: (Data) -> Void
 
@@ -130,7 +131,8 @@ final class QuickInputScrollView: NSScrollView {
             input.setFrameSize(NSSize(width: contentSize.width, height: contentHeight))
         }
         let viewportHeight = min(MacQuickInput.maximumHeight, contentHeight)
-        hasVerticalScroller = contentHeight > viewportHeight
+        let scrolls = contentHeight > viewportHeight
+        if hasVerticalScroller != scrolls { hasVerticalScroller = scrolls }
         onHeightChange?(viewportHeight)
         if revealSelection {
             revealSelection = false
@@ -162,6 +164,24 @@ final class QuickTextView: NSTextView {
         super.draw(dirtyRect)
         guard string.isEmpty else { return }
         (placeholder as NSString).draw(at: NSPoint(x: textContainerInset.width, y: textContainerInset.height), withAttributes: [.font: font ?? NSFont.systemFont(ofSize: 13), .foregroundColor: NSColor.secondaryLabelColor])
+    }
+}
+
+/// Keep the draft visible while the offline rich editor loads.
+struct MacQuickEditorPreview: View {
+    let text: String
+    let compact: Bool
+
+    var body: some View {
+        Text(text.isEmpty ? MacQuickInput.prompt : text)
+            .font(.system(size: compact ? 14 : 15))
+            .foregroundStyle(text.isEmpty ? MacPalette.muted : MacPalette.text)
+            .lineSpacing(5)
+            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+            .padding(.vertical, compact ? 8 : 20)
+            .padding(.horizontal, compact ? 4 : 28)
+            .clipped()
+            .allowsHitTesting(false)
     }
 }
 

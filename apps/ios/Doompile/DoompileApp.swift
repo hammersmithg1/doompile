@@ -198,7 +198,7 @@ struct Home: View {
     @State private var quickNote: Note?
     @State private var quickUsesRichEditor: Bool
     @State private var quickTransitioning = false
-    @State private var quickEditorHeight: CGFloat = 44
+    @State private var quickEditorHeight: CGFloat = 0
     @StateObject private var quickBridge = RichEditorBridge()
     private let quickComposerKey: String
     init() {
@@ -425,6 +425,7 @@ struct Home: View {
             do { try await refreshCompactQuickNote() } catch { quickError = error.localizedDescription; return }
             focused = false
             let note = quickDraft
+            quickEditorHeight = 0
             quickUsesRichEditor = true
             quickEditorID = note.id
             editorFocusID = note.id
@@ -607,14 +608,26 @@ struct Home: View {
     @ViewBuilder private func quickInput(lineLimit: Int, heightLimit: CGFloat) -> some View {
         if quickUsesRichEditor, !quickEditorOpen, let quickNote {
             let binding = compactQuickNote(quickNote)
-            RichEditorView(document: binding.body, plainText: binding.plainText, height: $quickEditorHeight,
-                attachments: binding.attachments, notes: library.notes, bridge: quickBridge,
-                onReference: { id in
-                    if let note = library.notes.first(where: { $0.id == id }) { editor = note }
-                }, onRequestLink: { _ in expandQuickComposer() }, onAction: handleCompactCaptureAction, captureCompact: true,
-                captureHeightLimit: heightLimit,
-                onPasteImage: { data, name, mime in try storeQuickImage(data, name: name, mime: mime, noteID: quickNote.id) })
-                .id(quickNote.id).frame(height: min(quickEditorHeight, heightLimit)).accessibilityIdentifier("quick-rich-input")
+            let editorReady = quickBridge.ready && quickEditorHeight > 0
+            ZStack(alignment: .topLeading) {
+                RichEditorView(document: binding.body, plainText: binding.plainText, height: $quickEditorHeight,
+                    attachments: binding.attachments, notes: library.notes, bridge: quickBridge,
+                    onReference: { id in
+                        if let note = library.notes.first(where: { $0.id == id }) { editor = note }
+                    }, onRequestLink: { _ in expandQuickComposer() }, onAction: handleCompactCaptureAction, captureCompact: true,
+                    captureHeightLimit: heightLimit,
+                    onPasteImage: { data, name, mime in try storeQuickImage(data, name: name, mime: mime, noteID: quickNote.id) })
+                    .id(quickNote.id).frame(height: min(max(44, quickEditorHeight), heightLimit))
+                    .opacity(editorReady ? 1 : 0).accessibilityIdentifier("quick-rich-input")
+                if !editorReady {
+                    Text(draft.isEmpty ? UICopy.capturePlaceholder : draft)
+                        .font(.system(size: 16)).lineSpacing(3).lineLimit(lineLimit)
+                        .foregroundStyle(draft.isEmpty ? Palette.muted : Palette.text)
+                        .padding(.horizontal, 4).padding(.vertical, 11)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .allowsHitTesting(false).accessibilityHidden(true)
+                }
+            }
         } else {
             TextField(UICopy.capturePlaceholder, text: Binding(get: { draft }, set: updateQuickText),
                 prompt: Text(UICopy.capturePlaceholder).foregroundColor(Palette.muted), axis: .vertical)
@@ -954,7 +967,7 @@ struct Home: View {
         }
         quickNote = nil
         quickUsesRichEditor = false
-        quickEditorHeight = 44
+        quickEditorHeight = 0
         draft = ""
         focused = false
         UserDefaults.standard.removeObject(forKey: quickComposerKey)
