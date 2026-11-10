@@ -174,7 +174,7 @@ extension Notification.Name {
     private var terminating = false
     private var accountObservation: AnyCancellable?
     override init() {
-        #if DEBUG
+        #if DEBUG && DOOMPILE_MAC_UI_REVIEW
         MacComposerReview.configure()
         #endif
         _ = Telemetry.shared
@@ -182,7 +182,11 @@ extension Notification.Name {
         let library = DesktopLibrary()
         self.library = library
         capture = QuickCaptureController(library: library)
+        #if DEBUG && DOOMPILE_MAC_UI_REVIEW
+        updater = ApplicationUpdater(enabled: !MacComposerReview.enabled)
+        #else
         updater = ApplicationUpdater()
+        #endif
         presence = MacApplicationPresence(defaults: Connection.defaults)
         loginItem = MacLoginItem()
         super.init()
@@ -193,7 +197,7 @@ extension Notification.Name {
     func applicationDidFinishLaunching(_ notification: Notification) {
         presence.start(inBackground: MacLaunchContext.isBackgroundLaunch(NSAppleEventManager.shared().currentAppleEvent))
         capture.prepare()
-        #if DEBUG
+        #if DEBUG && DOOMPILE_MAC_UI_REVIEW
         if MacComposerReview.launchGlobal {
             DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) { self.capture.toggle() }
         }
@@ -477,7 +481,7 @@ struct NoteWorkspace: View {
     func start(noteID: String) async throws {
         guard !recording else { return }
         let request = UUID(); startRequest = request
-        #if DEBUG
+        #if DEBUG && DOOMPILE_MAC_UI_REVIEW
         let useFixture = MacComposerReview.voiceFixture
         #else
         let useFixture = false
@@ -493,7 +497,7 @@ struct NoteWorkspace: View {
         let settings: [String: Any] = [AVFormatIDKey: kAudioFormatMPEG4AAC, AVSampleRateKey: 44100, AVNumberOfChannelsKey: 1, AVEncoderAudioQualityKey: AVAudioQuality.high.rawValue]
         let recorder: AVAudioRecorder?
         if useFixture {
-            #if DEBUG
+            #if DEBUG && DOOMPILE_MAC_UI_REVIEW
             try MacComposerReview.writeVoiceFixture(to: url, settings: settings)
             #endif
             recorder = nil
@@ -526,10 +530,10 @@ struct NoteWorkspace: View {
     func cancel() { startRequest = UUID(); recorder?.stop(); recorder = nil; recording = false; timer?.invalidate(); timer = nil }
 }
 
-#if DEBUG
+#if DEBUG && DOOMPILE_MAC_UI_REVIEW
 @MainActor private enum MacComposerReview {
     private static let environment = ProcessInfo.processInfo.environment
-    private static var enabled: Bool {
+    static var enabled: Bool {
         environment["DOOMPILE_MAC_UI_TESTING"] == "1" && !(environment["DOOMPILE_MAC_UI_ROOT"] ?? "").isEmpty
     }
     static var launchGlobal: Bool { enabled && environment["DOOMPILE_MAC_CAPTURE_GLOBAL"] == "1" }

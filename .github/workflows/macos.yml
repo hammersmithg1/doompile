@@ -60,7 +60,10 @@ jobs:
     steps:
       - name: Require a trusted release run
         if: inputs.publish_release || inputs.signed_release
+        env:
+          MAC_REVIEW: ${{ inputs.review_composer }}
         run: |
+          test "$MAC_REVIEW" != true
           test "$GITHUB_REF" = refs/heads/main
           case "$GITHUB_EVENT_NAME" in push|workflow_dispatch) ;; *) exit 1 ;; esac
       - uses: actions/checkout@v4
@@ -107,6 +110,7 @@ jobs:
           if-no-files-found: ignore
           retention-days: 7
       - name: Build native Mac app and embedded Safari Extension
+        if: ${{ !inputs.review_composer }}
         run: >-
           xcodebuild -project apps/macos/Doompile.xcodeproj -scheme Doompile
           -configuration Debug -destination 'generic/platform=macOS'
@@ -122,7 +126,8 @@ jobs:
           xcodebuild -project apps/macos/Doompile.xcodeproj -scheme Doompile \
             -configuration Debug -destination 'platform=macOS' -parallel-testing-enabled NO \
             -derivedDataPath "$RUNNER_TEMP/MacDerivedData" -resultBundlePath "$RUNNER_TEMP/MacComposer.xcresult" \
-            CODE_SIGN_IDENTITY=- CODE_SIGN_ENTITLEMENTS= test
+            CODE_SIGN_IDENTITY=- CODE_SIGN_ENTITLEMENTS= \
+            'SWIFT_ACTIVE_COMPILATION_CONDITIONS=DEBUG DOOMPILE_MAC_UI_REVIEW' test
       - name: Export Mac composer review captures
         if: always() && inputs.review_composer
         run: |
@@ -141,13 +146,16 @@ jobs:
           if-no-files-found: warn
           retention-days: 14
       - name: Verify signed update delivery with an ephemeral test key
+        if: ${{ !inputs.review_composer }}
         run: >-
           python3 apps/macos/scripts/test-update-delivery.py
           "$RUNNER_TEMP/MacDerivedData/Build/Products/Debug/Doompile.app"
           "$RUNNER_TEMP/MacDerivedData/SourcePackages/artifacts/sparkle/Sparkle/bin"
       - name: Package unsigned developer build
+        if: ${{ !inputs.review_composer }}
         run: ditto -c -k --keepParent "$RUNNER_TEMP/MacDerivedData/Build/Products/Debug/Doompile.app" "$RUNNER_TEMP/Doompile-macOS-unsigned.zip"
       - uses: actions/upload-artifact@v4
+        if: ${{ !inputs.review_composer }}
         with:
           name: Doompile-macOS-unsigned
           path: ${{ runner.temp }}/Doompile-macOS-unsigned.zip

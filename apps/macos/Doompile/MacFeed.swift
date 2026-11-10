@@ -32,7 +32,12 @@ struct MacFeedRow: View {
     var open: () -> Void
     var menu: () -> AnyView
     @State private var hovered = false
-    private var excerpt: String { MacPreview.text(for: note) }
+    private var excerpt: String {
+        let text = MacPreview.text(for: note)
+        if text == note.attachments.first?.name,
+           MacPreview.text(note.body).trimmingCharacters(in: .whitespacesAndNewlines).isEmpty { return "" }
+        return text
+    }
     var body: some View {
         HStack(alignment: .top, spacing: 10) {
             VStack(alignment: .leading, spacing: 7) {
@@ -41,15 +46,9 @@ struct MacFeedRow: View {
                 if excerpt.isEmpty && note.attachments.isEmpty && note.editorSource == nil { Text(note.displayTitle).font(.system(size: 13)).onTapGesture(perform: open) }
                 if !note.attachments.isEmpty {
                     ForEach(Array(note.attachments.prefix(3))) { attachment in
-                        MacAttachmentCard(attachment: attachment, transfer: attachment.url.hasPrefix("local:") ? library.uploadStates[attachment.id] ?? .queued : nil)
+                        MacAttachmentCard(attachment: attachment, transfer: attachment.url.hasPrefix("local:") ? library.uploadStates[attachment.id] ?? .queued : nil, openNote: open)
                     }
                     if note.attachments.count > 3 { Text("Ещё \(note.attachments.count - 3) вложений").font(.system(size: 10)).foregroundStyle(MacPalette.muted) }
-                }
-                if !note.attachments.isEmpty {
-                    Button(action: open) {
-                        HStack { Spacer(); Text(MacDates.timeLabel(note.createdAt)).font(.system(size: 9)).foregroundStyle(MacPalette.muted) }
-                            .frame(maxWidth: .infinity, minHeight: 18).contentShape(Rectangle())
-                    }.buttonStyle(.plain).accessibilityLabel("Открыть заметку")
                 }
                 if !note.tags.isEmpty { Text(note.tags.map { "# " + $0 }.joined(separator: "   ")).font(.system(size: 10)).foregroundStyle(MacPalette.muted).lineLimit(2) }
             }.frame(maxWidth: .infinity, alignment: .leading)
@@ -69,6 +68,7 @@ struct MacFileSnippet: View {
     var transfer: AttachmentUploadState? = nil
     var onRemove: (() -> Void)? = nil
     var onOpen: (() -> Void)? = nil
+    var onOpenPendingNote: (() -> Void)? = nil
     var opensDraft = false
     @StateObject private var audio = MacInlineAudio()
     @State private var previewError: String?
@@ -96,6 +96,15 @@ struct MacFileSnippet: View {
         let size = ByteCountFormatter.string(fromByteCount: Int64(attachment.size), countStyle: .file)
         return fileExtension.isEmpty ? size : "\(fileExtension) · \(size)"
     }
+    private var subtitle: String {
+        if case .uploading(let progress?) = transfer { return "\(metadata) · \(Int((progress * 100).rounded()))%" }
+        return transfer?.label ?? previewError ?? audio.error ?? metadata
+    }
+
+    private var openIcon: some View {
+        DoompileSymbol(systemName: "arrow.up.right", size: 11).foregroundStyle(MacPalette.muted)
+            .frame(width: 24, height: 32).contentShape(Rectangle())
+    }
 
     var body: some View {
         HStack(spacing: 6) {
@@ -103,14 +112,15 @@ struct MacFileSnippet: View {
                 Button(action: openAction) {
                     HStack(spacing: 6) {
                         details
-                        if !opensDraft {
-                            DoompileSymbol(systemName: "arrow.up.right", size: 11).foregroundStyle(MacPalette.muted)
-                                .frame(width: 24, height: 32)
-                        }
+                        if !opensDraft { openIcon }
                     }
                 }.buttonStyle(.plain).help(openLabel).accessibilityLabel(openLabel)
             } else {
                 details
+                if let onOpenPendingNote {
+                    Button(action: onOpenPendingNote) { openIcon }
+                        .buttonStyle(.plain).help("Открыть заметку").accessibilityLabel("Открыть заметку")
+                }
             }
             if let onRemove {
                 Button(action: onRemove) {
@@ -136,7 +146,7 @@ struct MacFileSnippet: View {
             .background(MacPalette.tool, in: RoundedRectangle(cornerRadius: 8))
             VStack(alignment: .leading, spacing: 2) {
                 Text(attachment.name).font(.system(size: 13, weight: .medium)).lineLimit(1).truncationMode(.middle)
-                Text(transfer?.label ?? previewError ?? audio.error ?? metadata).font(.system(size: 11))
+                Text(subtitle).font(.system(size: 11))
                     .foregroundStyle(transfer == .failed ? MacPalette.orange : MacPalette.muted).monospacedDigit().lineLimit(1)
                     .accessibilityHidden(transfer != nil)
             }
@@ -164,6 +174,7 @@ struct MacFileSnippet: View {
 struct MacAttachmentCard: View {
     let attachment: Attachment
     var transfer: AttachmentUploadState? = nil
+    var openNote: (() -> Void)? = nil
     @State private var file: URL?
     @State private var image: NSImage?
     @State private var player: AVPlayer?
@@ -172,7 +183,7 @@ struct MacAttachmentCard: View {
     var body: some View {
         Group {
             if let transfer {
-                MacFileSnippet(attachment: attachment, transfer: transfer)
+                MacFileSnippet(attachment: attachment, transfer: transfer, onOpenPendingNote: openNote)
             } else if attachment.mimeType.hasPrefix("audio/") {
                 MacAudioCard(attachment: attachment)
             } else if attachment.mimeType.hasPrefix("image/"), let image {

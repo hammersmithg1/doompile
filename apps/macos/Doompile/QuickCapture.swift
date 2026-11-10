@@ -55,6 +55,7 @@ import UniformTypeIdentifiers
             let window = CapturePanel(contentRect: NSRect(x: 0, y: 0, width: 680, height: 54), styleMask: [.borderless, .nonactivatingPanel, .resizable, .fullSizeContentView], backing: .buffered, defer: false)
             window.title = "Быстрая заметка — Doompile"
             window.identifier = NSUserInterfaceItemIdentifier("quick-capture-panel")
+            window.setAccessibilityIdentifier("quick-capture-panel")
             window.isReleasedWhenClosed = false
             window.isFloatingPanel = true; window.level = .floating
             window.hidesOnDeactivate = false; window.becomesKeyOnlyIfNeeded = false

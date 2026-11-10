@@ -37,7 +37,7 @@ enum Connection {
         current: (Bundle.main.object(forInfoDictionaryKey: "DoompilePublicURL") as? String) ?? "http://localhost:3000",
         previous: Bundle.main.object(forInfoDictionaryKey: "DoompilePreviousPublicURL") as? String
     )
-    #if DEBUG && os(macOS)
+    #if DEBUG && os(macOS) && DOOMPILE_MAC_UI_REVIEW
     private static let reviewDirectory: URL? = {
         let environment = ProcessInfo.processInfo.environment
         guard environment["DOOMPILE_MAC_UI_TESTING"] == "1", let path = environment["DOOMPILE_MAC_UI_ROOT"], !path.isEmpty else { return nil }
@@ -45,7 +45,7 @@ enum Connection {
     }()
     #endif
     static var defaults: UserDefaults {
-        #if DEBUG && os(macOS)
+        #if DEBUG && os(macOS) && DOOMPILE_MAC_UI_REVIEW
         if let reviewDirectory { return UserDefaults(suiteName: "app.doompile.macos.review." + scope(endpoint: reviewDirectory.path, userID: "review"))! }
         #endif
         return UserDefaults(suiteName: group) ?? .standard
@@ -66,7 +66,7 @@ enum Connection {
     static var scope: String { account?.scope ?? "signed-out" }
     static var signedIn: Bool { account != nil && !token.isEmpty }
     static var directory: URL {
-        #if DEBUG && os(macOS)
+        #if DEBUG && os(macOS) && DOOMPILE_MAC_UI_REVIEW
         if let reviewDirectory { return reviewDirectory }
         #endif
         return FileManager.default.containerURL(forSecurityApplicationGroupIdentifier: group)

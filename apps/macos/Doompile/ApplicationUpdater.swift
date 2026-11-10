@@ -15,10 +15,10 @@ import SwiftUI
     private var controller: SPUStandardUpdaterController?
     private var started = false
 
-    init(bundle: Bundle = .main) {
+    init(bundle: Bundle = .main, enabled: Bool = true) {
         let info = bundle.infoDictionary ?? [:]
         version = "\(info["CFBundleShortVersionString"] as? String ?? "—") (\(info["CFBundleVersion"] as? String ?? "—"))"
-        guard let feed = info["SUFeedURL"] as? String,
+        guard enabled, let feed = info["SUFeedURL"] as? String,
               let url = URLComponents(string: feed), url.scheme == "https", url.host != nil,
               url.user == nil, url.password == nil, url.query == nil, url.fragment == nil,
               let key = info["SUPublicEDKey"] as? String, Data(base64Encoded: key)?.count == 32 else {

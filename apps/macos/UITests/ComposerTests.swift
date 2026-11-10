@@ -63,11 +63,23 @@ import XCTest
 
     func testGlobalComposerText() {
         let app = launch(dark: true, global: true)
-        let panel = app.windows["Быстрая заметка — Doompile"]
+        let panel = app.windows.matching(NSPredicate(
+            format: "identifier == %@ OR title == %@ OR label == %@",
+            "quick-capture-panel", "Быстрая заметка — Doompile", "Быстрая заметка — Doompile"
+        )).firstMatch
         XCTAssertTrue(panel.waitForExistence(timeout: 8))
         let mic = element(panel, "quick-composer-mic")
         XCTAssertTrue(mic.waitForExistence(timeout: 8))
         capture("mac-global-idle-dark", in: panel)
+
+        mic.click()
+        let stop = element(panel, "quick-composer-stop")
+        XCTAssertTrue(stop.waitForExistence(timeout: 8))
+        capture("mac-global-recording-dark", in: panel)
+        stop.click()
+        wait("exists == false", for: stop)
+        XCTAssertTrue(element(panel, "quick-composer-attachment").exists)
+        capture("mac-global-recorded-draft-dark", in: panel)
 
         let input = element(panel, "quick-composer-input")
         input.click()
@@ -78,6 +90,7 @@ import XCTest
         capture("mac-global-typed-dark", in: panel)
         send.click()
         wait("exists == false", for: panel)
+        XCTAssertTrue(app.staticTexts["Quick review draft"].waitForExistence(timeout: 8))
     }
 
     func testMainComposerVoice() {
@@ -114,5 +127,13 @@ import XCTest
         let recordings = app.buttons.matching(NSPredicate(format: "label == %@", "Слушать Голосовая заметка.m4a"))
         let allSaved = XCTNSPredicateExpectation(predicate: NSPredicate(format: "count == 3"), object: recordings)
         XCTAssertEqual(XCTWaiter.wait(for: [allSaved], timeout: 35), .completed)
+
+        hold.click(forDuration: 0.85, thenDragTo: hold.withOffset(CGVector(dx: -180, dy: -45)))
+        let remove = app.buttons["Убрать Голосовая заметка.m4a"]
+        XCTAssertTrue(remove.waitForExistence(timeout: 8))
+        XCTAssertEqual(recordings.count, 3)
+        capture("mac-main-hold-kept-as-draft-dark", in: window)
+        remove.click()
+        XCTAssertTrue(mic.waitForExistence(timeout: 8))
     }
 }

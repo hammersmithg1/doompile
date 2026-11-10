@@ -98,7 +98,7 @@ final class QuickTextView: NSTextView {
     override func draw(_ dirtyRect: NSRect) {
         super.draw(dirtyRect)
         guard string.isEmpty else { return }
-        (placeholder as NSString).draw(at: NSPoint(x: textContainerInset.width, y: textContainerInset.height), withAttributes: [.font: font ?? NSFont.systemFont(ofSize: 13), .foregroundColor: NSColor.placeholderTextColor])
+        (placeholder as NSString).draw(at: NSPoint(x: textContainerInset.width, y: textContainerInset.height), withAttributes: [.font: font ?? NSFont.systemFont(ofSize: 13), .foregroundColor: NSColor.secondaryLabelColor])
     }
 }
 
