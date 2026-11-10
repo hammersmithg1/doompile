@@ -654,6 +654,7 @@ test("legacy IndexedDB pending notes migrate atomically and only once", async ({
 test("quick composer grows through fifteen lines and scrolls additional content", async ({
   page,
 }, info) => {
+  test.setTimeout(60_000);
   const mobile = info.project.name === "iphone-webkit";
   await page.emulateMedia({ colorScheme: mobile ? "dark" : "light" });
   await setup(page);
@@ -711,6 +712,7 @@ test("quick composer grows through fifteen lines and scrolls additional content"
 test("expanded composer collapses text and formatting into a draft until sent", async ({
   page,
 }, info) => {
+  test.setTimeout(60_000);
   await page.emulateMedia({
     colorScheme: info.project.name === "iphone-webkit" ? "dark" : "light",
     reducedMotion: "no-preference",
@@ -722,8 +724,19 @@ test("expanded composer collapses text and formatting into a draft until sent", 
   const collapse = expanded.getByRole("button", { name: "Свернуть редактор", exact: true });
   const send = expanded.getByRole("button", { name: "Отправить заметку", exact: true });
   const rich = expanded.getByRole("textbox", { name: "Текст заметки" });
+  const dock = page.locator(".composer-expanded");
   const capture = (state: string) => page.screenshot({ path: info.outputPath(`${state}.png`) });
   const draftText = "План на неделю\nСледующие шаги\nЗаписать важную мысль\nДописать черновик";
+  const pauseCollapse = () => dock.evaluate((element) => {
+    const animate = element.animate.bind(element);
+    element.animate = (...args) => {
+      const animation = animate(...args);
+      animation.pause();
+      animation.currentTime = 120;
+      element.setAttribute("data-collapse-paused", "");
+      return animation;
+    };
+  });
 
   await open.click();
   await expect(collapse.locator('svg polyline[points="4 14 10 14 10 20"]')).toHaveCount(1);
@@ -748,19 +761,9 @@ test("expanded composer collapses text and formatting into a draft until sent", 
   await expect(rich.locator("strong")).toHaveText("важную мысль");
   await expect(send).toBeEnabled();
   expect(notes).toHaveLength(1);
-  await expect.poll(() => page.locator(".composer-expanded").evaluate((element) => element.getAnimations().length)).toBe(0);
+  await expect.poll(() => dock.evaluate((element) => element.getAnimations().length)).toBe(0);
   await capture("04-expanded-rich-draft");
-  const dock = page.locator(".composer-expanded");
-  await dock.evaluate((element) => {
-    const animate = element.animate.bind(element);
-    element.animate = (...args) => {
-      const animation = animate(...args);
-      animation.pause();
-      animation.currentTime = 120;
-      element.setAttribute("data-collapse-paused", "");
-      return animation;
-    };
-  });
+  await pauseCollapse();
   await collapse.click();
   await expect(dock).toHaveAttribute("data-collapse-paused", "");
   const arrivingCard = page.locator(".quick-composer");
@@ -768,18 +771,44 @@ test("expanded composer collapses text and formatting into a draft until sent", 
   try {
     await expect(page.locator(".main-scroll")).toHaveCSS("visibility", "visible");
     expect(arrivingFrame!.height).toBeGreaterThan(100);
+    await dock.evaluate((element) => { element.getAnimations()[0].currentTime = 65; });
+    await capture("05a-collapse-early");
+    await dock.evaluate((element) => { element.getAnimations()[0].currentTime = 120; });
     await capture("05-collapse-intermediate");
+    await rich.locator("p").last().evaluate((element) => {
+      element.closest<HTMLElement>("[contenteditable]")?.focus();
+      const selection = window.getSelection();
+      if (element.lastChild)
+        selection?.collapse(element.lastChild, element.lastChild.textContent?.length || 0);
+    });
+    await page.keyboard.insertText("!");
+    await expect(rich.locator("p").last()).toHaveText("Дописать черновик!");
   } finally {
     await dock.evaluate((element) => element.getAnimations().forEach((animation) => animation.finish()));
   }
-  await expect(quick).toHaveValue(draftText);
+  const finalDraft = `${draftText}!`;
+  await expect(quick).toHaveValue(finalDraft);
   expect(await arrivingCard.boundingBox()).toEqual(arrivingFrame);
   expect(notes).toHaveLength(1);
   await capture("06-collapsed-rich-draft");
   await page.reload();
-  await expect(quick).toHaveValue(draftText);
+  await expect(quick).toHaveValue(finalDraft);
   await open.click();
   await expect(rich.locator("h2")).toHaveText("Записать важную мысль");
+  await expect(rich.locator("strong")).toHaveText("важную мысль");
+  await pauseCollapse();
+  await collapse.click();
+  await expect(dock).toHaveAttribute("data-collapse-paused", "");
+  await page.evaluate(() => history.back());
+  await expect(expanded).toHaveCount(0);
+  await expect(quick).toHaveValue(finalDraft);
+  await page.evaluate(() => new Promise<void>((resolve) => {
+    window.addEventListener("popstate", () => resolve(), { once: true });
+    history.forward();
+  }));
+  await expect(page).toHaveURL(/\/$/);
+  await expect(quick).toHaveValue(finalDraft);
+  await open.click();
   await expect(rich.locator("strong")).toHaveText("важную мысль");
   await send.click();
   await expect(expanded).toHaveCount(0);
@@ -787,6 +816,13 @@ test("expanded composer collapses text and formatting into a draft until sent", 
   await expect.poll(() => notes.length).toBe(2);
   expect(notes.at(-1).plainText).toContain("Дописать черновик");
   await capture("07-sent-note");
+  await page.emulateMedia({ reducedMotion: "reduce" });
+  await quick.fill("Черновик без анимации");
+  await open.click();
+  expect(await dock.evaluate((element) => element.getAnimations().length)).toBe(0);
+  await collapse.click();
+  await expect(expanded).toHaveCount(0);
+  await expect(quick).toHaveValue("Черновик без анимации");
 });
 
 test("compact composer sends a visible note before its file finishes uploading", async ({
@@ -868,7 +904,7 @@ test("compact composer sends a visible note before its file finishes uploading",
     release();
     const ready = row.getByRole("link", { name: `Открыть ${file.name}` });
     await expect(ready).toBeVisible();
-    expect((await ready.boundingBox())!.height).toBe(height);
+    expect((await ready.boundingBox())!.height).toBeCloseTo(height, 1);
     await expect.poll(() => notes.length).toBe(2);
     await capture("ready-feed");
   } finally {

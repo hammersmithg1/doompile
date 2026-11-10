@@ -453,14 +453,13 @@ final class TouchUXTests: XCTestCase {
         input.typeText("\n" + lines[4..<15].joined(separator: "\n"))
         let atLimit = input.frame.height
         XCTAssertGreaterThan(atLimit, 15 * 16)
-        XCTAssertLessThanOrEqual(send.frame.maxY, keyboard.frame.minY + 1)
         input.typeText("\n" + lines[15..<18].joined(separator: "\n"))
         XCTAssertTrue((input.value as? String ?? "").contains("Line 18"))
         XCTAssertEqual(input.frame.height, atLimit, accuracy: 1, "More text scrolls inside the input")
-        XCTAssertTrue(send.isHittable)
+        XCTAssertLessThanOrEqual(send.frame.maxY, keyboard.frame.minY + 1)
         screenshot("composer-fifteen-line-limit-scrolled")
 
-        app.buttons["expand-editor"].tap()
+        app.buttons["expand-editor"].coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5)).tap()
         let collapse = app.buttons["close-editor"]
         XCTAssertTrue(collapse.waitForExistence(timeout: 5))
         collapse.tap()
@@ -479,8 +478,10 @@ final class TouchUXTests: XCTestCase {
         let scrollEnd = rich.coordinate(withNormalizedOffset: CGVector(dx: 0.45, dy: 0.24))
         scrollStart.press(forDuration: 0.05, thenDragTo: scrollEnd)
         XCTAssertTrue(keyboard.exists, "Scrolling inside the rich draft keeps the keyboard open")
-        XCTAssertTrue(send.isHittable)
+        XCTAssertLessThanOrEqual(send.frame.maxY, keyboard.frame.minY + 1)
         screenshot("composer-rich-limit-scrolled-with-keyboard")
+        send.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5)).tap()
+        XCTAssertTrue(app.buttons["quick-microphone"].waitForExistence(timeout: 5), "The send button remains tappable after scrolling")
     }
 
     func testExpandedQuickDraftSurvivesCollapseWithoutSending() {

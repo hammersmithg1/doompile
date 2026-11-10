@@ -104,11 +104,26 @@ import { useMobileViewport } from "./mobile-viewport";
 import { useMobileSidebar } from "./mobile-sidebar";
 type Filter = "all" | "urgent" | "pinned" | "media" | "tag";
 const collapsedCaptureKey = "doompile-collapsed-capture";
-function compactComposerFrame(dock: HTMLDivElement | null) {
+const checklistDraftBody: DocumentNode = {
+  type: "doc",
+  content: [{
+    type: "taskList",
+    content: [{
+      type: "taskItem",
+      attrs: { checked: false },
+      content: [{ type: "paragraph" }],
+    }],
+  }],
+};
+type ComposerFrame = { rect: DOMRect; radius: string };
+function compactComposerFrame(dock: HTMLDivElement | null): ComposerFrame | null {
   const card = dock?.querySelector(".quick-composer");
-  return card && { rect: card.getBoundingClientRect(), radius: getComputedStyle(card).borderRadius };
+  return card ? {
+    rect: card.getBoundingClientRect(),
+    radius: getComputedStyle(card).borderRadius,
+  } : null;
 }
-function composerClipPath(surface: HTMLDivElement, target: NonNullable<ReturnType<typeof compactComposerFrame>>) {
+function composerClipPath(surface: HTMLDivElement, target: ComposerFrame) {
   const area = surface.getBoundingClientRect();
   const { rect, radius } = target;
   return `inset(${rect.top - area.top}px ${area.right - rect.right}px ${area.bottom - rect.bottom}px ${rect.left - area.left}px round ${radius})`;
@@ -216,6 +231,8 @@ export default function Doompile({
   }
   const [text, setText] = useState("");
   const [collapsedCapture, setCollapsedCapture] = useState<Note | null>(null);
+  const latestCollapsedCapture = useRef(collapsedCapture);
+  latestCollapsedCapture.current = collapsedCapture;
   const [draftReady, setDraftReady] = useState(false);
   const [sending, setSending] = useState(false);
   const submitting = useRef(false);
@@ -274,7 +291,7 @@ export default function Doompile({
   const dock = useRef<HTMLDivElement>(null);
   const expandedDock = useRef<HTMLDivElement>(null);
   const detailPane = useRef<HTMLElement>(null);
-  const composerOrigin = useRef<ReturnType<typeof compactComposerFrame>>(null);
+  const composerOrigin = useRef<ComposerFrame | null>(null);
   const closing = useRef(false);
   const input = useRef<HTMLTextAreaElement>(null);
   const search = useRef<HTMLInputElement>(null);
@@ -346,17 +363,27 @@ export default function Doompile({
   useEffect(() => {
     let generation = 0;
     const back = () => {
-      const request = ++generation,
-        id = noteIDFromURL(location.href);
+      const request = ++generation;
+      let id = noteIDFromURL(location.href);
       void (async () => {
         try {
           const current = latestEditor.current;
+          if (id && (id === latestCollapsedCapture.current?.id || id === latestComposer.current?.id)) {
+            writeNoteLocation(null, true);
+            id = null;
+          }
           if (current && latestComposer.current?.id === current.id) {
-            if (!closing.current && !submitting.current) {
-              keepCapture(noteForEditorSave(current, latestEditTags.current));
-              try { localStorage.removeItem("doompile-editor-draft"); } catch {}
-            }
-          } else if (current) await finishRecording(current.id);
+            keepCapture(noteForEditorSave(current, latestEditTags.current));
+            try { localStorage.removeItem("doompile-editor-draft"); } catch {}
+            closing.current = false;
+            expandedDock.current?.getAnimations().forEach((animation) => animation.cancel());
+            setClosingComposer(false);
+            setEditor(null);
+            setDetailExpanded(false);
+            setSelectedState(id);
+            return;
+          }
+          if (current) await finishRecording(current.id);
           await autosave.current?.flush();
           if (request !== generation) return;
           const animation = !id ? await animateDetailClose() : undefined;
@@ -594,6 +621,8 @@ export default function Doompile({
       finish();
       return true;
     }
+    const previewedNote = latestComposer.current;
+    const previewedTags = latestEditTags.current;
     flushSync(() => {
       keepCurrentCapture();
       setClosingComposer(true);
@@ -606,17 +635,16 @@ export default function Doompile({
         await surface.animate(
           [
             { clipPath: from === "none" ? "inset(0px round 0px)" : from, opacity: 1 },
+            { opacity: 0, offset: 0.66 },
             { clipPath: composerClipPath(surface, target), opacity: 0 },
           ],
           { duration: 240, easing: "cubic-bezier(.4,0,.2,1)", fill: "forwards" },
         ).finished;
       } catch {}
     }
-    if (latestComposer.current?.id !== editor?.id) {
-      closing.current = false;
-      setClosingComposer(false);
-      return false;
-    }
+    if (!closing.current || expandedDock.current !== surface) return false;
+    if (latestComposer.current !== previewedNote || latestEditTags.current !== previewedTags)
+      keepCurrentCapture();
     finish();
     return true;
   }
@@ -1151,8 +1179,8 @@ export default function Doompile({
         await autosave.current?.flush();
         await recordingSession.finish("quick");
       }
-      const expandedNote = expandedDraft && latestComposer.current
-        ? noteForEditorSave(latestComposer.current, editTags)
+      const expandedNote = expandedDraft
+        ? noteForEditorSave(expandedDraft, editTags)
         : undefined;
       const note = expandedNote ? {
         ...expandedNote,
@@ -1187,7 +1215,7 @@ export default function Doompile({
       for (const file of files)
         if (!pending.includes(file)) forgetUpload(file.attachment.id);
       clearCapture();
-      if (expandedDraft) {
+      if (expandedDraft && latestComposer.current?.id === expandedDraft.id) {
         setEditor(null);
         writeNoteLocation(null, true);
         try { localStorage.removeItem("doompile-editor-draft"); } catch {}
@@ -1220,6 +1248,8 @@ export default function Doompile({
     setDetailExpanded(false);
     if (collapsedCapture) {
       const draft = compactNote();
+      if (kind === "checklist" && !shouldPersistNote(draft))
+        draft.body = checklistDraftBody;
       setEditor(draft);
       writeNoteLocation(draft.id);
       setEditTags(draft.tags.join(", "));
@@ -1267,25 +1297,7 @@ export default function Doompile({
     const created = createNote({
       plainText: text,
       ...(filter === "tag" ? { tags: [selectedTag] } : {}),
-      ...(kind === "checklist"
-        ? {
-            body: {
-              type: "doc",
-              content: [
-                {
-                  type: "taskList",
-                  content: [
-                    {
-                      type: "taskItem",
-                      attrs: { checked: false },
-                      content: [{ type: "paragraph" }],
-                    },
-                  ],
-                },
-              ],
-            },
-          }
-        : {}),
+      ...(kind === "checklist" ? { body: checklistDraftBody } : {}),
     });
     setEditor(created);
     writeNoteLocation(created.id);
