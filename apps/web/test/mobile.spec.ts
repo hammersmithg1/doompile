@@ -1,4 +1,4 @@
-import { createNote } from "../../../packages/core/src/index";
+import { createNote, type Note } from "../../../packages/core/src/index";
 import {
   test,
   expect,
@@ -7,7 +7,7 @@ import {
   type Page,
 } from "../../../packages/editor/test/web-test";
 const id = "d3d0daa0-cc18-4bbf-b8c2-2837b3324ef3";
-async function setup(page: Page, populated = true) {
+async function setup(page: Page, populated = true, additionalNotes: Note[] = []) {
   const notes: any[] = populated
     ? [
         {
@@ -35,6 +35,7 @@ async function setup(page: Page, populated = true) {
         },
       ]
     : [];
+  notes.push(...additionalNotes);
   await page.route("**/api/notes", (route) =>
     route.fulfill({ json: { notes } }),
   );
@@ -202,9 +203,9 @@ test("horizontal drawer and row gestures keep a long feed still while vertical s
   await page.setViewportSize({ width: 390, height: 844 });
   const cdp = await page.context().newCDPSession(page);
   await cdp.send("Emulation.setTouchEmulationEnabled", { enabled: true, maxTouchPoints: 1 });
-  const notes = await setup(page);
-  for (let i = 0; i < 25; i++) notes.push(createNote({ plainText: `Длинная лента ${i}`, revision: 1 }));
-  await page.reload();
+  await setup(page, true, Array.from({ length: 25 }, (_, index) =>
+    createNote({ plainText: `Длинная лента ${index}`, revision: 1 }),
+  ));
   await expect(page.locator(".mobile-note-row")).toHaveCount(26);
   const feed = page.locator(".main-scroll");
   const scroll = () => feed.evaluate((element) => element.scrollTop);
