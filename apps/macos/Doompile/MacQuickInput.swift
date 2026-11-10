@@ -3,8 +3,9 @@ import SwiftUI
 
 /// Native first keystroke; no web view or network needs to finish loading.
 struct MacQuickInput: NSViewRepresentable {
+    static let height: CGFloat = 39
+
     @Binding var text: String
-    @Binding var height: CGFloat
     @Binding var focused: Bool
     var placeholder = "Добавь что-нибудь в кучу…"
     var onSubmit: () -> Void
@@ -13,7 +14,7 @@ struct MacQuickInput: NSViewRepresentable {
     func makeCoordinator() -> Coordinator { Coordinator(self) }
     func makeNSView(context: Context) -> NSScrollView {
         let scroll = QuickInputScrollView()
-        let input = QuickTextView(frame: NSRect(x: 0, y: 0, width: 300, height: 39))
+        let input = QuickTextView(frame: NSRect(x: 0, y: 0, width: 300, height: Self.height))
         input.delegate = context.coordinator
         input.isRichText = false
         input.drawsBackground = false
@@ -27,7 +28,7 @@ struct MacQuickInput: NSViewRepresentable {
         input.textContainer?.widthTracksTextView = true
         input.isVerticallyResizable = true
         input.isHorizontallyResizable = false
-        input.minSize = NSSize(width: 0, height: 39)
+        input.minSize = NSSize(width: 0, height: Self.height)
         input.maxSize = NSSize(width: CGFloat.greatestFiniteMagnitude, height: CGFloat.greatestFiniteMagnitude)
         input.autoresizingMask = [.width]
         input.string = text; input.placeholder = placeholder
@@ -38,7 +39,6 @@ struct MacQuickInput: NSViewRepresentable {
         scroll.drawsBackground = false
         scroll.hasVerticalScroller = false
         scroll.borderType = .noBorder
-        scroll.onLayout = { [weak coordinator = context.coordinator] in coordinator?.measure() }
         context.coordinator.input = input
         return scroll
     }
@@ -47,7 +47,6 @@ struct MacQuickInput: NSViewRepresentable {
         guard let input = context.coordinator.input else { return }
         if input.string != text { input.string = text; input.needsDisplay = true }
         input.placeholder = placeholder
-        context.coordinator.measure()
         if focused, scroll.window?.firstResponder !== input {
             DispatchQueue.main.async { [weak input] in
                 guard let input, context.coordinator.parent.focused, input.window?.isKeyWindow == true else { return }
@@ -59,7 +58,7 @@ struct MacQuickInput: NSViewRepresentable {
         var parent: MacQuickInput
         weak var input: QuickTextView?
         init(_ parent: MacQuickInput) { self.parent = parent }
-        func textDidChange(_ notification: Notification) { guard let input else { return }; parent.text = input.string; input.needsDisplay = true; measure() }
+        func textDidChange(_ notification: Notification) { guard let input else { return }; parent.text = input.string; input.needsDisplay = true }
         func textDidBeginEditing(_ notification: Notification) { DispatchQueue.main.async { self.parent.focused = true } }
         func textDidEndEditing(_ notification: Notification) { DispatchQueue.main.async { self.parent.focused = false } }
         func textView(_ textView: NSTextView, doCommandBy commandSelector: Selector) -> Bool {
@@ -71,21 +70,13 @@ struct MacQuickInput: NSViewRepresentable {
             }
             return false
         }
-        func measure() {
-            guard let input, let layout = input.layoutManager, let container = input.textContainer else { return }
-            layout.ensureLayout(for: container)
-            let desired = max(39, min(136, ceil(layout.usedRect(for: container).height) + 18))
-            if abs(parent.height - desired) > 1 { DispatchQueue.main.async { self.parent.height = desired } }
-        }
     }
 }
 
 final class QuickInputScrollView: NSScrollView {
-    var onLayout: (() -> Void)?
     override func layout() {
         super.layout()
-        if let input = documentView as? NSTextView, abs(input.frame.width - contentSize.width) > 0.5 { input.setFrameSize(NSSize(width: contentSize.width, height: max(39, input.frame.height))) }
-        onLayout?()
+        if let input = documentView as? NSTextView, abs(input.frame.width - contentSize.width) > 0.5 { input.setFrameSize(NSSize(width: contentSize.width, height: max(MacQuickInput.height, input.frame.height))) }
     }
 }
 

@@ -52,6 +52,11 @@ import XCTest
         XCTAssertTrue(transfer.waitForExistence(timeout: 8))
         wait("label BEGINSWITH 'Загружается'", for: transfer)
         capture("mac-main-uploading-light", in: app.windows.firstMatch)
+        input.click()
+        input.typeText("Second note while uploading")
+        XCTAssertTrue(send.waitForExistence(timeout: 8))
+        send.click()
+        XCTAssertTrue(app.staticTexts["Second note while uploading"].waitForExistence(timeout: 8))
         wait("exists == false", for: transfer, timeout: 20)
         capture("mac-main-uploaded-light", in: app.windows.firstMatch)
     }
@@ -106,5 +111,8 @@ import XCTest
         XCTAssertTrue(mic.waitForExistence(timeout: 8))
         XCTAssertFalse(stop.exists)
         capture("mac-main-voice-sent-dark", in: window)
+        let recordings = app.buttons.matching(NSPredicate(format: "label == %@", "Слушать Голосовая заметка.m4a"))
+        let allSaved = XCTNSPredicateExpectation(predicate: NSPredicate(format: "count == 3"), object: recordings)
+        XCTAssertEqual(XCTWaiter.wait(for: [allSaved], timeout: 35), .completed)
     }
 }

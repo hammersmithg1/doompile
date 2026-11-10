@@ -15,7 +15,6 @@ struct DesktopHome: View {
     @State private var noteExpanded = false
     @State private var quickExpanded = false
     @State private var quickFocused = true
-    @State private var quickHeight: CGFloat = 39
     @State private var quickEditorHeight: CGFloat = 300
     @State private var quickFiles = false
     @State private var quickDrawing = false
@@ -242,8 +241,8 @@ struct DesktopHome: View {
                 if !quickExpanded { attachButton }
                 if quick.richMounted { richComposerInput }
                 else {
-                    MacQuickInput(text: Binding(get: { quick.note.plainText }, set: quick.updateText), height: $quickHeight, focused: $quickFocused, onSubmit: saveQuick, onPasteImage: pasteQuickImage)
-                        .frame(height: quickHeight).padding(.horizontal, 4)
+                    MacQuickInput(text: Binding(get: { quick.note.plainText }, set: quick.updateText), focused: $quickFocused, onSubmit: saveQuick, onPasteImage: pasteQuickImage)
+                        .frame(height: MacQuickInput.height).padding(.horizontal, 4)
                 }
                 if !quickExpanded {
                     MacComposerButton(icon: "arrow.up.left.and.arrow.down.right", label: "Развернуть редактор", disabled: quick.busy, identifier: "quick-composer-expand") { compose() }
@@ -268,7 +267,7 @@ struct DesktopHome: View {
         }, onRequestLink: { quickLinkValue = $0; quickLink = true }, onAction: composerAction, onPasteImage: quick.storeFile)
         .id(quick.note.id)
         .accessibilityIdentifier("quick-composer-input")
-        .frame(maxWidth: .infinity, minHeight: quickExpanded ? 180 : 43, maxHeight: quickExpanded ? .infinity : 43)
+        .frame(maxWidth: .infinity, minHeight: quickExpanded ? 180 : MacQuickInput.height, maxHeight: quickExpanded ? .infinity : MacQuickInput.height)
         .onReceive(quick.bridge.$ready) { ready in if ready { quick.editorReady() } }
     }
     private var attachButton: some View {
@@ -352,7 +351,7 @@ struct DesktopHome: View {
         Task { @MainActor in
             if await quick.submit(in: library, tag: tag) {
                 withAnimation(motion) { quickExpanded = false }
-                quickHeight = 39; quickFocused = !noteExpanded
+                quickFocused = !noteExpanded
             }
         }
     }

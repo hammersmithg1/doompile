@@ -43,7 +43,7 @@ permissions:
   id-token: write
 
 concurrency:
-  group: macos-${{ github.ref }}
+  group: macos-${{ github.ref }}-${{ inputs.review_composer && 'composer-review' || 'build' }}
   cancel-in-progress: ${{ !inputs.publish_release && !inputs.signed_release }}
 
 jobs:
@@ -136,6 +136,7 @@ jobs:
           name: macos-composer-review
           path: |
             ${{ runner.temp }}/MacComposer-attachments
+            ${{ runner.temp }}/MacComposer.xcresult
             ${{ runner.temp }}/mac-composer-fixture.log
           if-no-files-found: warn
           retention-days: 14

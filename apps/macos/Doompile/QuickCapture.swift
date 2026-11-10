@@ -14,7 +14,6 @@ import UniformTypeIdentifiers
     @Published var expanded = false
     @Published var richMounted = false
     @Published var focused = true
-    @Published var inputHeight: CGFloat = 39
     @Published var busy = false
     @Published private(set) var startingVoice = false
     @Published var error: String?
@@ -81,6 +80,15 @@ import UniformTypeIdentifiers
     func show() {
         Telemetry.shared.record(.screenViewed, ["screen": "capture"])
         guard Connection.signedIn else { onOpenMainWindow?(); return }
+        do {
+            for draft in try voice.recover(noteID: note.id) {
+                if note.body.hasFinishedRecording(draft.id) { voice.acknowledge(draft.id) }
+                else { try acceptRecording(draft.data, id: draft.id) }
+            }
+        } catch {
+            Telemetry.shared.failure(.runtimeError, error)
+            self.error = error.localizedDescription
+        }
         library.reload(); prepare()
         if !MacPreview.hasContent(note) { note.createdAt = Note.now() }
         guard let panel else { return }
@@ -95,7 +103,7 @@ import UniformTypeIdentifiers
         DispatchQueue.main.async { [weak self] in self?.focused = true; if self?.richMounted == true { self?.bridge.focus() } }
     }
     var compactHeight: CGFloat {
-        max(54, (richMounted ? 43 : inputHeight) + 12) + (error == nil ? 0 : 44) + (showsCompactAttachments ? 52 : 0)
+        54 + (error == nil ? 0 : 44) + (showsCompactAttachments ? 52 : 0)
     }
     var compactAttachments: [Attachment] {
         richMounted && bridge.ready ? MacQuickDocument.referencedFiles(in: note) : note.attachments
@@ -181,7 +189,7 @@ import UniformTypeIdentifiers
             draftTask?.cancel(); try drafts.clear()
             panel?.orderOut(nil)
             note = Note(); draftTask?.cancel()
-            richMounted = false; expanded = false; error = nil; inputHeight = 39
+            richMounted = false; expanded = false; error = nil
             library.notice = "Сохранено"
         } catch { Telemetry.shared.failure(.runtimeError, error); self.error = error.localizedDescription; resizeForContent() }
     }
@@ -235,7 +243,10 @@ import UniformTypeIdentifiers
     }
     private func finishRecording() throws {
         let id = voice.id
-        let data = try voice.finish()
+        try acceptRecording(voice.finish(), id: id)
+    }
+    private func acceptRecording(_ data: Data, id: String) throws {
+        guard Connection.signedIn, Connection.scope == accountScope else { throw DoompileError.authentication }
         guard data.count <= 30 * 1024 * 1024, compactAttachments.count < NoteLimits.attachments else { throw DoompileError.message("До 100 вложений, не более 30 МБ каждое.") }
         let attachment = try Storage.shared.addFile(data, name: "Голосовая заметка.m4a", mimeType: "audio/mp4")
         note.attachments.append(attachment); note.body = note.body.finishingRecording(id, attachment: attachment)
@@ -246,16 +257,6 @@ import UniformTypeIdentifiers
     func editorReady() {
         bridge.captureMode(compact: !expanded); bridge.focus()
         if voice.recording { bridge.insertRecording(voice.id); bridge.recordingState(id: voice.id, seconds: voice.seconds) }
-        else {
-            do {
-                for draft in try voice.recover(noteID: note.id) {
-                    if note.body.hasFinishedRecording(draft.id) { voice.acknowledge(draft.id); continue }
-                    let attachment = try Storage.shared.addFile(draft.data, name: "Голосовая заметка.m4a", mimeType: "audio/mp4")
-                    note.attachments.append(attachment); note.body = note.body.finishingRecording(draft.id, attachment: attachment)
-                    bridge.completeRecording(draft.id, attachment: attachment); try drafts.save(note); voice.acknowledge(draft.id)
-                }
-            } catch { Telemetry.shared.failure(.runtimeError, error); self.error = error.localizedDescription }
-        }
     }
     func applyAppearance() {
         let mode = AppearanceMode(rawValue: Connection.defaults.string(forKey: AppearanceMode.storageKey) ?? "system") ?? .system
@@ -379,11 +380,11 @@ struct QuickCaptureRoot: View {
         }, onRequestLink: { capture.link = $0; capture.showLink = true }, onAction: capture.action, onPasteImage: capture.storeFile)
         .id(capture.note.id)
         .accessibilityIdentifier("quick-composer-input")
-        .frame(maxWidth: .infinity, minHeight: capture.expanded ? 240 : 43, maxHeight: capture.expanded ? .infinity : 43)
+        .frame(maxWidth: .infinity, minHeight: capture.expanded ? 240 : MacQuickInput.height, maxHeight: capture.expanded ? .infinity : MacQuickInput.height)
     }
     private var nativeInput: some View {
-        MacQuickInput(text: Binding(get: { capture.note.plainText }, set: capture.updateText), height: $capture.inputHeight, focused: $capture.focused, onSubmit: submit, onPasteImage: pasteQuickImage)
-            .frame(height: capture.inputHeight).padding(.horizontal, 4)
+        MacQuickInput(text: Binding(get: { capture.note.plainText }, set: capture.updateText), focused: $capture.focused, onSubmit: submit, onPasteImage: pasteQuickImage)
+            .frame(height: MacQuickInput.height).padding(.horizontal, 4)
     }
     private func pasteQuickImage(_ data: Data) {
         do { try capture.addFile(data, name: "Изображение.png", mime: "image/png") }

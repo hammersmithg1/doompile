@@ -7,12 +7,17 @@ struct MacUrgentCard: View {
     let selected: Bool
     var open: () -> Void
     var removeUrgent: () -> Void
+    @EnvironmentObject private var library: DesktopLibrary
     var body: some View {
         HStack(alignment: .top, spacing: 7) {
             Button(action: open) {
                 VStack(alignment: .leading, spacing: 5) {
                     Text(note.displayTitle).font(.system(size: 12, weight: .medium)).lineLimit(2).frame(maxWidth: .infinity, alignment: .leading)
-                    Text(note.tags.first ?? "В твоей куче").font(.system(size: 9)).foregroundStyle(MacPalette.adaptive(0xA27678, 0xC2979B))
+                    if let file = note.attachments.first(where: { $0.url.hasPrefix("local:") }) {
+                        AttachmentTransferBadge(state: library.uploadStates[file.id] ?? .queued)
+                    } else {
+                        Text(note.tags.first ?? "В твоей куче").font(.system(size: 9)).foregroundStyle(MacPalette.adaptive(0xA27678, 0xC2979B))
+                    }
                 }.frame(maxWidth: .infinity, minHeight: 40, alignment: .topLeading).contentShape(Rectangle())
             }.buttonStyle(.plain)
             Button(action: removeUrgent) { DoompileSymbol(systemName: "flame", size: 11).font(.system(size: 11)).foregroundStyle(MacPalette.orange) }.buttonStyle(.plain).help("Убрать из важного").accessibilityLabel("Убрать из важного \(note.displayTitle)")
