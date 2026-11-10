@@ -17,6 +17,10 @@ import WebKit
             webView?.evaluateJavaScript("window.doompileEditor.insertAttachment(\(json))")
         }
     }
+    func removeAttachment(_ attachment: Attachment) {
+        guard ready, let data = try? JSONEncoder().encode(attachment.url), let json = String(data: data, encoding: .utf8) else { return }
+        webView?.evaluateJavaScript("window.doompileEditor.removeAttachment?.(\(json))")
+    }
     func replaceDocument(_ document: JSONValue) {
         guard ready, let data = try? JSONEncoder().encode(document), let json = String(data: data, encoding: .utf8) else { return }
         webView?.evaluateJavaScript("window.doompileEditor.setDocument(\(json))")

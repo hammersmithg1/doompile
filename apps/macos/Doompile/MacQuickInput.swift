@@ -33,6 +33,7 @@ struct MacQuickInput: NSViewRepresentable {
         input.string = text; input.placeholder = placeholder
         input.onPasteImage = { [weak coordinator = context.coordinator] in coordinator?.parent.onPasteImage($0) }
         input.setAccessibilityLabel("Быстрая заметка")
+        input.setAccessibilityIdentifier("quick-composer-input")
         scroll.documentView = input
         scroll.drawsBackground = false
         scroll.hasVerticalScroller = false
@@ -115,14 +116,98 @@ struct MacComposerButton: View {
     var label: String
     var send = false
     var disabled = false
+    var primary = false
+    var identifier: String? = nil
     var action: () -> Void
     var body: some View {
         Button(action: action) {
-            DoompileSymbol(systemName: icon).font(.system(size: send ? 18 : 15, weight: .regular))
-                .frame(width: send ? 39 : 34, height: 37)
+            DoompileSymbol(systemName: icon).font(.system(size: primary || send ? 18 : 15, weight: .regular))
+                .frame(width: primary || send ? 39 : 34, height: 37)
                 .foregroundStyle(send ? Color(red: 37/255, green: 37/255, blue: 31/255).opacity(disabled ? 0.45 : 1) : MacPalette.muted)
                 .background(send ? MacPalette.send.opacity(disabled ? 0.55 : 1) : MacPalette.tool, in: RoundedRectangle(cornerRadius: 10))
-        }.buttonStyle(.plain).disabled(disabled).help(label).accessibilityLabel(label)
+        }.buttonStyle(.plain).disabled(disabled).help(label).accessibilityLabel(label).accessibilityIdentifier(identifier ?? icon)
+    }
+}
+
+/// The pointer target stays mounted when the microphone changes to Send during a hold.
+struct MacComposerPrimaryButton: View {
+    let canSend: Bool
+    let starting: Bool
+    let busy: Bool
+    let onStart: () -> Void
+    let onSend: () -> Void
+    let onHoldRelease: () -> Void
+
+    private func activate() {
+        if canSend { onSend() } else { onStart() }
+    }
+
+    var body: some View {
+        MacComposerButton(
+            icon: canSend ? "arrow.up" : "mic",
+            label: canSend ? "Отправить заметку" : "Записать голосовую заметку",
+            send: canSend, disabled: busy || starting, primary: true,
+            identifier: canSend ? "quick-composer-send" : "quick-composer-mic",
+            action: activate
+        )
+        .overlay {
+            MacComposerPointer(allowsHold: !canSend && !starting && !busy, enabled: !starting && !busy,
+                               onTap: activate, onHold: onStart, onRelease: onHoldRelease)
+                .accessibilityHidden(true)
+        }
+    }
+}
+
+private struct MacComposerPointer: NSViewRepresentable {
+    let allowsHold: Bool
+    let enabled: Bool
+    let onTap: () -> Void
+    let onHold: () -> Void
+    let onRelease: () -> Void
+
+    func makeNSView(context: Context) -> PointerView { PointerView() }
+    func updateNSView(_ view: PointerView, context: Context) { view.control = self }
+
+    final class PointerView: NSView {
+        var control: MacComposerPointer?
+        private var hold: Task<Void, Never>?
+        private var held = false
+        private var pressed = false
+
+        override func acceptsFirstMouse(for event: NSEvent?) -> Bool { true }
+
+        override func mouseDown(with event: NSEvent) {
+            guard control?.enabled == true else { return }
+            pressed = true
+            held = false
+            hold?.cancel()
+            guard control?.allowsHold == true else { return }
+            hold = Task { @MainActor [weak self] in
+                try? await Task.sleep(for: .milliseconds(350))
+                guard !Task.isCancelled, let self, control?.allowsHold == true else { return }
+                held = true
+                control?.onHold()
+            }
+        }
+
+        override func mouseDragged(with event: NSEvent) {
+            guard !held, !bounds.insetBy(dx: -8, dy: -8).contains(convert(event.locationInWindow, from: nil)) else { return }
+            hold?.cancel()
+            pressed = false
+        }
+
+        override func mouseUp(with event: NSEvent) {
+            hold?.cancel()
+            guard pressed else { return }
+            pressed = false
+            if held { control?.onRelease() }
+            else if control?.enabled == true, bounds.contains(convert(event.locationInWindow, from: nil)) { control?.onTap() }
+        }
+
+        override func viewWillMove(toWindow newWindow: NSWindow?) {
+            super.viewWillMove(toWindow: newWindow)
+            if newWindow == nil { hold?.cancel(); pressed = false }
+        }
     }
 }
 
@@ -132,36 +217,47 @@ struct MacRecordingSnippet: View {
     let onStop: () -> Void
 
     var body: some View {
-        HStack(spacing: 8) {
-            Circle().fill(MacPalette.orange).frame(width: 6, height: 6)
-            Text(starting ? "Включаем микрофон…" : "Запись \(Note.timeLabel(Double(seconds)))")
-            Spacer()
+        HStack(spacing: 9) {
+            DoompileSymbol(systemName: "mic", size: 16).foregroundStyle(MacPalette.orange)
+                .frame(width: 32, height: 32)
+                .background(MacPalette.tool, in: RoundedRectangle(cornerRadius: 8))
+            Text(starting ? "Включаем микрофон…" : "Запись · \(Note.timeLabel(Double(seconds)))")
+                .font(.system(size: 12, weight: .medium)).monospacedDigit()
             if !starting {
-                Button("■ Стоп", action: onStop).buttonStyle(.plain).accessibilityLabel("Остановить запись")
+                Button(action: onStop) {
+                    DoompileSymbol(systemName: "stop.fill", size: 14)
+                        .frame(width: 30, height: 32)
+                        .contentShape(Rectangle())
+                }.buttonStyle(.plain).foregroundStyle(MacPalette.orange)
+                    .help("Остановить запись").accessibilityLabel("Остановить запись")
+                    .accessibilityIdentifier("quick-composer-stop")
             }
         }
-        .font(.system(size: 11)).foregroundStyle(MacPalette.orange)
-        .padding(.horizontal, 10).frame(height: 30)
+        .padding(6)
+        .background(MacPalette.surface, in: RoundedRectangle(cornerRadius: 12))
+        .overlay(RoundedRectangle(cornerRadius: 12).strokeBorder(MacPalette.line))
     }
 }
 
 struct MacComposerAttachmentStrip: View {
     let attachments: [Attachment]
+    var starting = false
+    var recording = false
+    var seconds = 0
     var onRemove: ((String) -> Void)?
+    var onStop: () -> Void
 
     var body: some View {
         ScrollView(.horizontal, showsIndicators: false) {
-            HStack(alignment: .top, spacing: 10) {
+            HStack(spacing: 8) {
+                if starting || recording { MacRecordingSnippet(starting: starting, seconds: seconds, onStop: onStop) }
                 ForEach(attachments) { file in
-                    HStack(alignment: .top, spacing: 3) {
-                        MacAttachmentCard(attachment: file)
-                        if let onRemove {
-                            Button { onRemove(file.id) } label: { DoompileSymbol(systemName: "xmark.circle.fill", size: 12) }
-                                .buttonStyle(.plain).foregroundStyle(MacPalette.muted).help("Убрать вложение").accessibilityLabel("Убрать вложение")
-                        }
-                    }
+                    MacFileSnippet(attachment: file, onRemove: onRemove.map { remove in { remove(file.id) } })
+                        .accessibilityElement(children: .contain)
+                        .accessibilityIdentifier("quick-composer-attachment")
                 }
             }.padding(.horizontal, 4)
         }
+        .frame(height: 46)
     }
 }

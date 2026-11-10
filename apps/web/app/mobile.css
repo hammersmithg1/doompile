@@ -1,5 +1,4 @@
 /* iPhone shell. Desktop layout and the shared document model stay unchanged. */
-.mobile-compose-plus,
 .mobile-welcome,
 .mobile-editor-tools,
 .mobile-new-flags,
@@ -197,15 +196,6 @@
   .composer-input-row {
     align-items: center;
   }
-  .mobile-compose-plus {
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    width: 36px;
-    height: 40px;
-    flex-shrink: 0;
-    color: var(--muted);
-  }
   .composer-input-row textarea {
     padding: 9px 2px;
     min-height: 40px;
@@ -218,22 +208,8 @@
   .composer-tools {
     height: auto;
   }
-  .composer-tools > .icon-button:not(.quick-voice),
-  .composer-tools > .attachment-trigger {
-    display: none !important;
-  }
-  .composer-tools .quick-voice {
-    width: 40px;
-    height: 40px;
-  }
-  .send-button {
-    width: 38px;
-    height: 38px;
+  .composer-tools .composer-primary {
     border-radius: 50%;
-    margin: 0;
-  }
-  .send-button:disabled {
-    display: none;
   }
   .composer-footnote {
     display: none;

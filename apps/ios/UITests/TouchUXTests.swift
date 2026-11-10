@@ -6,6 +6,9 @@ final class TouchUXTests: XCTestCase {
         continueAfterFailure = false
         app = XCUIApplication()
         app.launchEnvironment["DOOMPILE_UI_TESTING"] = "1"
+        if name.contains("testCompactComposerAttachmentAndVoiceStates") {
+            app.launchEnvironment["DOOMPILE_UI_COMPOSER_FIXTURE"] = "1"
+        }
         app.launch()
         XCTAssertTrue(app.textFields["quick-input"].waitForExistence(timeout: 10))
     }
@@ -130,7 +133,73 @@ final class TouchUXTests: XCTestCase {
             let allow = springboard.alerts.buttons.matching(NSPredicate(format: "label IN %@", ["Allow", "Разрешить", "OK", "ОК"])).firstMatch
             if allow.exists { allow.tap() } else { springboard.alerts.buttons["OK"].tap() }
         }
-        XCTAssertTrue(app.buttons["quick-stop-recording"].waitForExistence(timeout: 5), app.debugDescription)
+        let activeStop = app.buttons.matching(NSPredicate(format: "identifier == %@ AND label == %@", "quick-stop-recording", "Остановить запись")).firstMatch
+        XCTAssertTrue(activeStop.waitForExistence(timeout: 5), app.debugDescription)
+    }
+    func testCompactComposerAttachmentAndVoiceStates() {
+        let mic = app.buttons["quick-microphone"]
+        let send = app.buttons["quick-send"]
+        let attach = app.buttons["quick-attach"]
+        let expand = app.buttons["expand-editor"]
+        let input = app.textFields["quick-input"]
+        let caption = "Voice note with caption"
+        XCTAssertTrue(mic.exists)
+        XCTAssertFalse(send.exists)
+        XCTAssertLessThan(attach.frame.maxX, input.frame.midX)
+        XCTAssertLessThan(expand.frame.minX, mic.frame.minX)
+        let microphoneWidth = mic.frame.width
+        screenshot("composer-idle")
+
+        input.tap(); input.typeText("Hi")
+        XCTAssertTrue(send.exists)
+        XCTAssertFalse(mic.exists)
+        XCTAssertEqual(send.frame.width, microphoneWidth, accuracy: 1)
+        screenshot("composer-typed-keyboard")
+        input.typeText(String(repeating: XCUIKeyboardKey.delete.rawValue, count: 2))
+        app.coordinate(withNormalizedOffset: CGVector(dx: 0.9, dy: 0.38)).tap()
+
+        startQuickRecording()
+        XCTAssertTrue(send.exists)
+        XCTAssertFalse(mic.exists)
+        XCTAssertFalse(app.buttons["close-editor"].exists)
+        screenshot("composer-tap-recording")
+        app.buttons["quick-stop-recording"].tap()
+        XCTAssertTrue(app.buttons["quick-stop-recording"].waitForNonExistence(timeout: 5))
+        XCTAssertTrue(app.buttons["quick-remove-attachment"].exists)
+        XCTAssertFalse(noteRow("Голосовая заметка").exists)
+        screenshot("composer-audio-snippet")
+
+        input.tap(); input.typeText(caption)
+        send.tap()
+        let uploaded = noteRow(caption)
+        XCTAssertTrue(uploaded.waitForExistence(timeout: 3), "The note must appear before the fixture responds to the upload")
+        XCTAssertTrue(mic.waitForExistence(timeout: 3))
+        let sending = app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH 'note-' AND label CONTAINS %@ AND label CONTAINS %@", caption, "Загружается")).firstMatch
+        XCTAssertTrue(sending.waitForExistence(timeout: 4), app.debugDescription)
+        screenshot("feed-audio-uploading")
+        XCTAssertTrue(sending.waitForNonExistence(timeout: 15))
+        XCTAssertTrue(uploaded.exists)
+        screenshot("feed-audio-uploaded")
+
+        mic.press(forDuration: 1.3)
+        XCTAssertTrue(noteRow("Голосовая заметка").waitForExistence(timeout: 5), "Releasing a held microphone must send its voice note")
+        XCTAssertFalse(app.buttons["quick-stop-recording"].exists)
+        screenshot("composer-hold-sent")
+
+        attach.tap()
+        XCTAssertTrue(app.buttons["Файл"].waitForExistence(timeout: 3))
+        XCTAssertTrue(app.buttons["Фото"].exists)
+        screenshot("composer-paperclip-menu")
+
+        app.terminate()
+        app.launchEnvironment["DOOMPILE_UI_ARCHIVE_FIXTURE"] = "1"
+        app.launchEnvironment["DOOMPILE_TEST_APPEARANCE"] = "dark"
+        app.launch()
+        XCTAssertTrue(app.buttons["quick-remove-attachment"].waitForExistence(timeout: 5))
+        XCTAssertTrue(send.exists)
+        screenshot("composer-archive-snippet-dark")
+        app.buttons["quick-remove-attachment"].tap()
+        XCTAssertTrue(mic.waitForExistence(timeout: 4), "Removing the only attachment must restore the microphone")
     }
     func testQuickMicrophoneStartsInlineAndSendsAudio() {
         startQuickRecording()

@@ -21,6 +21,13 @@ import AppKit
         let payload = ["id": attachment.id, "url": attachment.url, "name": attachment.name, "mimeType": attachment.mimeType, "size": attachment.size] as [String: Any]
         if let data = try? JSONSerialization.data(withJSONObject: payload), let json = String(data: data, encoding: .utf8) { webView?.evaluateJavaScript("window.doompileEditor.insertAttachment(\(json))") }
     }
+    func removeAttachment(_ attachment: Attachment) {
+        pending.removeAll { $0.id == attachment.id }
+        pendingRecordings.removeAll { $0.1.id == attachment.id }
+        if let data = try? JSONEncoder().encode(attachment.url), let json = String(data: data, encoding: .utf8) {
+            webView?.evaluateJavaScript("window.doompileEditor.removeAttachment(\(json))")
+        }
+    }
     func insertRecording(_ id: String) {
         if let data = try? JSONEncoder().encode(id), let json = String(data: data, encoding: .utf8) { webView?.evaluateJavaScript("window.doompileEditor.insertRecording(\(json))") }
     }

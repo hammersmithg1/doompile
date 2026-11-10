@@ -1,5 +1,5 @@
 "use client";
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState, type ReactNode } from "react";
 import {
   ArrowDownToLine,
   ArrowUpRight,
@@ -275,16 +275,21 @@ function VideoPreview({ attachment }: { attachment: Attachment }) {
 export default function AttachmentPreview({
   attachment: a,
   onOpen,
+  compact,
+  transfer,
 }: {
   attachment: Attachment;
   onOpen?: () => void;
+  compact?: boolean;
+  transfer?: { icon: ReactNode; status: ReactNode };
 }) {
   const [imageFailed, setImageFailed] = useState(false);
   const [imageWidth, setImageWidth] = useState(240);
-  if (a.mimeType.startsWith("audio/"))
+  if (!compact && !transfer && a.mimeType.startsWith("audio/"))
     return <AudioPreview attachment={a} onDownload={onOpen} />;
-  if (a.mimeType.startsWith("video/")) return <VideoPreview attachment={a} />;
-  if (a.mimeType.startsWith("image/") && !imageFailed)
+  if (!compact && !transfer && a.mimeType.startsWith("video/"))
+    return <VideoPreview attachment={a} />;
+  if (!compact && !transfer && a.mimeType.startsWith("image/") && !imageFailed)
     return (
       <a
         className="attachment-picture"
@@ -341,9 +346,38 @@ export default function AttachmentPreview({
             : /json|js|ts|py|html|css|sh/.test(extension)
               ? FileCode2
               : File;
+  const className = `attachment-card ${image ? "attachment-image" : ""}`;
+  const content = (
+    <>
+      <span className="attachment-art">
+        {transfer ? transfer.icon : image && !imageFailed ? (
+          <img
+            src={safeURL(a.url)}
+            alt=""
+            loading="lazy"
+            onError={() => setImageFailed(true)}
+          />
+        ) : (
+          <Icon size={22} strokeWidth={1.5} />
+        )}
+      </span>
+      <span className="attachment-info">
+        <strong title={a.name}>{a.name}</strong>
+        <small>
+          {extension.toUpperCase().slice(0, 12) ||
+            a.mimeType.split("/")[1] ||
+            "Файл"}
+          <span>·</span>
+          {fileSize(a.size)}
+          {transfer && <><span>·</span>{transfer.status}</>}
+        </small>
+      </span>
+    </>
+  );
+  if (transfer) return <div className={`${className} attachment-transfer`}>{content}</div>;
   return (
     <a
-      className={`attachment-card ${image ? "attachment-image" : ""}`}
+      className={className}
       href={safeURL(a.url)}
       target={
         image || !a.url.startsWith("/api/attachments/") ? "_blank" : undefined
@@ -361,28 +395,7 @@ export default function AttachmentPreview({
       onContextMenu={(e) => e.stopPropagation()}
       aria-label={`Открыть ${a.name}`}
     >
-      <span className="attachment-art">
-        {image && !imageFailed ? (
-          <img
-            src={safeURL(a.url)}
-            alt=""
-            loading="lazy"
-            onError={() => setImageFailed(true)}
-          />
-        ) : (
-          <Icon size={22} strokeWidth={1.5} />
-        )}
-      </span>
-      <span className="attachment-info">
-        <strong>{a.name}</strong>
-        <small>
-          {extension.toUpperCase().slice(0, 12) ||
-            a.mimeType.split("/")[1] ||
-            "Файл"}
-          <span>·</span>
-          {fileSize(a.size)}
-        </small>
-      </span>
+      {content}
       <ArrowDownToLine className="attachment-action" size={15} />
     </a>
   );

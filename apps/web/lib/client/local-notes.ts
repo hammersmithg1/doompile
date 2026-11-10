@@ -1,5 +1,6 @@
 import { openDB, type DBSchema, type IDBPDatabase } from "idb";
 import type { Note } from "@doompile/core";
+import type { QuickUpload } from "./quick-uploads";
 import {
   acknowledge,
   conflictCopy,
@@ -11,6 +12,7 @@ export type StoredRecord = LocalRecord & {
   pending: number;
   writer?: string;
   error?: string;
+  uploads?: QuickUpload[];
 };
 interface NotesDB extends DBSchema {
   state: { key: string; value: any }; // Legacy snapshot retained until transactional migration completes.
@@ -69,9 +71,14 @@ export class LocalNotes {
   async read(ids: string[]) {
     return Promise.all(ids.map((id) => this.db.get("records", id)));
   }
-  async save(note: Note): Promise<string[]> {
+  async save(note: Note, uploads: QuickUpload[] = []): Promise<string[]> {
     const tx = this.db.transaction("records", "readwrite");
     const current = await tx.store.get(note.id);
+    if (current?.uploads?.length) {
+      await tx.done;
+      if (uploads.length) return [];
+      throw new Error("Дождись загрузки вложений, чтобы изменить заметку.");
+    }
     const changed = [note.id];
     if (
       current?.dirty &&
@@ -87,12 +94,37 @@ export class LocalNotes {
       await tx.store.put(stored(copy, current.writer), copy.note.id);
       changed.push(copy.note.id);
     }
+    const next = stored(localEdit(current, note, this.writer), this.writer);
     await tx.store.put(
-      stored(localEdit(current, note, this.writer), this.writer),
+      uploads.length ? { ...next, pending: 0, uploads } : next,
       note.id,
     );
     await tx.done;
     return changed;
+  }
+  async finishUpload(noteID: string, attachment: QuickUpload["attachment"]) {
+    const tx = this.db.transaction("records", "readwrite");
+    const current = await tx.store.get(noteID);
+    if (!current?.uploads?.some((file) => file.attachment.id === attachment.id))
+      return [];
+    const uploads = current.uploads.filter((file) => file.attachment.id !== attachment.id);
+    const note = {
+      ...current.note,
+      attachments: current.note.attachments.map((file) =>
+        file.id === attachment.id ? attachment : file,
+      ),
+    };
+    await tx.store.put({ ...current, note, uploads, pending: uploads.length ? 0 : 1 }, noteID);
+    await tx.done;
+    return [noteID];
+  }
+  async discardUploads(noteID: string) {
+    const tx = this.db.transaction("records", "readwrite");
+    const current = await tx.store.get(noteID);
+    if (!current?.uploads?.length) return [];
+    await tx.store.delete(noteID);
+    await tx.done;
+    return [noteID];
   }
   async accept(sent: Note, server: Note): Promise<string[]> {
     const tx = this.db.transaction("records", "readwrite");

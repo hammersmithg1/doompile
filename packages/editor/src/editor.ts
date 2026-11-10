@@ -191,6 +191,16 @@ const api = {
   insertAttachment(attachment: Media) {
     controller.insertAttachment(attachment);
   },
+  removeAttachment(url: string) {
+    const transaction = editor.state.tr;
+    editor.state.doc.descendants((node, position) => {
+      if ((node.type.name === "image" && node.attrs.src === url) ||
+          (node.type.name === "attachment" && node.attrs.url === url)) {
+        transaction.delete(transaction.mapping.map(position), transaction.mapping.map(position + node.nodeSize));
+      }
+    });
+    if (transaction.docChanged) editor.view.dispatch(transaction);
+  },
   insertRecording(id: string) {
     controller.insertRecording(id);
   },

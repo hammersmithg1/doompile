@@ -348,6 +348,21 @@ export class RecordingSession {
       });
     });
   }
+  async discardQuick() {
+    const draft = this.state.draft;
+    if (draft?.target !== "quick" || this.state.status === "uploading") return;
+    await this.finish("quick");
+    if (this.state.draft?.id !== draft.id) return;
+    this.emit({ status: "stopping" });
+    try {
+      await this.writes.catch(() => {});
+      await this.disk.remove();
+      if (this.state.url) URL.revokeObjectURL(this.state.url);
+      this.emit({ ...empty, analyser: undefined });
+    } catch {
+      this.emit({ status: "ready", error: "Не удалось убрать запись." });
+    }
+  }
   moveTo(target: string) {
     if (!this.state.draft || this.state.draft.target === target) return;
     const draft = { ...this.state.draft, target };

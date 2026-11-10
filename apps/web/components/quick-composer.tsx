@@ -1,25 +1,22 @@
 "use client";
+
 import { brandCopy, uiCopy } from "../../../packages/design/copy";
-import type {
-  Dispatch,
-  SetStateAction,
-  RefObject,
-  ClipboardEvent,
-} from "react";
-import { Plus, X, Paperclip, Maximize2, ArrowUp } from "../../../packages/design/ui-icons";
+import type { Dispatch, SetStateAction, RefObject, ClipboardEvent } from "react";
+import { X, Paperclip, Maximize2 } from "../../../packages/design/ui-icons";
 import type { Attachment } from "@doompile/core";
-import { recordingSession } from "@/lib/client/recording";
+import { recordingSession, type RecordingState } from "@/lib/client/recording";
 import { RecordingPreview } from "../../../packages/editor/src/media-preview";
-import AttachmentPreview from "./attachment-preview";
+import CaptureAttachment from "./capture-attachment";
 import VoiceCapture from "./voice-capture";
-type RecordingState = ReturnType<typeof recordingSession.getSnapshot>;
+
 export default function QuickComposer({
   recording,
   editorId,
   dropActive,
-  draftAttachments,
-  setDraftAttachments,
-  uploading,
+  attachments,
+  pending,
+  removeAttachment,
+  retryAttachment,
   text,
   setText,
   sending,
@@ -34,9 +31,10 @@ export default function QuickComposer({
   recording: RecordingState;
   editorId?: string;
   dropActive: boolean;
-  draftAttachments: Attachment[];
-  setDraftAttachments: Dispatch<SetStateAction<Attachment[]>>;
-  uploading: number;
+  attachments: Attachment[];
+  pending: string[];
+  removeAttachment: (id: string) => void;
+  retryAttachment: (id: string) => void;
   text: string;
   setText: Dispatch<SetStateAction<string>>;
   sending: boolean;
@@ -45,7 +43,7 @@ export default function QuickComposer({
   send: () => Promise<void>;
   openEditor: () => void;
   pasteQuick: (event: ClipboardEvent) => Promise<void>;
-  attachQuick: (files: File[]) => Promise<void>;
+  attachQuick: (files: File[]) => void;
   setSelected: (id: string) => void;
 }) {
   return (
@@ -58,73 +56,71 @@ export default function QuickComposer({
           void send();
         }}
       >
-        {recording.draft && recording.draft.target !== editorId && (
-          <div className="quick-recording">
-            <RecordingPreview
-              state={{
-                id: recording.draft.id,
-                status: recording.status,
-                seconds: recording.draft.seconds,
-                size: recording.draft.blob.size,
-                url: recording.url,
-                error: recording.error,
-                recovered: recording.recovered,
-                analyser: recording.analyser,
-              }}
-              onStop={recordingSession.stop}
-              onRetry={recordingSession.retry}
-            />
-            {recording.draft.target !== "quick" && (
-              <button
-                type="button"
-                className="quiet-button"
-                onClick={() => setSelected(recording.draft!.target)}
-              >
-                Открыть заметку с записью
-              </button>
-            )}
-          </div>
-        )}
         {dropActive && (
           <div className="quick-drop-label" role="status">
             Добавить в новое сообщение
           </div>
         )}
-        {(draftAttachments.length > 0 || uploading > 0) && (
-          <div className="quick-attachments" aria-live="polite">
-            {draftAttachments.map((a) => (
-              <div className="draft-attachment" key={a.id}>
-                <AttachmentPreview attachment={a} />
-                <button
-                  type="button"
-                  className="draft-remove"
-                  aria-label={`Убрать вложение ${a.name}`}
-                  onClick={() =>
-                    setDraftAttachments((current) =>
-                      current.filter((item) => item.id !== a.id),
-                    )
-                  }
-                >
-                  <X size={12} />
-                </button>
-              </div>
+        {(attachments.length > 0 || (recording.draft && recording.draft.target !== editorId)) && (
+          <div className="quick-attachments">
+            {attachments.map((attachment) => (
+              <CaptureAttachment
+                key={attachment.id}
+                attachment={attachment}
+                pending={pending.includes(attachment.id)}
+                onRetry={() => retryAttachment(attachment.id)}
+                onRemove={() => removeAttachment(attachment.id)}
+                compact
+              />
             ))}
-            {uploading > 0 && (
-              <span className="upload-status">
-                <span className="upload-spinner" />
-                Загружаем файлы…
-              </span>
+            {recording.draft && recording.draft.target !== editorId && (
+              <div className="quick-recording">
+                <RecordingPreview
+                  state={{
+                    id: recording.draft.id,
+                    status: recording.status,
+                    seconds: recording.draft.seconds,
+                    size: recording.draft.blob.size,
+                    url: recording.url,
+                    error: recording.error,
+                    recovered: recording.recovered,
+                    analyser: recording.analyser,
+                  }}
+                  onStop={recordingSession.stop}
+                  onRetry={recordingSession.retry}
+                />
+                {recording.draft.target === "quick" && recording.status === "ready" && (
+                  <button
+                    type="button"
+                    className="draft-remove"
+                    aria-label="Убрать голосовую запись"
+                    onClick={() => void recordingSession.discardQuick()}
+                  >
+                    <X size={14} />
+                  </button>
+                )}
+                {recording.draft.target !== "quick" && (
+                  <button
+                    type="button"
+                    className="quiet-button"
+                    onClick={() => setSelected(recording.draft!.target)}
+                  >
+                    Открыть заметку с записью
+                  </button>
+                )}
+              </div>
             )}
           </div>
         )}
         <div className="composer-input-row">
           <button
             type="button"
-            className="mobile-compose-plus"
-            aria-label="Новая заметка"
-            onClick={() => openEditor()}
+            className="icon-button attachment-trigger"
+            aria-label="Прикрепить файл"
+            disabled={sending}
+            onClick={() => fileInput.current?.click()}
           >
-            <Plus size={23} />
+            <Paperclip size={20} />
           </button>
           <textarea
             ref={input}
@@ -167,41 +163,21 @@ export default function QuickComposer({
             }}
           />
           <div className="composer-tools">
-            <VoiceCapture disabled={!!uploading} />
             <button
               type="button"
-              className="icon-button attachment-trigger"
-              aria-label="Прикрепить файл"
-              disabled={sending}
-              onClick={() => fileInput.current?.click()}
-            >
-              <Paperclip size={19} />
-            </button>
-            <button
-              type="button"
-              className="icon-button"
+              className="icon-button composer-expand"
               aria-label="Развернуть редактор"
               disabled={sending}
-              onClick={() => openEditor()}
+              onClick={openEditor}
             >
-              <Maximize2 size={17} />
+              <Maximize2 size={18} />
             </button>
-            <button
-              type="submit"
-              className="send-button"
-              aria-label="Сохранить заметку"
-              disabled={
-                (!text.trim() &&
-                  !draftAttachments.length &&
-                  recording.draft?.target !== "quick") ||
-                sending ||
-                (recording.draft?.target === "quick" &&
-                  ["starting", "uploading"].includes(recording.status)) ||
-                !!uploading
-              }
-            >
-              <ArrowUp size={22} />
-            </button>
+            <VoiceCapture
+              recording={recording}
+              hasContent={Boolean(text.trim() || attachments.length)}
+              sending={sending}
+              send={send}
+            />
           </div>
         </div>
       </form>
@@ -218,7 +194,7 @@ export default function QuickComposer({
         ref={fileInput}
         onChange={(e) => {
           const files = Array.from(e.target.files || []);
-          if (files.length) void attachQuick(files);
+          if (files.length) attachQuick(files);
           e.target.value = "";
         }}
       />

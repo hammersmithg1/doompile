@@ -31,6 +31,7 @@ private enum FeedItem: Identifiable {
     @Published var pending = 0
     @Published var syncing = false
     @Published var error: String?
+    @Published private(set) var uploadStates: [String: AttachmentUploadState] = [:]
     private let connectivity = NWPathMonitor()
     private var syncWorker: Task<Void, Never>?
     private var syncRequested = false
@@ -98,7 +99,8 @@ private enum FeedItem: Identifiable {
             let pull = pullRequested
             syncRequested = false; pullRequested = false
             do {
-                try await SyncService.shared.sync(pull: pull, onProgress: { @MainActor [weak self] in self?.reload() })
+                try await SyncService.shared.sync(pull: pull, onProgress: { @MainActor [weak self] in self?.reload() },
+                    onUpload: { @MainActor [weak self] id, state in self?.uploadStates[id] = state })
                 error = nil
             } catch { self.error = error.localizedDescription }
             reload()
@@ -113,9 +115,11 @@ private enum FeedItem: Identifiable {
     init() {
         #if DEBUG && targetEnvironment(simulator)
         if ProcessInfo.processInfo.environment["DOOMPILE_UI_TESTING"] == "1" {
-            // UI automation must never read or write the developer's live localhost pile.
-            Connection.endpoint = "http://localhost:1"
-            try? Connection.install(NativeAccount(id:"11111111-1111-4111-8111-111111111111",email:"ui-test@localhost",name:"UI Test",endpoint:"http://localhost:1"),token:String(repeating:"t",count:43))
+            // UI automation only uses the offline endpoint or the isolated CI fixture.
+            let environment = ProcessInfo.processInfo.environment
+            let endpoint = environment["DOOMPILE_UI_COMPOSER_FIXTURE"] == "1" ? "http://127.0.0.1:18743" : "http://localhost:1"
+            Connection.endpoint = endpoint
+            try? Connection.install(NativeAccount(id:"11111111-1111-4111-8111-111111111111",email:"ui-test@localhost",name:"UI Test",endpoint:endpoint),token:String(repeating:"t",count:43))
             AccountSession.shared.refresh()
             UserDefaults.standard.removeObject(forKey: "quickDraft")
             UserDefaults.standard.removeObject(forKey: "quickDraft:" + Connection.scope)
@@ -124,7 +128,18 @@ private enum FeedItem: Identifiable {
             if testAppearance != "preserve" { Connection.defaults.set(testAppearance, forKey: AppearanceMode.storageKey) }
             if ProcessInfo.processInfo.environment["DOOMPILE_UI_KEEP_TAGS"] != "1" { Connection.defaults.removeObject(forKey: TagCatalog.key) }
             if ProcessInfo.processInfo.environment["DOOMPILE_UI_KEEP_COLLAPSED"] != "1" { UserDefaults.standard.removeObject(forKey: "collapsedFeedSections:" + Connection.scope) }
-            // Each UI test starts with its own empty, offline pile on a dedicated simulator.
+            if environment["DOOMPILE_UI_ARCHIVE_FIXTURE"] == "1",
+               let file = try? Storage.shared.addFile(Data(repeating: 0, count: 184_100),
+                   name: "Проект с длинным названием для проверки.zip", mimeType: "application/zip") {
+                var note = Note.text("")
+                note.attachments = [file]
+                note.body = note.body.appendingQuickAttachment(file)
+                note.kind = "file"
+                if let data = try? JSONEncoder().encode(note) {
+                    UserDefaults.standard.set(data, forKey: "quickComposer:" + Connection.scope)
+                }
+            }
+            // Each UI test starts with an empty local pile on a dedicated simulator.
             if let state = try? Storage.shared.snapshot() {
                 for original in state.notes.values where original.deletedAt == nil {
                     var deleted = original; deleted.deletedAt = Note.now()
@@ -222,7 +237,13 @@ struct Home: View {
     @State private var noteLinkRequest = UUID()
     @State private var noteLinkError: String?
     @State private var settings = false
-    @State private var voiceError: String?
+    @State private var quickError: String?
+    @State private var quickHolding = false
+    @State private var quickImporter = false
+    @State private var quickPhotoPicker = false
+    @State private var quickPhoto: PhotosPickerItem?
+    @State private var quickPreparing: [Attachment] = []
+    @State private var preparingPhoto = false
     @StateObject private var recorder = VoiceRecorder()
     @FocusState private var focused: Bool
     @FocusState private var searchFocused: Bool
@@ -302,9 +323,14 @@ struct Home: View {
                 else { openComposer(draft) }
             }
         }
-        .alert("Голосовая заметка", isPresented: Binding(get: { voiceError != nil }, set: { if !$0 { voiceError = nil } })) {
-            Button("Понятно", role: .cancel) { voiceError = nil }
-        } message: { Text(voiceError ?? "") }
+        .fileImporter(isPresented: $quickImporter, allowedContentTypes: [.item], allowsMultipleSelection: true, onCompletion: importQuickFiles)
+        .photosPicker(isPresented: $quickPhotoPicker, selection: $quickPhoto, matching: .images)
+        .onChange(of: quickPhoto) { _, photo in
+            if let photo { importQuickPhoto(photo) }
+        }
+        .alert("Быстрая заметка", isPresented: Binding(get: { quickError != nil }, set: { if !$0 { quickError = nil } })) {
+            Button("Понятно", role: .cancel) { quickError = nil }
+        } message: { Text(quickError ?? "") }
     }
     private var homeContent: some View {
         GeometryReader { geometry in
@@ -387,7 +413,7 @@ struct Home: View {
     private func compactQuickNote(_ original: Note) -> Binding<Note> {
         Binding(get: { quickNote ?? original }, set: { note in
             guard !quickEditorOpen, quickNote?.id == original.id else { return }
-            do { try saveQuickDraft(note) } catch { voiceError = error.localizedDescription }
+            do { try saveQuickDraft(note) } catch { quickError = error.localizedDescription }
         })
     }
     private func expandQuickComposer() {
@@ -395,7 +421,7 @@ struct Home: View {
         quickTransitioning = true
         Task {
             defer { quickTransitioning = false }
-            do { try await refreshCompactQuickNote() } catch { voiceError = error.localizedDescription; return }
+            do { try await refreshCompactQuickNote() } catch { quickError = error.localizedDescription; return }
             focused = false
             let note = quickDraft
             quickUsesRichEditor = true
@@ -497,78 +523,137 @@ struct Home: View {
         NoteSwipeRow(note: note, revealedID: $revealedNoteID,
             onOpen: { focused = false; editor = note },
             onPin: { togglePinned(note) }, onUrgent: { toggleUrgent(note) },
-            onDelete: { library.remove(note) }) { NoteCard(note: note) }
+            onDelete: { library.remove(note) }) { NoteCard(note: note, uploadStates: library.uploadStates) }
             .padding(.horizontal, 20).padding(.vertical, 6)
     }
 
+    private var quickHasPayload: Bool {
+        recorder.recording || recorder.starting || recorder.hasPendingRecording
+            || !draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+            || quickNote.map({ EditorLifecycle.shouldSave($0, existing: false) }) == true
+    }
+    private var quickImportInProgress: Bool { !quickPreparing.isEmpty || preparingPhoto }
     private var composer: some View {
-        VStack(spacing: 8) {
-            if recorder.recording || recorder.starting {
-                HStack(spacing: 10) {
-                    Circle().fill(Palette.orange).frame(width: 7, height: 7)
-                    Text(recorder.starting ? "Включаем микрофон…" : "Запись  " + Note.timeLabel(recorder.seconds))
-                        .font(.system(size: 13, weight: .medium, design: .monospaced))
-                        .accessibilityIdentifier("quick-recording")
-                    Spacer()
-                    if recorder.recording {
-                        Button { finishQuickRecording() } label: { DoompileSymbol(systemName: "stop.fill").frame(width: 44, height: 44) }
-                            .accessibilityLabel("Остановить запись").accessibilityIdentifier("quick-stop-recording")
-                    } else {
-                        Button { recorder.cancel() } label: { DoompileSymbol(systemName: "xmark").frame(width: 44, height: 44) }
-                            .accessibilityLabel("Отменить запись")
-                    }
-                }.foregroundStyle(Palette.orange).padding(.horizontal, 14)
+        VStack(alignment: .leading, spacing: 4) {
+            if recorder.recording || recorder.starting || recorder.hasPendingRecording {
+                quickRecordingSnippet
+                    .padding(.horizontal, 6).padding(.top, 4)
             }
-            if recorder.hasPendingRecording {
-                Button("Повторить сохранение записи") { finishQuickRecording() }.font(.system(size: 12))
-            }
-            if let quickNote, !quickNote.attachments.isEmpty {
+            let attachments = quickNote?.attachments ?? []
+            if !attachments.isEmpty || quickImportInProgress {
                 ScrollView(.horizontal, showsIndicators: false) {
-                    HStack(spacing: 12) {
-                        ForEach(quickNote.attachments) { file in
-                            DoompileLabel(file.name, systemImage: file.mimeType.hasPrefix("audio/") ? "waveform" : "paperclip")
-                                .lineLimit(1).accessibilityIdentifier("quick-attachment")
+                    HStack(spacing: 8) {
+                        ForEach(attachments) { file in
+                            CaptureAttachmentSnippet(attachment: file, remove: { removeQuickAttachment(file) })
+                                .frame(width: 210).accessibilityIdentifier("quick-attachment")
                         }
-                    }.font(.system(size: 12)).padding(.horizontal, 12)
-                }
+                        ForEach(quickPreparing) { file in
+                            CaptureAttachmentSnippet(attachment: file, transfer: .uploading(nil))
+                                .frame(width: 210)
+                        }
+                        if preparingPhoto {
+                            CaptureAttachmentSnippet(attachment: Attachment(id: "photo", name: "Фото", mimeType: "image/*", url: "", size: 0),
+                                transfer: .uploading(nil)).frame(width: 210)
+                        }
+                    }.padding(.horizontal, 6)
+                }.padding(.top, 4)
             }
-            HStack(alignment: .bottom, spacing: 4) {
+            HStack(spacing: 2) {
+                quickAttachmentMenu
+                quickInput
                 Button(action: expandQuickComposer) {
-                    DoompileSymbol(systemName: draft.isEmpty && quickNote == nil && !recorder.recording ? "plus" : "arrow.up.left.and.arrow.down.right", size: 19)
-                        .font(.system(size: 19, weight: .medium)).frame(width: 40, height: 44).contentShape(Rectangle()).foregroundStyle(Palette.muted)
+                    DoompileSymbol(systemName: "arrow.up.left.and.arrow.down.right", size: 18)
+                        .frame(width: 44, height: 44).contentShape(Rectangle())
                 }
-                    .accessibilityLabel("Развернуть редактор").accessibilityIdentifier("expand-editor")
-                if quickUsesRichEditor, !quickEditorOpen, let quickNote {
-                    let binding = compactQuickNote(quickNote)
-                    RichEditorView(document: binding.body, plainText: binding.plainText, height: .constant(0),
-                        attachments: binding.attachments, notes: library.notes, bridge: quickBridge,
-                        onReference: { id in
-                            if let note = library.notes.first(where: { $0.id == id }) { editor = note }
-                        }, onRequestLink: { _ in expandQuickComposer() }, onAction: handleCompactCaptureAction, captureCompact: true,
-                        onPasteImage: { data, name, mime in try storeQuickImage(data, name: name, mime: mime, noteID: quickNote.id) })
-                        .id(quickNote.id).frame(height: 55).accessibilityIdentifier("quick-rich-input")
-                } else {
-                    TextField(UICopy.capturePlaceholder, text: Binding(get: { draft }, set: updateQuickText), axis: .vertical)
-                        .lineLimit(1...6).focused($focused).onTapGesture { focused = true }.font(.system(size: 16)).padding(.vertical, 12)
-                        .foregroundStyle(Palette.text).accessibilityIdentifier("quick-input")
+                .disabled(quickTransitioning || quickImportInProgress)
+                .accessibilityLabel("Развернуть редактор").accessibilityIdentifier("expand-editor")
+                quickVoiceAction
+            }.foregroundStyle(Palette.muted)
+        }
+        .buttonStyle(.plain)
+        .padding(4).background(Palette.card, in: RoundedRectangle(cornerRadius: 21))
+        .overlay { RoundedRectangle(cornerRadius: 21).strokeBorder(Palette.line) }
+        .shadow(color: .black.opacity(0.04), radius: 12, y: 3)
+        .padding(.horizontal, 14).padding(.vertical, 8).background(Palette.ink)
+    }
+    private var quickAttachmentMenu: some View {
+        Menu {
+            Button { focused = false; quickBridge.blur(); quickImporter = true } label: {
+                DoompileLabel("Файл", systemImage: "doc")
+            }
+            Button { focused = false; quickBridge.blur(); quickPhotoPicker = true } label: {
+                DoompileLabel("Фото", systemImage: "photo")
+            }
+        } label: {
+            DoompileSymbol(systemName: "paperclip", size: 19)
+                .frame(width: 44, height: 44).contentShape(Rectangle())
+        }
+        .disabled(quickTransitioning || quickImportInProgress)
+        .accessibilityLabel("Прикрепить файл").accessibilityIdentifier("quick-attach")
+    }
+    @ViewBuilder private var quickInput: some View {
+        if quickUsesRichEditor, !quickEditorOpen, let quickNote {
+            let binding = compactQuickNote(quickNote)
+            RichEditorView(document: binding.body, plainText: binding.plainText, height: .constant(0),
+                attachments: binding.attachments, notes: library.notes, bridge: quickBridge,
+                onReference: { id in
+                    if let note = library.notes.first(where: { $0.id == id }) { editor = note }
+                }, onRequestLink: { _ in expandQuickComposer() }, onAction: handleCompactCaptureAction, captureCompact: true,
+                onPasteImage: { data, name, mime in try storeQuickImage(data, name: name, mime: mime, noteID: quickNote.id) })
+                .id(quickNote.id).frame(height: 44).accessibilityIdentifier("quick-rich-input")
+        } else {
+            TextField(UICopy.capturePlaceholder, text: Binding(get: { draft }, set: updateQuickText), axis: .vertical)
+                .lineLimit(1).focused($focused).onTapGesture { focused = true }.font(.system(size: 16))
+                .foregroundStyle(Palette.text).frame(maxWidth: .infinity).accessibilityIdentifier("quick-input")
+        }
+    }
+    private var quickVoiceAction: some View {
+        QuickVoiceControl(showsSend: quickHasPayload,
+            enabled: !recorder.starting && !quickTransitioning && !quickImportInProgress,
+            onActivate: { if quickHasPayload { sendQuickDraft() } else { startQuickRecording() } },
+            onHoldStart: { startQuickRecording(held: true) }, onHoldEnd: finishQuickHold)
+            .frame(width: 44, height: 44)
+            .overlay {
+                DoompileSymbol(systemName: quickHasPayload ? "arrow.up" : "mic", size: 19)
+                    .frame(width: 40, height: 40)
+                    .background(quickHasPayload ? Palette.lime : .clear, in: RoundedRectangle(cornerRadius: 14))
+                    .foregroundStyle(quickHasPayload ? Palette.onLime : Palette.muted)
+                    .allowsHitTesting(false).accessibilityHidden(true)
+            }
+    }
+    private var quickRecordingSnippet: some View {
+        HStack(spacing: 8) {
+            DoompileSymbol(systemName: "waveform", size: 17)
+                .foregroundStyle(Palette.orange)
+                .frame(width: 32, height: 32)
+                .background(Palette.urgent, in: RoundedRectangle(cornerRadius: DesignTokens.radiusControl))
+                .accessibilityHidden(true)
+            VStack(alignment: .leading, spacing: 2) {
+                Text(recorder.starting ? "Включаем микрофон…" : "Голосовая заметка")
+                    .font(.system(size: 13, weight: .medium)).lineLimit(1)
+                if !recorder.starting {
+                    HStack(spacing: 5) {
+                        Text(Note.timeLabel(recorder.seconds)).monospacedDigit()
+                        if quickHolding { Text("· Отпусти, чтобы отправить").lineLimit(1) }
+                    }.font(.system(size: 11)).foregroundStyle(Palette.muted)
                 }
-                if !recorder.recording && !recorder.hasPendingRecording {
-                    Button(action: startQuickRecording) {
-                        DoompileSymbol(systemName: "mic", size: 18).font(.system(size: 18, weight: .medium))
-                            .frame(width: 40, height: 44).contentShape(Rectangle()).foregroundStyle(Palette.muted)
-                    }.disabled(recorder.starting || quickTransitioning)
-                        .accessibilityLabel("Записать голосовую заметку").accessibilityIdentifier("quick-microphone")
-                }
-                if recorder.recording || recorder.hasPendingRecording || !draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
-                    || quickNote.map({ EditorLifecycle.shouldSave($0, existing: false) }) == true {
-                    Button(action: sendQuickDraft) {
-                        DoompileSymbol(systemName: "arrow.up", size: 18).font(.system(size: 18, weight: .semibold)).frame(width: 40, height: 40).background(Palette.lime, in: RoundedRectangle(cornerRadius: 14)).foregroundStyle(Palette.onLime)
-                    }.disabled(recorder.starting || quickTransitioning).accessibilityLabel("Сохранить заметку").padding(.trailing, 4).padding(.bottom, 2)
-                }
-            }.padding(4).background(Palette.card, in: RoundedRectangle(cornerRadius: 21))
-                .overlay(RoundedRectangle(cornerRadius: 21).stroke(Palette.line))
-                .shadow(color: .black.opacity(0.04), radius: 12, y: 3)
-        }.padding(.horizontal, 14).padding(.top, 8).padding(.bottom, 8).background(Palette.ink)
+            }.accessibilityIdentifier("quick-recording")
+            Spacer(minLength: 0)
+            Button {
+                if recorder.starting { quickHolding = false; recorder.cancel() }
+                else { finishQuickRecording() }
+            } label: {
+                DoompileSymbol(systemName: recorder.starting ? "xmark" : recorder.hasPendingRecording ? "arrow.clockwise" : "stop.fill", size: 14)
+                    .foregroundStyle(Palette.orange)
+                    .frame(width: 44, height: 44).contentShape(Rectangle())
+            }
+            .accessibilityLabel(recorder.starting ? "Отменить запись" : recorder.hasPendingRecording ? "Повторить сохранение записи" : "Остановить запись")
+            .accessibilityIdentifier("quick-stop-recording")
+        }
+        .padding(.leading, 6).frame(minHeight: 44)
+        .foregroundStyle(Palette.text)
+        .background(Palette.card, in: RoundedRectangle(cornerRadius: DesignTokens.radiusCard))
+        .overlay { RoundedRectangle(cornerRadius: DesignTokens.radiusCard).strokeBorder(Palette.line) }
     }
     private var sidebar: some View {
         VStack(alignment: .leading, spacing: 0) {
@@ -671,29 +756,47 @@ struct Home: View {
         Button { togglePinned(note) } label: { DoompileLabel(note.pinned ? "Открепить" : "Закрепить", systemImage: "pin") }
         Button(role: .destructive) { library.remove(note) } label: { DoompileLabel("Удалить", systemImage: "trash") }
     }
-    private func startQuickRecording() {
-        guard !quickTransitioning else { return }
+    private func startQuickRecording(held: Bool = false) {
+        guard !quickTransitioning, !quickImportInProgress,
+              !recorder.starting, !recorder.recording, !recorder.hasPendingRecording else { return }
         guard (quickNote?.attachments.count ?? 0) < NoteLimits.attachments else {
-            voiceError = "В заметке уже \(NoteLimits.attachments) вложений."
+            quickError = "В заметке уже \(NoteLimits.attachments) вложений."
             return
         }
-        Task { do { try await recorder.start() } catch { voiceError = error.localizedDescription } }
+        quickHolding = held
+        Task {
+            do { try await recorder.start() }
+            catch { quickHolding = false; quickError = error.localizedDescription }
+        }
+    }
+    private func finishQuickHold(_ release: QuickVoiceControl.Release) {
+        guard quickHolding else { return }
+        quickHolding = false
+        if recorder.recording {
+            if release == .inside && recorder.elapsed >= 0.12 { sendQuickDraft() }
+            else { finishQuickRecording() }
+        } else if release == .outside {
+            recorder.cancel()
+        }
+        // A first-run permission prompt can outlast the press. That recording
+        // stays in the composer until the user stops or sends it explicitly.
     }
     private func finishQuickRecording() {
+        quickHolding = false
         do {
             guard library.isCurrentAccount else { throw DoompileError.authentication }
             var note = quickDraft
             let (id, attachment) = try recorder.attachRecording(to: &note)
             try saveQuickDraft(note)
             quickBridge.completeRecording(id, attachment: attachment)
-        } catch { voiceError = error.localizedDescription }
+        } catch { quickError = error.localizedDescription }
     }
     private func updateQuickText(_ text: String) {
         draft = text
         guard var note = quickNote, note.plainText != text else { return }
         note.plainText = text
         note.body = JSONValue.document(text).includingAttachments(note.attachments)
-        do { try saveQuickDraft(note) } catch { voiceError = error.localizedDescription }
+        do { try saveQuickDraft(note) } catch { quickError = error.localizedDescription }
     }
     private func saveQuickDraft(_ note: Note) throws {
         quickNote = note
@@ -702,15 +805,84 @@ struct Home: View {
         if let id = recorder.recordingID { durable.body = durable.body.removingRecording(id) }
         UserDefaults.standard.set(try JSONEncoder().encode(durable), forKey: quickComposerKey)
     }
+    private var quickAttachmentSlots: Int {
+        let reservedForRecording = recorder.recordingID != nil || recorder.starting ? 1 : 0
+        return NoteLimits.attachments - (quickNote?.attachments.count ?? 0) - reservedForRecording
+    }
     private func storeQuickImage(_ data: Data, name: String, mime: String, noteID: String) throws -> Attachment {
-        guard library.isCurrentAccount, !quickTransitioning, !quickEditorOpen,
-              var note = quickNote, note.id == noteID else { throw DoompileError.authentication }
-        let reserved = recorder.recording || recorder.starting ? 1 : 0
-        guard note.attachments.count + reserved < NoteLimits.attachments else { throw DoompileError.message("В заметке уже \(NoteLimits.attachments) вложений.") }
+        guard quickNote?.id == noteID else { throw DoompileError.authentication }
+        return try storeQuickFile(data, name: name, mime: mime)
+    }
+    @discardableResult
+    private func storeQuickFile(_ data: Data, name: String, mime: String) throws -> Attachment {
+        guard library.isCurrentAccount, !quickTransitioning, !quickEditorOpen else { throw DoompileError.authentication }
+        guard data.count <= 30 * 1024 * 1024 else { throw DoompileError.message("Максимальный размер вложения — 30 МБ.") }
+        guard quickAttachmentSlots > 0 else { throw DoompileError.message("В заметке уже \(NoteLimits.attachments) вложений.") }
+        var note = quickDraft
         let attachment = try Storage.shared.addFile(data, name: name, mimeType: mime)
         note.attachments.append(attachment)
+        note.body = note.body.appendingQuickAttachment(attachment)
+        if note.kind == "note" {
+            note.kind = mime.hasPrefix("image/") ? "image" : mime.hasPrefix("audio/") ? "audio" : "file"
+        }
         try saveQuickDraft(note)
         return attachment
+    }
+    private func removeQuickAttachment(_ attachment: Attachment) {
+        guard !quickTransitioning, var note = quickNote else { return }
+        note.attachments.removeAll { $0.id == attachment.id }
+        note.body = note.body.removingQuickAttachment(url: attachment.url)
+        if note.attachments.isEmpty && ["image", "audio", "file"].contains(note.kind) { note.kind = "note" }
+        do {
+            try saveQuickDraft(note)
+            quickBridge.removeAttachment(attachment)
+        } catch { quickError = error.localizedDescription }
+    }
+    private func importQuickFiles(_ result: Result<[URL], Error>) {
+        do {
+            let urls = try result.get()
+            guard urls.count <= quickAttachmentSlots else {
+                throw DoompileError.message("В одной заметке может быть не больше \(NoteLimits.attachments) вложений.")
+            }
+            let selected = urls.map { url in
+                Attachment(id: UUID().uuidString, name: url.lastPathComponent,
+                    mimeType: UTType(filenameExtension: url.pathExtension)?.preferredMIMEType ?? "application/octet-stream",
+                    url: url.absoluteString, size: 0)
+            }
+            quickPreparing = selected
+            Task {
+                for (url, item) in zip(urls, selected) {
+                    defer { quickPreparing.removeAll { $0.id == item.id } }
+                    do {
+                        let data = try await Task.detached(priority: .userInitiated) {
+                            let access = url.startAccessingSecurityScopedResource()
+                            defer { if access { url.stopAccessingSecurityScopedResource() } }
+                            if let size = try url.resourceValues(forKeys: [.fileSizeKey]).fileSize, size > 30 * 1024 * 1024 {
+                                throw DoompileError.message("Максимальный размер вложения — 30 МБ.")
+                            }
+                            return try Data(contentsOf: url, options: .mappedIfSafe)
+                        }.value
+                        let file = try storeQuickFile(data, name: item.name, mime: item.mimeType)
+                        if quickBridge.ready { quickBridge.insertAttachment(file) }
+                    } catch { quickError = error.localizedDescription }
+                }
+            }
+        } catch { quickError = error.localizedDescription }
+    }
+    private func importQuickPhoto(_ photo: PhotosPickerItem) {
+        preparingPhoto = true
+        Task {
+            defer { preparingPhoto = false; quickPhoto = nil }
+            do {
+                guard let data = try await photo.loadTransferable(type: Data.self) else {
+                    throw DoompileError.message("Не удалось прочитать фото.")
+                }
+                let type = EditorImagePaste.contentType(of: data) ?? photo.supportedContentTypes.first
+                let file = try storeQuickFile(data, name: "Фото." + (type?.preferredFilenameExtension ?? "jpg"),
+                    mime: type?.preferredMIMEType ?? "image/jpeg")
+                if quickBridge.ready { quickBridge.insertAttachment(file) }
+            } catch { quickError = error.localizedDescription }
+        }
     }
     private func refreshCompactQuickNote() async throws {
         guard quickBridge.ready, var note = quickNote else { return }
@@ -723,18 +895,20 @@ struct Home: View {
     private func handleCompactCaptureAction(_ action: String) {
         switch EditorAction(rawValue: action) {
         case .sendCapture: sendQuickDraft()
-        case .expandCapture, .file, .image, .drawing: expandQuickComposer()
+        case .expandCapture, .drawing: expandQuickComposer()
+        case .file: quickBridge.blur(); quickImporter = true
+        case .image: quickBridge.blur(); quickPhotoPicker = true
         case .voice: startQuickRecording()
         case .stopVoice, .retryVoice: if recorder.recording || recorder.hasPendingRecording { finishQuickRecording() }
         case .preferencesClosed, nil: break
         }
     }
     private func sendQuickDraft() {
-        guard !quickTransitioning, !recorder.starting else { return }
+        guard !quickTransitioning, !recorder.starting, !quickImportInProgress else { return }
         quickTransitioning = true
         Task {
             defer { quickTransitioning = false }
-            do { try await refreshCompactQuickNote() } catch { voiceError = error.localizedDescription; return }
+            do { try await refreshCompactQuickNote() } catch { quickError = error.localizedDescription; return }
             if recorder.recording || recorder.hasPendingRecording {
                 finishQuickRecording()
                 guard !recorder.recording, !recorder.hasPendingRecording else { return }
@@ -753,7 +927,10 @@ struct Home: View {
             document["attrs"] = .object(attrs)
             note.body = .object(document)
         }
-        if EditorLifecycle.shouldSave(note, existing: false), !library.save(note) { return false }
+        if EditorLifecycle.shouldSave(note, existing: false), !library.save(note) {
+            quickError = library.error
+            return false
+        }
         quickNote = nil
         quickUsesRichEditor = false
         draft = ""
@@ -765,6 +942,10 @@ struct Home: View {
 
 struct NoteCard: View {
     let note: Note
+    var uploadStates: [String: AttachmentUploadState] = [:]
+    private func transfer(for attachment: Attachment) -> AttachmentUploadState? {
+        attachment.url.hasPrefix("local:") ? uploadStates[attachment.id] ?? .queued : nil
+    }
     private var excerpt: String {
         var lines = note.plainText.components(separatedBy: .newlines)
         if lines.first?.trimmingCharacters(in: .whitespacesAndNewlines) == note.displayTitle.trimmingCharacters(in: .whitespacesAndNewlines) { lines.removeFirst() }
@@ -779,6 +960,14 @@ struct NoteCard: View {
         VStack(alignment: .leading, spacing: 0) {
             if let image {
                 AttachmentImage(attachment: image).frame(maxWidth: .infinity).frame(height: 200).clipped()
+                    .overlay(alignment: .bottomTrailing) {
+                        if let state = transfer(for: image) {
+                            AttachmentTransferBadge(state: state)
+                                .padding(.horizontal, 8).padding(.vertical, 6)
+                                .background(Palette.card, in: RoundedRectangle(cornerRadius: DesignTokens.radiusControl))
+                                .padding(8)
+                        }
+                    }
             }
             VStack(alignment: .leading, spacing: 8) {
                 if showTitle {
@@ -793,22 +982,13 @@ struct NoteCard: View {
                     Text(quote).font(.system(size: 13)).foregroundStyle(Palette.muted).lineLimit(3)
                 }
                 if !excerpt.isEmpty { Text(excerpt).font(.system(size: 14)).foregroundStyle(Palette.muted).lineLimit(5).lineSpacing(3) }
-                ForEach(note.attachments.filter { !$0.mimeType.hasPrefix("image/") }) { file in
-                    HStack(spacing: 9) {
-                        DoompileSymbol(systemName: file.mimeType.hasPrefix("audio/") ? "waveform" : "doc")
-                        VStack(alignment: .leading, spacing: 3) {
-                            Text(file.name).font(.system(size: 14)).lineLimit(2)
-                            Text(ByteCountFormatter.string(fromByteCount: Int64(file.size), countStyle: .file)).font(.system(size: 11)).foregroundStyle(Palette.muted)
-                        }
-                    }
+                ForEach(note.attachments.filter { $0.id != image?.id }) { file in
+                    CaptureAttachmentSnippet(attachment: file, transfer: transfer(for: file))
                 }
                 HStack(spacing: 6) {
                     if let source = note.source, let host = URL(string: source.url)?.host {
                         Text(host.replacingOccurrences(of: "www.", with: "")).lineLimit(1)
                         if let time = source.timestampSeconds { Text("· " + Note.timeLabel(time)) }
-                    }
-                    if note.attachments.filter({ $0.mimeType.hasPrefix("image/") }).count > 1 {
-                        Text("Фото: \(note.attachments.filter { $0.mimeType.hasPrefix("image/") }.count)")
                     }
                     Spacer(minLength: 4)
                     ForEach(note.tags.prefix(2), id: \.self) { Text("#" + $0).lineLimit(1) }
@@ -1337,6 +1517,7 @@ struct NoteTagsSheet: View {
     @Published private(set) var recordingID: String?
     @Published private var pendingURL: URL?
     var hasPendingRecording: Bool { pendingURL != nil }
+    var elapsed: TimeInterval { recorder?.currentTime ?? seconds }
     private var recorder: AVAudioRecorder?
     private var ticker: Task<Void, Never>?
     private var attempt = UUID()

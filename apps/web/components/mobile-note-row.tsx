@@ -18,9 +18,11 @@ export default function MobileNoteRow({
   onDelete,
   mobile,
   bareDesktop,
+  disabled,
 }: {
   mobile: boolean;
   bareDesktop?: boolean;
+  disabled?: boolean;
   children: ReactNode;
   id: string;
   openId: string | null;
@@ -38,7 +40,7 @@ export default function MobileNoteRow({
   current.current = { revealed, id, onOpen };
   const settle = useRef<(reveal: boolean) => void>(() => {});
   useLayoutEffect(() => {
-    if (!mobile || !row.current || !content.current) return;
+    if (!mobile || disabled || !row.current || !content.current) return;
     const root = row.current;
     let origin = 0;
     const motion = swipeMotion(
@@ -91,7 +93,7 @@ export default function MobileNoteRow({
       motion.stop();
       settle.current = () => {};
     };
-  }, [mobile]);
+  }, [mobile, disabled]);
   useLayoutEffect(() => settle.current(revealed), [revealed, mobile]);
   if (!mobile) return bareDesktop ? <>{children}</> : <div>{children}</div>;
   return (

@@ -48,16 +48,31 @@ button {
 :root[data-native-capture="compact"] {
   background: transparent !important;
 }
+/* Compact native hosts render media as snippets outside the editor. The
+   document keeps its original nodes for expansion and saving. */
 :root[data-native-capture="compact"] .block-editor {
-  min-height: 39px;
-  padding: 8px 6px;
-  font-size: 13px;
-  line-height: 23px;
+  min-height: 36px;
+  padding: 7px 4px;
+  font-size: 14px;
+  line-height: 22px;
+}
+:root[data-native-capture="compact"]:not([data-native-desktop="true"]) .block-editor {
+  min-height: 44px;
+  padding-block: 11px;
+  font-size: 16px;
 }
 :root[data-native-capture="compact"] .block-editor .tiptap {
-  min-height: 23px;
+  min-height: 22px;
+  max-height: 22px;
+  overflow-y: auto;
+  scrollbar-width: none;
 }
-:root[data-native-capture="compact"] :is(.block-handle, .editor-outline, .selection-toolbar, .recording-block, [data-attachment]:has(.attachment-audio)) {
+:root[data-native-capture="compact"] .tiptap :is(h1, h2, h3) {
+  font-size: inherit;
+  line-height: inherit;
+  margin: 0;
+}
+:root[data-native-capture="compact"] :is(.block-handle, .editor-outline, .selection-toolbar, .recording-block, [data-attachment], [data-resize-container]:has(img[data-original-src])) {
   display: none !important;
 }
 

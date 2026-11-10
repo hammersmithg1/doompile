@@ -20,7 +20,7 @@ import Combine
         do {
             if let draft = try store.load() { note = draft }
             else if let legacy = UserDefaults.standard.string(forKey: "macQuickDraft:" + Connection.scope), !legacy.isEmpty { note = Note.text(legacy); try store.save(note) }
-            richMounted = !note.body.isPlainParagraphDocument
+            richMounted = MacQuickDocument.needsRichEditor(note)
             for draft in try voice.recover(noteID: note.id) {
                 if note.body.hasFinishedRecording(draft.id) { voice.acknowledge(draft.id) }
                 else { try acceptRecording(draft.data, id: draft.id) }
@@ -41,6 +41,14 @@ import Combine
     }
     func editorReady() {
         if voice.recording { bridge.insertRecording(voice.id); bridge.recordingState(id: voice.id, seconds: voice.seconds) }
+    }
+    var attachments: [Attachment] {
+        richMounted && bridge.ready ? MacQuickDocument.referencedFiles(in: note) : note.attachments
+    }
+    var hasContent: Bool {
+        var draft = note
+        draft.attachments = attachments
+        return MacPreview.hasContent(draft)
     }
     private func schedule() {
         task?.cancel()
@@ -64,6 +72,7 @@ import Combine
                 if note.body == before { note.body = state.body; note.plainText = state.plainText }
             }
             var value = EditorLifecycle.prepared(note)
+            if richMounted { value.attachments = MacQuickDocument.referencedFiles(in: value) }
             guard EditorLifecycle.shouldSave(value, existing: false) else { return false }
             if let tag, !value.tags.contains(tag) { value.tags.append(tag) }
             guard let saved = library.save(value) else { throw DoompileError.message(library.error ?? "Не удалось сохранить заметку на Mac.") }
@@ -90,21 +99,24 @@ import Combine
     func storeFile(_ data: Data, name: String, mime: String) throws -> Attachment {
         guard accountScope == Connection.scope else { throw DoompileError.authentication }
         let reserved = voice.recording || startingVoice ? 1 : 0
-        guard data.count <= 30 * 1024 * 1024, note.attachments.count + reserved < NoteLimits.attachments else { throw DoompileError.message("До 100 вложений, не более 30 МБ каждое.") }
+        guard data.count <= 30 * 1024 * 1024, attachments.count + reserved < NoteLimits.attachments else { throw DoompileError.message("До 100 вложений, не более 30 МБ каждое.") }
         if !voice.recording, !MacPreview.hasContent(note) { note.createdAt = Note.now() }
         let attachment = try Storage.shared.addFile(data, name: name, mimeType: mime)
         note.attachments.append(attachment)
         return attachment
     }
     func removeFile(_ id: String) {
-        guard !richMounted else { return }
+        if richMounted {
+            if let file = note.attachments.first(where: { $0.id == id }) { bridge.removeAttachment(file) }
+            return
+        }
         note.attachments.removeAll { $0.id == id }; note = MacQuickDocument.updating(note, text: note.plainText)
     }
     func startRecording() async {
         guard !startingVoice, !voice.recording, !busy else { return }
         startingVoice = true; defer { startingVoice = false }
         do {
-            guard note.attachments.count < NoteLimits.attachments else { throw DoompileError.message("В одной заметке может быть до 100 вложений.") }
+            guard attachments.count < NoteLimits.attachments else { throw DoompileError.message("В одной заметке может быть до 100 вложений.") }
             if !MacPreview.hasContent(note) { note.createdAt = Note.now() }
             try persist()
             try await voice.start(noteID: note.id)
@@ -120,7 +132,7 @@ import Combine
     private func finishRecording() throws { let id = voice.id; try acceptRecording(voice.finish(), id: id) }
     private func acceptRecording(_ data: Data, id: String) throws {
         guard accountScope == Connection.scope else { throw DoompileError.authentication }
-        guard note.attachments.count < NoteLimits.attachments, data.count <= 30 * 1024 * 1024 else { throw DoompileError.message("До 100 вложений, не более 30 МБ каждое.") }
+        guard attachments.count < NoteLimits.attachments, data.count <= 30 * 1024 * 1024 else { throw DoompileError.message("До 100 вложений, не более 30 МБ каждое.") }
         let file = try Storage.shared.addFile(data, name: "Голосовая заметка.m4a", mimeType: "audio/mp4")
         note.attachments.append(file); note.body = note.body.finishingRecording(id, attachment: file)
         if richMounted { bridge.completeRecording(id, attachment: file) }

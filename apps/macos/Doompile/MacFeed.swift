@@ -22,6 +22,7 @@ struct MacUrgentCard: View {
 
 struct MacFeedRow: View {
     let note: Note
+    @EnvironmentObject private var library: DesktopLibrary
     var selected: Bool
     var open: () -> Void
     var menu: () -> AnyView
@@ -34,7 +35,9 @@ struct MacFeedRow: View {
                 if !excerpt.isEmpty { Text(excerpt).font(.system(size: 13)).lineSpacing(4).lineLimit(8).frame(maxWidth: .infinity, alignment: .leading).contentShape(Rectangle()).onTapGesture(perform: open) }
                 if excerpt.isEmpty && note.attachments.isEmpty && note.editorSource == nil { Text(note.displayTitle).font(.system(size: 13)).onTapGesture(perform: open) }
                 if !note.attachments.isEmpty {
-                    ForEach(Array(note.attachments.prefix(3))) { attachment in MacAttachmentCard(attachment: attachment) }
+                    ForEach(Array(note.attachments.prefix(3))) { attachment in
+                        MacAttachmentCard(attachment: attachment, transfer: attachment.url.hasPrefix("local:") ? library.uploadStates[attachment.id] ?? .queued : nil)
+                    }
                     if note.attachments.count > 3 { Text("Ещё \(note.attachments.count - 3) вложений").font(.system(size: 10)).foregroundStyle(MacPalette.muted) }
                 }
                 if !note.attachments.isEmpty {
@@ -56,8 +59,74 @@ struct MacFeedRow: View {
     }
 }
 
+struct MacFileSnippet: View {
+    let attachment: Attachment
+    var transfer: AttachmentUploadState? = nil
+    var onRemove: (() -> Void)? = nil
+    var onOpen: (() -> Void)? = nil
+
+    private var icon: String {
+        if attachment.mimeType.hasPrefix("image/") { return "photo" }
+        if attachment.mimeType.hasPrefix("audio/") { return "waveform" }
+        if attachment.mimeType == "application/zip" { return "doc.zipper" }
+        if attachment.mimeType == "application/pdf" { return "doc.text" }
+        if attachment.mimeType.hasPrefix("video/") { return "video" }
+        return "doc"
+    }
+
+    private var metadata: String {
+        let fileExtension = (attachment.name as NSString).pathExtension.uppercased()
+        let size = ByteCountFormatter.string(fromByteCount: Int64(attachment.size), countStyle: .file)
+        return fileExtension.isEmpty ? size : "\(fileExtension) · \(size)"
+    }
+
+    var body: some View {
+        HStack(spacing: 6) {
+            if let onOpen {
+                Button(action: onOpen) {
+                    HStack(spacing: 6) {
+                        details
+                        DoompileSymbol(systemName: "arrow.up.right", size: 11).foregroundStyle(MacPalette.muted)
+                            .frame(width: 24, height: 32)
+                    }
+                }.buttonStyle(.plain).help("Открыть \(attachment.name)").accessibilityLabel("Открыть \(attachment.name)")
+            } else {
+                details
+            }
+            if let onRemove {
+                Button(action: onRemove) {
+                    DoompileSymbol(systemName: "xmark", size: 11).foregroundStyle(MacPalette.muted)
+                        .frame(width: 28, height: 32).contentShape(Rectangle())
+                }.buttonStyle(.plain).help("Убрать вложение").accessibilityLabel("Убрать \(attachment.name)")
+            }
+        }
+        .padding(6)
+        .background(MacPalette.surface, in: RoundedRectangle(cornerRadius: 12))
+        .overlay(RoundedRectangle(cornerRadius: 12).strokeBorder(MacPalette.line))
+    }
+
+    private var details: some View {
+        HStack(spacing: 8) {
+            Group {
+                if let transfer { AttachmentTransferBadge(state: transfer, compact: true) }
+                else { DoompileSymbol(systemName: icon, size: 16).foregroundStyle(MacPalette.muted) }
+            }
+            .frame(width: 32, height: 32)
+            .background(MacPalette.tool, in: RoundedRectangle(cornerRadius: 8))
+            VStack(alignment: .leading, spacing: 2) {
+                Text(attachment.name).font(.system(size: 13, weight: .medium)).lineLimit(1).truncationMode(.middle)
+                Text(transfer?.label ?? metadata).font(.system(size: 11))
+                    .foregroundStyle(transfer == .failed ? MacPalette.orange : MacPalette.muted).monospacedDigit().lineLimit(1)
+                    .accessibilityHidden(transfer != nil)
+            }
+            .frame(minWidth: 88, maxWidth: 192, alignment: .leading)
+        }
+    }
+}
+
 struct MacAttachmentCard: View {
     let attachment: Attachment
+    var transfer: AttachmentUploadState? = nil
     @State private var file: URL?
     @State private var image: NSImage?
     @State private var player: AVPlayer?
@@ -65,24 +134,20 @@ struct MacAttachmentCard: View {
     @State private var loading = false
     var body: some View {
         Group {
-            if attachment.mimeType.hasPrefix("audio/") {
+            if let transfer {
+                MacFileSnippet(attachment: attachment, transfer: transfer)
+            } else if attachment.mimeType.hasPrefix("audio/") {
                 MacAudioCard(attachment: attachment)
             } else if attachment.mimeType.hasPrefix("image/"), let image {
                 Button(action: open) { Image(nsImage: image).resizable().scaledToFit().frame(maxWidth: 360, maxHeight: 260).clipShape(RoundedRectangle(cornerRadius: 8)) }.buttonStyle(.plain).accessibilityLabel("Открыть \(attachment.name)")
             } else if attachment.mimeType.hasPrefix("video/"), let player {
                 VideoPlayer(player: player).frame(width: 250, height: 155).clipShape(RoundedRectangle(cornerRadius: 8))
             } else {
-                Button(action: open) {
-                    HStack(spacing: 10) {
-                        DoompileSymbol(systemName: attachment.mimeType.hasPrefix("audio/") ? "play.circle" : attachment.mimeType == "application/pdf" ? "doc.richtext" : "doc", size: 21).font(.system(size: 21, weight: .light)).foregroundStyle(MacPalette.muted)
-                        VStack(alignment: .leading, spacing: 4) {
-                            Text(attachment.name).font(.system(size: 11, weight: .medium)).lineLimit(1)
-                            Text(error ?? ByteCountFormatter.string(fromByteCount: Int64(attachment.size), countStyle: .file)).font(.system(size: 9)).foregroundStyle(MacPalette.muted).lineLimit(1)
-                        }
-                        Spacer(minLength: 8)
-                        if loading { ProgressView().controlSize(.mini) } else { DoompileSymbol(systemName: "arrow.up.right", size: 10).font(.system(size: 10)).foregroundStyle(MacPalette.muted) }
-                    }.padding(11).frame(maxWidth: 330).background(MacPalette.surface, in: RoundedRectangle(cornerRadius: 9)).overlay(RoundedRectangle(cornerRadius: 9).stroke(MacPalette.line))
-                }.buttonStyle(.plain).help("Открыть \(attachment.name)")
+                HStack(spacing: 8) {
+                    MacFileSnippet(attachment: attachment, onOpen: loading ? nil : open)
+                    if loading { ProgressView().controlSize(.mini).accessibilityLabel("Загрузка вложения") }
+                    if let error { Text(error).font(.system(size: 11)).foregroundStyle(MacPalette.orange).lineLimit(2) }
+                }
             }
         }
         .task(id: attachment.url) {

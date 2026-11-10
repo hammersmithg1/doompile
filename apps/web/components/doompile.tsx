@@ -54,6 +54,7 @@ import {
   type DocumentNode,
 } from "@doompile/core";
 import * as store from "@/lib/client/store";
+import { forgetUpload, quickUpload, uploadQuickFile, uploadState, type QuickUpload } from "@/lib/client/quick-uploads";
 import {
   appearanceMode,
   resolvedAppearance,
@@ -62,7 +63,7 @@ import {
 import { Autosave } from "@/lib/client/autosave";
 import { prepareDocument } from "../../../packages/editor/src/blocks";
 import LinkedText, { splitLinks } from "./linked-text";
-import AttachmentPreview from "./attachment-preview";
+import CaptureAttachment from "./capture-attachment";
 import LinkPreview from "./link-preview";
 import NoteExcerpt from "./note-excerpt";
 import { groupFeed } from "@/lib/client/feed-groups";
@@ -134,6 +135,11 @@ function sourceName(note: Note) {
     } catch {}
   return typeLabel[note.kind];
 }
+function attachmentNode(a: Attachment): DocumentNode {
+  return a.mimeType.startsWith("image/")
+    ? { type: "image", attrs: { src: a.url, alt: a.name } }
+    : { type: "attachment", attrs: { url: a.url, name: a.name, mimeType: a.mimeType } };
+}
 export default function Doompile({
   initialNoteID,
 }: { initialNoteID?: string } = {}) {
@@ -151,7 +157,14 @@ export default function Doompile({
     y: number;
   } | null>(null);
   const [draftAttachments, setDraftAttachments] = useState<Attachment[]>([]);
-  const [uploading, setUploading] = useState(0);
+  const [draftUploads, setDraftUploads] = useState<QuickUpload[]>([]);
+  const draftUploadsRef = useRef(draftUploads);
+  const draftAttachmentsRef = useRef(draftAttachments);
+  draftAttachmentsRef.current = draftAttachments;
+  function changeDraftUploads(files: QuickUpload[]) {
+    draftUploadsRef.current = files;
+    setDraftUploads(files);
+  }
   const [dropActive, setDropActive] = useState(false);
   const menuRef = useRef<HTMLDivElement>(null);
   const [collapsed, setCollapsed] = useState<Record<string, boolean>>({});
@@ -174,6 +187,7 @@ export default function Doompile({
       notify("Некорректная ссылка на заметку.");
       return;
     }
+    if (id && store.getSnapshot().queuedUploads[id]) return;
     setSelectedState(id);
     if (id && id !== selectedRef.current) track("note.opened", { note_id: id });
     writeNoteLocation(id);
@@ -214,7 +228,7 @@ export default function Doompile({
       async (note) => {
         if (
           latestComposer.current?.id === note.id &&
-          recordingSession.getSnapshot().draft?.target === "quick"
+          (recordingSession.getSnapshot().draft?.target === "quick" || draftUploadsRef.current.length)
         ) return;
         setSaveStatus("Сохраняем…");
         const stored = store
@@ -326,7 +340,7 @@ export default function Doompile({
           const current = latestEditor.current;
           if (
             current && latestComposer.current?.id === current.id &&
-            recordingSession.getSnapshot().draft?.target === "quick"
+            (recordingSession.getSnapshot().draft?.target === "quick" || draftUploadsRef.current.length)
           ) {
             if (!closing.current && !submitting.current) {
               const stored = localStorage.getItem(collapsedCaptureKey);
@@ -377,20 +391,27 @@ export default function Doompile({
       try {
         localStorage.setItem("doompile-draft", text);
       } catch {}
-    if (input.current) {
-      input.current.style.height = "auto";
-      input.current.style.height = `${Math.min(input.current.scrollHeight, 180)}px`;
-    }
   }, [text, draftReady]);
+  function persistDraftAttachments() {
+    const readyFiles = draftUploadsRef.current.flatMap((file) => {
+      const state = uploadState(file.attachment.id);
+      return state.status === "ready" ? [state.attachment] : [];
+    });
+    try {
+      localStorage.setItem(
+        "doompile-attachment-draft",
+        JSON.stringify([...draftAttachmentsRef.current, ...readyFiles]),
+      );
+    } catch {}
+  }
   useEffect(() => {
-    if (draftReady)
-      try {
-        localStorage.setItem(
-          "doompile-attachment-draft",
-          JSON.stringify(draftAttachments),
-        );
-      } catch {}
-  }, [draftReady, draftAttachments]);
+    if (draftReady) persistDraftAttachments();
+  }, [draftReady, draftAttachments, draftUploads]);
+  useEffect(() => {
+    const retry = () => draftUploadsRef.current.forEach(startDraftUpload);
+    window.addEventListener("online", retry);
+    return () => window.removeEventListener("online", retry);
+  }, []);
   useEffect(() => {
     if (!toast) return;
     const id = setTimeout(() => {
@@ -485,13 +506,10 @@ export default function Doompile({
     return animation;
   }
   async function closeEditor() {
-    if (
-      closing.current || submitting.current || editorBusy || (composing && uploading > 0)
-    )
-      return false;
+    if (closing.current || submitting.current || editorBusy) return false;
     closing.current = true;
     const keepDraft = composing &&
-      recordingSession.getSnapshot().draft?.target === "quick";
+      (recordingSession.getSnapshot().draft?.target === "quick" || draftUploadsRef.current.length > 0);
     try {
       if (
         editor &&
@@ -696,7 +714,7 @@ export default function Doompile({
       ...(selectedTag ? [selectedTag] : []),
     ]),
   ].sort((a, b) => a.localeCompare(b, "ru"));
-  const activeNote = notes.find((n) => n.id === selected);
+  const activeNote = notes.find((n) => n.id === selected && !state.queuedUploads[n.id]);
   useEffect(() => {
     if (editorMode === "compose" && editor) return;
     if (!activeNote) {
@@ -781,7 +799,7 @@ export default function Doompile({
         .toLocaleLowerCase()
         .includes(query.toLocaleLowerCase()),
     );
-  const urgent = filtered.filter((n) => n.urgent);
+  const urgent = filtered.filter((n) => n.urgent && !state.queuedUploads[n.id]);
   useEffect(() => {
     if (!query.trim()) return;
     const timer = setTimeout(
@@ -795,7 +813,7 @@ export default function Doompile({
     return () => clearTimeout(timer);
   }, [query, filtered.length]);
   const normal = filtered
-    .filter((n) => !n.urgent)
+    .filter((n) => !n.urgent || state.queuedUploads[n.id])
     .sort(
       (a, b) =>
         Number(b.pinned) - Number(a.pinned) || compareNoteCreation(a, b),
@@ -842,6 +860,7 @@ export default function Doompile({
     if (
       !editorBusy &&
       !voiceCapture &&
+      !(editorMode === "compose" && draftUploadsRef.current.length) &&
       !submitting.current &&
       (shouldPersistNote(
         note,
@@ -852,7 +871,7 @@ export default function Doompile({
       setSaveStatus("Сохраняем…");
       autosave.current?.schedule(note);
     }
-  }, [editor, editTags, editorBusy, editorMode, recording.draft?.target]);
+  }, [editor, editTags, editorBusy, editorMode, recording.draft?.target, draftUploads.length]);
   useEffect(() => {
     if (recording.error && !recording.draft) notify(recording.error);
   }, [recording.error]);
@@ -965,22 +984,24 @@ export default function Doompile({
     setCollapsedCapture(null);
     setText("");
     setDraftAttachments([]);
+    changeDraftUploads([]);
     try {
       localStorage.removeItem(collapsedCaptureKey);
     } catch {}
   }
-  function uploadRecording(draft: RecordingDraft) {
-    return upload(
-      new window.File(
-        [draft.blob],
-        `Голосовая заметка.${draft.mimeType.includes("mp4") ? "m4a" : "webm"}`,
-        { type: draft.mimeType },
-      ),
+  function recordingFile(draft: RecordingDraft) {
+    return new window.File(
+      [draft.blob],
+      `Голосовая заметка.${draft.mimeType.includes("mp4") ? "m4a" : "webm"}`,
+      { type: draft.mimeType },
     );
   }
-  function compactNote(id?: string) {
+  function uploadRecording(draft: RecordingDraft) {
+    return upload(recordingFile(draft));
+  }
+  function compactNote(id?: string, extras: Attachment[] = []) {
     const plainText = text.trim();
-    const attachments = draftAttachments;
+    const attachments = [...draftAttachments, ...extras];
     if (collapsedCapture) {
       const note = editableNote({
         ...collapsedCapture,
@@ -1005,9 +1026,7 @@ export default function Doompile({
         type: "doc",
         content: [
           ...(textToDocument(plainText).content || []),
-          ...attachments.map((a) => a.mimeType.startsWith("image/")
-            ? { type: "image", attrs: { src: a.url, alt: a.name } }
-            : { type: "attachment", attrs: { url: a.url, name: a.name, mimeType: a.mimeType } }),
+          ...attachments.map(attachmentNode),
         ],
       },
       ...(filter === "tag" ? { tags: [selectedTag] } : {}),
@@ -1061,39 +1080,61 @@ export default function Doompile({
     const activeRecording = recordingState.draft;
     const ownsRecording = activeRecording?.target === "quick";
     const expandedDraft = expanded && latestComposer.current;
-    if (ownsRecording && ["starting", "uploading"].includes(recordingState.status)) return;
+    const files = draftUploadsRef.current;
+    if (ownsRecording && ["starting", "stopping", "uploading"].includes(recordingState.status)) return;
     if (
-      (!expandedDraft && !text.trim() && !draftAttachments.length && !ownsRecording) ||
-      submitting.current || closing.current ||
-      uploading
-    )
-      return;
+      (!expandedDraft && !text.trim() && !draftAttachments.length && !files.length && !ownsRecording) ||
+      submitting.current || closing.current
+    ) return;
     submitting.current = true;
     setSending(true);
+    const pending: QuickUpload[] = [];
+    const extras = files.map((file) => {
+      const transfer = uploadState(file.attachment.id);
+      if (transfer.status === "ready") return transfer.attachment;
+      pending.push(file);
+      return file.attachment;
+    });
     try {
       if (ownsRecording) {
         await autosave.current?.flush();
         await recordingSession.finish("quick");
-        const note = expandedDraft && latestComposer.current
-          ? noteForEditorSave(latestComposer.current, editTags)
-          : compactNote(activeRecording.id);
+      }
+      const expandedNote = expandedDraft && latestComposer.current
+        ? noteForEditorSave(latestComposer.current, editTags)
+        : undefined;
+      const note = expandedNote ? {
+        ...expandedNote,
+        attachments: [...expandedNote.attachments, ...extras],
+        body: {
+          ...expandedNote.body,
+          content: [
+            ...(expandedNote.body.content || []),
+            ...extras.map(attachmentNode),
+          ],
+        },
+      } : compactNote(ownsRecording ? activeRecording.id : undefined, extras);
+      if (ownsRecording) {
         await recordingSession.deliver(async (draft) => {
           const stored = store.getSnapshot().notes.find((saved) => saved.id === note.id);
-          const attachment = (stored && findFinishedRecording(stored, draft.id)) ||
-            await uploadRecording(draft);
+          if (stored && findFinishedRecording(stored, draft.id)) return;
+          const voice = quickUpload(recordingFile(draft), draft.id);
+          pending.push(voice);
           await store.saveNote({
             ...note,
             title: note.title || "Голосовая заметка",
             kind: !note.plainText.trim() && !note.attachments.length ? "audio" : note.kind,
-            body: finishRecordingDocument(note.body, draft.id, attachment),
-            attachments: [...note.attachments.filter((file) => file.id !== attachment.id), attachment],
-          });
+            body: finishRecordingDocument(note.body, draft.id, voice.attachment),
+            attachments: [...note.attachments, voice.attachment],
+          }, pending);
         });
         const remaining = recordingSession.getSnapshot();
         if (remaining.draft) throw new Error(remaining.error || "Не удалось завершить запись.");
       } else {
-        await store.saveNote(expandedDraft ? noteForEditorSave(expandedDraft, editTags) : compactNote());
+        await store.saveNote(note, pending);
       }
+      for (const file of files)
+        if (!pending.includes(file)) forgetUpload(file.attachment.id);
       clearCapture();
       if (expandedDraft) {
         setEditor(null);
@@ -1102,10 +1143,13 @@ export default function Doompile({
       }
       setDemo(false);
       setFilter("all");
-      notify(uiCopy.saved);
-      input.current?.focus({ preventScroll: true });
+      setQuery("");
+      const group = groupFeed([note])[0]?.id;
+      if (group) setCollapsed((current) => current[group] ? { ...current, [group]: false } : current);
+      notify(pending.length ? "Заметка сохранена на устройстве" : uiCopy.saved);
+      if (!isMobile) input.current?.focus({ preventScroll: true });
     } catch (error) {
-      notify(ownsRecording && error instanceof Error ? error.message : "Не удалось сохранить. Попробуй ещё раз.");
+      notify(error instanceof Error ? error.message : "Не удалось сохранить. Попробуй ещё раз.");
     } finally {
       submitting.current = false;
       setSending(false);
@@ -1141,6 +1185,7 @@ export default function Doompile({
         );
         if (
           draft?.note?.id &&
+          !draftUploadsRef.current.length &&
           (draft.note.plainText === text ||
             (!text.trim() && !draftAttachments.length))
         ) {
@@ -1242,66 +1287,48 @@ export default function Doompile({
       );
     return (await r.json()).attachment;
   }
-  async function attachQuick(files: File[]) {
-    setUploading((count) => count + 1);
+  function startDraftUpload(file: QuickUpload) {
+    void uploadQuickFile(file).then(() => {
+      if (!submitting.current && draftUploadsRef.current.includes(file))
+        persistDraftAttachments();
+    }).catch(() => {});
+  }
+  function attachQuick(files: File[]) {
+    if (submitting.current || closing.current || latestComposer.current) return;
+    const available = NOTE_LIMITS.attachments - draftAttachmentsRef.current.length - draftUploadsRef.current.length;
+    if (files.length > available)
+      notify(`В одну заметку можно добавить до ${NOTE_LIMITS.attachments} вложений.`);
+    const added = files.slice(0, Math.max(available, 0)).map((file) => quickUpload(file));
+    if (!added.length) return;
+    changeDraftUploads([...draftUploadsRef.current, ...added]);
+    added.forEach(startDraftUpload);
+  }
+  function retryDraftUpload(id: string) {
+    const file = draftUploadsRef.current.find((item) => item.attachment.id === id);
+    if (file && !submitting.current) startDraftUpload(file);
+  }
+  function removeDraftAttachment(id: string) {
+    if (submitting.current) return;
+    changeDraftUploads(draftUploadsRef.current.filter((item) => item.attachment.id !== id));
+    setDraftAttachments((current) => current.filter((item) => item.id !== id));
+    forgetUpload(id);
+  }
+  async function discardQueuedNote(note: Note) {
     try {
-      for (const file of files) {
-        const attachment = await upload(file);
-        if (latestComposer.current) {
-          const id = latestComposer.current.id;
-          if (editorAPI.current) {
-            setEditor((current) =>
-              current?.id === id
-                ? {
-                    ...current,
-                    attachments: [...current.attachments, attachment],
-                  }
-                : current,
-            );
-            editorAPI.current.insertAttachment(attachment);
-          } else {
-            setEditor((current) =>
-              current?.id === id
-                ? {
-                    ...current,
-                    attachments: [...current.attachments, attachment],
-                    body: {
-                      ...current.body,
-                      content: [
-                        ...(current.body.content || []),
-                        attachment.mimeType.startsWith("image/")
-                          ? {
-                              type: "image",
-                              attrs: {
-                                src: attachment.url,
-                                alt: attachment.name,
-                              },
-                            }
-                          : { type: "attachment", attrs: { ...attachment } },
-                        { type: "paragraph" },
-                      ],
-                    },
-                  }
-                : current,
-            );
-          }
-        } else setDraftAttachments((current) => [...current, attachment]);
+      if (await store.discardUploads(note.id)) notify("Заметка удалена");
+      else {
+        const ready = store.getSnapshot().notes.find((item) => item.id === note.id);
+        if (ready) await update(ready, { deletedAt: new Date().toISOString() });
       }
-    } catch (error) {
-      notify(
-        error instanceof Error ? error.message : "Не удалось загрузить файл",
-      );
-    } finally {
-      setUploading((count) => count - 1);
+    } catch {
+      notify("Не удалось удалить заметку. Попробуй ещё раз.");
     }
   }
   useEffect(
     () =>
       installFileDrop(
         window,
-        (files) => {
-          void attachQuick(files);
-        },
+        attachQuick,
         setDropActive,
         {
           accept: (target) =>
@@ -1353,15 +1380,29 @@ export default function Doompile({
         .map((tag) => tag.trim())
         .filter(Boolean)}
       availableTags={allTags}
-      status={composing && uploading > 0 ? "Загружаем вложения…" :
-        composing && recording.draft?.target === "quick" ? "Черновик" : saveStatus}
-      busy={editorBusy || (composing && uploading > 0)}
+      status={composing && (draftUploads.length || recording.draft?.target === "quick")
+        ? "Черновик" : saveStatus}
+      busy={editorBusy}
+      captureAttachments={composing && draftUploads.length ? (
+        <div className="quick-attachments editor-capture-attachments">
+          {draftUploads.map(({ attachment }) => (
+            <CaptureAttachment
+              key={attachment.id}
+              attachment={attachment}
+              pending
+              compact
+              onRetry={() => retryDraftUpload(attachment.id)}
+              onRemove={() => removeDraftAttachment(attachment.id)}
+            />
+          ))}
+        </div>
+      ) : undefined}
       existing={editorMode === "note"}
       expanded={detailExpanded}
       onClose={() => {
         void closeEditor();
       }}
-      onSendCapture={composing && recording.draft?.target === "quick"
+      onSendCapture={composing && (draftUploads.length || recording.draft?.target === "quick")
         ? () => void send(true) : undefined}
       sendingCapture={composing && sending}
       onExpand={() => setDetailExpanded((value) => !value)}
@@ -1816,6 +1857,7 @@ export default function Doompile({
                   {!collapsed[group.id] && (
                     <div id={`section-${group.id}`}>
                       {group.notes.map((n) => {
+                        const pending = state.queuedUploads[n.id];
                         const links = [
                           ...new Set([
                             ...(n.source ? [n.source.url] : []),
@@ -1827,6 +1869,7 @@ export default function Doompile({
                         return (
                           <MobileNoteRow
                             mobile={isMobile}
+                            disabled={!!pending}
                             key={n.id}
                             id={n.id}
                             openId={openSwipe}
@@ -1846,12 +1889,12 @@ export default function Doompile({
                             }}
                           >
                             <article
-                              onContextMenu={(e) => showNoteMenu(e, n)}
+                              onContextMenu={pending ? undefined : (e) => showNoteMenu(e, n)}
                               className={`note-row ${n.kind === "note" ? "text-note" : ""} ${selected === n.id ? "active" : ""}`}
                             >
                               <div
-                                role="button"
-                                tabIndex={0}
+                                role={pending ? undefined : "button"}
+                                tabIndex={pending ? undefined : 0}
                                 className="note-main"
                                 onClick={() => setSelected(n.id)}
                                 onKeyDown={(e) => {
@@ -1903,9 +1946,11 @@ export default function Doompile({
                                     links.length > 0) && (
                                     <div className="snippet-attachments">
                                       {n.attachments.map((attachment) => (
-                                        <AttachmentPreview
+                                        <CaptureAttachment
                                           key={attachment.id}
                                           attachment={attachment}
+                                          pending={pending?.includes(attachment.id)}
+                                          onRetry={() => store.retryUploads(n.id)}
                                         />
                                       ))}
                                       {links.map((url) => (
@@ -1938,15 +1983,25 @@ export default function Doompile({
                               <time className="row-time">
                                 {time(n.createdAt)}
                               </time>
-                              <button
-                                className="icon-button row-more"
+                              {pending ? (
+                                <button
+                                  className="icon-button row-more queued-note-delete"
+                                  aria-label={`Удалить заметку ${n.title}`}
+                                  onClick={() => void discardQueuedNote(n)}
+                                >
+                                  <Trash2 size={16} />
+                                </button>
+                              ) : (
+                                <button
+                                  className="icon-button row-more"
                                 aria-label={`Меню заметки ${n.title}`}
                                 aria-haspopup="menu"
                                 aria-expanded={noteMenu?.id === n.id}
                                 onClick={(e) => showNoteMenu(e, n)}
                               >
-                                <MoreHorizontal size={19} />
-                              </button>
+                                  <MoreHorizontal size={19} />
+                                </button>
+                              )}
                             </article>
                           </MobileNoteRow>
                         );
@@ -1988,16 +2043,17 @@ export default function Doompile({
                 recording={recording}
                 editorId={editor?.id}
                 dropActive={dropActive}
-                draftAttachments={draftAttachments}
-                setDraftAttachments={setDraftAttachments}
-                uploading={uploading}
+                attachments={[...draftAttachments, ...draftUploads.map((file) => file.attachment)]}
+                pending={draftUploads.map((file) => file.attachment.id)}
+                removeAttachment={removeDraftAttachment}
+                retryAttachment={retryDraftUpload}
                 text={text}
                 setText={setText}
                 sending={sending}
                 input={input}
                 fileInput={fileInput}
                 send={send}
-                openEditor={openEditor}
+                openEditor={() => openEditor()}
                 pasteQuick={pasteQuick}
                 attachQuick={attachQuick}
                 setSelected={setSelected}

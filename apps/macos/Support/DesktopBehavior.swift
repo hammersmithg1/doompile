@@ -62,6 +62,24 @@ final class MacCaptureDraftStore {
 }
 
 enum MacQuickDocument {
+    static func needsRichEditor(_ note: Note) -> Bool {
+        !note.body.isPlainParagraphDocument && note.body != updating(note, text: note.plainText).body
+    }
+
+    static func referencedFiles(in note: Note) -> [Attachment] {
+        var urls = Set<String>()
+        func collect(_ value: JSONValue) {
+            guard case .object(let node) = value else { return }
+            if case .object(let attrs) = node["attrs"] {
+                if node["type"] == .string("image"), let url = attrs["src"]?.string { urls.insert(url) }
+                if node["type"] == .string("attachment"), let url = attrs["url"]?.string { urls.insert(url) }
+            }
+            if case .array(let children) = node["content"] { children.forEach(collect) }
+        }
+        collect(note.body)
+        return note.attachments.filter { urls.contains($0.url) }
+    }
+
     /// The compact native input edits text; retain every media node's metadata.
     static func updating(_ original: Note, text: String) -> Note {
         var media: [String: JSONValue] = [:]

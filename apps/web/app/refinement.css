@@ -1120,10 +1120,36 @@ html[data-theme="dark"] .note-preview-more {
 }
 .composer-input-row {
   display: flex;
-  align-items: flex-end;
-  gap: 7px;
+  align-items: center;
+  gap: 5px;
   min-width: 0;
   width: 100%;
+}
+.quick-composer textarea {
+  height: 42px;
+}
+.quick-composer .attachment-trigger,
+.quick-composer .composer-tools .composer-expand,
+.quick-composer .composer-tools .composer-primary {
+  display: inline-flex;
+  width: 42px;
+  height: 42px;
+  flex: 0 0 42px;
+  margin: 0;
+  align-items: center;
+  justify-content: center;
+}
+.quick-composer .attachment-trigger {
+  color: var(--muted);
+}
+.composer-tools .composer-primary {
+  touch-action: none;
+  user-select: none;
+  -webkit-user-select: none;
+  -webkit-touch-callout: none;
+}
+.composer-primary[aria-disabled="true"] {
+  opacity: 0.5;
 }
 .quick-attachments {
   display: flex;
@@ -1141,7 +1167,7 @@ html[data-theme="dark"] .note-preview-more {
   animation: attachment-enter 0.22s ease-out;
 }
 .draft-attachment .attachment-card {
-  padding-right: 22px;
+  padding-right: 33px;
 }
 .draft-attachment .attachment-info strong {
   font-size: 11px;
@@ -1154,34 +1180,51 @@ html[data-theme="dark"] .note-preview-more {
 }
 .draft-remove {
   position: absolute;
-  top: 3px;
-  right: 3px;
+  top: 4px;
+  right: 4px;
   display: flex;
   align-items: center;
   justify-content: center;
-  width: 19px;
-  height: 19px;
-  background: var(--input);
+  width: 28px;
+  height: 28px;
   color: var(--muted);
-  border: 1px solid var(--line);
-  border-radius: 50%;
+  border-radius: 7px;
 }
 .draft-remove:hover {
   color: #d34860;
 }
-.upload-status {
-  display: flex;
-  gap: 7px;
-  align-items: center;
-  padding: 10px 3px;
+.capture-attachment-progress,
+.capture-attachment-retry {
+  display: grid;
+  width: 100%;
+  height: 100%;
+  place-items: center;
+  color: var(--text);
 }
-.upload-spinner {
-  width: 12px;
-  height: 12px;
-  border-radius: 50%;
-  border: 1.5px solid var(--line);
-  border-top-color: var(--muted);
-  animation: spin 0.8s linear infinite;
+.capture-attachment-progress svg {
+  transform: rotate(-90deg);
+}
+.capture-attachment-progress circle {
+  stroke: currentColor;
+}
+.capture-attachment-progress circle:first-child {
+  opacity: 0.18;
+}
+.capture-attachment-retry:hover,
+.capture-attachment-retry:focus-visible,
+.draft-remove:focus-visible {
+  background: var(--surface);
+}
+.capture-attachment-status {
+  color: var(--text);
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.note-row > .queued-note-delete {
+  display: inline-flex;
+  opacity: 1;
+  width: 32px;
+  height: 32px;
 }
 .page-drop-zone {
   position: fixed;
@@ -1229,8 +1272,7 @@ html[data-theme="dark"] .note-preview-more {
 @media (prefers-reduced-motion: reduce) {
   .quick-attachments,
   .draft-attachment,
-  .page-drop-zone,
-  .upload-spinner {
+  .page-drop-zone {
     animation: none;
   }
   .audio-play {
@@ -1577,8 +1619,15 @@ html[data-theme="dark"] .note-preview-more {
   margin-left: 4px;
 }
 .quick-recording {
-  max-width: 560px;
-  padding: 5px 5px 8px 0;
+  position: relative;
+  min-width: 0;
+  max-width: 320px;
+}
+.quick-recording:has(.draft-remove) {
+  padding-right: 32px;
+}
+.editor-capture-attachments {
+  margin-bottom: 8px;
 }
 .note-editor-surface {
   position: relative;

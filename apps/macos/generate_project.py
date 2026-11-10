@@ -168,6 +168,19 @@ for target, folder, product, bundle in [('Doompile', 'Doompile', 'application', 
         phases.append(obj('embedExtensions', 'PBXCopyFilesBuildPhase', buildActionMask='2147483647', dstPath=q(''), dstSubfolderSpec='13', files=arr([embedded]), name=q('Embed App Extensions'), runOnlyForDeploymentPostprocessing='0'))
     targets[target] = obj('target:' + target, 'PBXNativeTarget', buildConfigurationList=configuration_list, buildPhases=arr(phases), buildRules='()', dependencies=arr(dependencies), packageProductDependencies=arr([sparkle_product] if app_target else []), name=q(target), productName=q(target), productReference=products[target], productType=q('com.apple.product-type.' + product))
 
+ui_target = 'DoompileUITests'
+ui_source = file('UITests/ComposerTests.swift', 'sourcecode.swift')
+products[ui_target] = obj('product:' + ui_target, 'PBXFileReference', explicitFileType=q('wrapper.cfbundle'), includeInIndex='0', path=q(ui_target + '.xctest'), sourceTree=q('BUILT_PRODUCTS_DIR'))
+ui_settings = '{PRODUCT_BUNDLE_IDENTIFIER = "app.doompile.macos.uitests"; PRODUCT_NAME = "$(TARGET_NAME)"; GENERATE_INFOPLIST_FILE = YES; SWIFT_VERSION = 5.0; MACOSX_DEPLOYMENT_TARGET = 14.0; TEST_TARGET_NAME = Doompile; CODE_SIGN_STYLE = Automatic;}'
+ui_configs = [obj('config:' + ui_target + name, 'XCBuildConfiguration', buildSettings=ui_settings, name=q(name)) for name in ['Debug', 'Release']]
+ui_configurations = obj('configs:' + ui_target, 'XCConfigurationList', buildConfigurations=arr(ui_configs), defaultConfigurationIsVisible='0', defaultConfigurationName=q('Release'))
+ui_build_file = obj('compile:' + ui_target, 'PBXBuildFile', fileRef=ui_source)
+ui_sources = obj('sources:' + ui_target, 'PBXSourcesBuildPhase', buildActionMask='2147483647', files=arr([ui_build_file]), runOnlyForDeploymentPostprocessing='0')
+ui_frameworks = obj('frameworks:' + ui_target, 'PBXFrameworksBuildPhase', buildActionMask='2147483647', files='()', runOnlyForDeploymentPostprocessing='0')
+ui_proxy = obj('proxy:UITestHost', 'PBXContainerItemProxy', containerPortal=ident('project'), proxyType='1', remoteGlobalIDString=targets['Doompile'], remoteInfo=q('Doompile'))
+ui_dependency = obj('dependency:UITestHost', 'PBXTargetDependency', target=targets['Doompile'], targetProxy=ui_proxy)
+targets[ui_target] = obj('target:' + ui_target, 'PBXNativeTarget', buildConfigurationList=ui_configurations, buildPhases=arr([ui_sources, ui_frameworks]), buildRules='()', dependencies=arr([ui_dependency]), name=q(ui_target), productName=q(ui_target), productReference=products[ui_target], productType=q('com.apple.product-type.bundle.ui-testing'))
+
 products_group = obj('products', 'PBXGroup', children=arr(list(products.values())), name=q('Products'), sourceTree=q('<group>'))
 main_group = obj('main', 'PBXGroup', children=arr(file_ids + [products_group]), sourceTree=q('<group>'))
 project_configs = []
@@ -182,10 +195,11 @@ project_dir.mkdir(exist_ok=True)
 scheme_dir = project_dir / 'xcshareddata/xcschemes'
 scheme_dir.mkdir(parents=True, exist_ok=True)
 reference = f'<BuildableReference BuildableIdentifier="primary" BlueprintIdentifier="{targets["Doompile"]}" BuildableName="Doompile.app" BlueprintName="Doompile" ReferencedContainer="container:Doompile.xcodeproj"/>'
+ui_reference = f'<BuildableReference BuildableIdentifier="primary" BlueprintIdentifier="{targets[ui_target]}" BuildableName="{ui_target}.xctest" BlueprintName="{ui_target}" ReferencedContainer="container:Doompile.xcodeproj"/>'
 (scheme_dir / 'Doompile.xcscheme').write_text(f'''<?xml version="1.0" encoding="UTF-8"?>
 <Scheme LastUpgradeVersion="2620" version="1.3">
  <BuildAction parallelizeBuildables="YES" buildImplicitDependencies="YES"><BuildActionEntries><BuildActionEntry buildForTesting="YES" buildForRunning="YES" buildForProfiling="YES" buildForArchiving="YES" buildForAnalyzing="YES">{reference}</BuildActionEntry></BuildActionEntries></BuildAction>
- <TestAction buildConfiguration="Debug" selectedDebuggerIdentifier="Xcode.DebuggerFoundation.Debugger.LLDB" selectedLauncherIdentifier="Xcode.IDEFoundation.Launcher.LLDB" shouldUseLaunchSchemeArgsEnv="YES"/>
+ <TestAction buildConfiguration="Debug" selectedDebuggerIdentifier="Xcode.DebuggerFoundation.Debugger.LLDB" selectedLauncherIdentifier="Xcode.IDEFoundation.Launcher.LLDB" shouldUseLaunchSchemeArgsEnv="YES"><Testables><TestableReference skipped="NO">{ui_reference}</TestableReference></Testables></TestAction>
  <LaunchAction buildConfiguration="Debug" selectedDebuggerIdentifier="Xcode.DebuggerFoundation.Debugger.LLDB" selectedLauncherIdentifier="Xcode.IDEFoundation.Launcher.LLDB" launchStyle="0" useCustomWorkingDirectory="NO" ignoresPersistentStateOnLaunch="NO" debugDocumentVersioning="YES" debugServiceExtension="internal"><BuildableProductRunnable runnableDebuggingMode="0">{reference}</BuildableProductRunnable></LaunchAction>
  <ProfileAction buildConfiguration="Release" shouldUseLaunchSchemeArgsEnv="YES" savedToolIdentifier="" useCustomWorkingDirectory="NO" debugDocumentVersioning="YES"><BuildableProductRunnable runnableDebuggingMode="0">{reference}</BuildableProductRunnable></ProfileAction>
  <AnalyzeAction buildConfiguration="Debug"/><ArchiveAction buildConfiguration="Release" revealArchiveInOrganizer="YES"/>

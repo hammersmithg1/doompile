@@ -82,6 +82,30 @@ test("capture mode preserves an active recording and its text until explicit sto
   expect(JSON.stringify(state.body)).toContain(`"recordingId":"${recordingId}"`);
 });
 
+test("removing a compact attachment removes each instance and remains undoable", async ({ page }) => {
+  const attachment = { id: "00000000-0000-0000-0000-000000000001", url: "local:00000000-0000-0000-0000-000000000001", name: "archive.zip", mimeType: "application/zip", size: 22 };
+  const other = { ...attachment, id: "00000000-0000-0000-0000-000000000002", url: "local:00000000-0000-0000-0000-000000000002", name: "another.zip" };
+  await page.evaluate(({ attachment, other }) => {
+    const editor = window.doompileEditor;
+    editor.setDocument({ type: "doc", content: [{ type: "paragraph", content: [
+      { type: "text", text: "Черновик" },
+      { type: "attachment", attrs: attachment },
+      { type: "attachment", attrs: other },
+      { type: "attachment", attrs: attachment },
+    ] }] });
+    editor.setCaptureMode(true);
+    editor.focus();
+  }, { attachment, other });
+  const original = await page.evaluate(() => window.doompileEditor.getState().body);
+  await page.evaluate(url => window.doompileEditor.removeAttachment(url), attachment.url);
+  const after = await page.evaluate(() => window.doompileEditor.getState());
+  expect(JSON.stringify(after.body)).not.toContain(attachment.url);
+  expect(JSON.stringify(after.body)).toContain(other.url);
+  expect(after.plainText).toContain("Черновик");
+  await page.keyboard.press("ControlOrMeta+z");
+  expect(await page.evaluate(() => window.doompileEditor.getState().body)).toEqual(original);
+});
+
 test("expanded Enter edits rather than submitting and composition never submits", async ({ page }) => {
   await page.evaluate(() => (window as any).doompileEditor.setCaptureMode(false));
   const input = page.getByRole("textbox");

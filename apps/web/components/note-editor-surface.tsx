@@ -1,6 +1,6 @@
 "use client";
 import dynamic from "next/dynamic";
-import { useRef, useState } from "react";
+import { useRef, useState, type ReactNode } from "react";
 import { useRecording } from "./use-recording";
 import { recordingSession } from "@/lib/client/recording";
 import type { RichEditorAPI } from "./rich-editor";
@@ -44,6 +44,7 @@ export default function NoteEditorSurface({
   onClose,
   onSendCapture,
   sendingCapture = false,
+  captureAttachments,
   onCopyLink,
   onExpand,
   onDelete,
@@ -67,6 +68,7 @@ export default function NoteEditorSurface({
   onClose: () => void;
   onSendCapture?: () => void;
   sendingCapture?: boolean;
+  captureAttachments?: ReactNode;
   onCopyLink: () => void;
   onExpand: () => void;
   onDelete: () => void;
@@ -288,6 +290,7 @@ export default function NoteEditorSurface({
               onChange={onTags}
             />
           )}
+          {captureAttachments}
           <RichEditor
             autoFocus={!existing}
             onMediaPaste={(attachments) =>

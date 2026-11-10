@@ -37,7 +37,7 @@ import UniformTypeIdentifiers
             guard let self else { return true }
             return await self.prepareToTerminate()
         }
-        do { if let draft = try drafts.load() { note = draft; richMounted = !draft.body.isPlainParagraphDocument } }
+        do { if let draft = try drafts.load() { note = draft; richMounted = MacQuickDocument.needsRichEditor(draft) } }
         catch { Telemetry.shared.failure(.runtimeError, error); self.error = "Не удалось прочитать черновик: \(error.localizedDescription)" }
         shortcut.onInvoke = { [weak self] in self?.toggle() }
         syncTask = Task { @MainActor [weak library] in
@@ -55,6 +55,7 @@ import UniformTypeIdentifiers
         if panel == nil {
             let window = CapturePanel(contentRect: NSRect(x: 0, y: 0, width: 680, height: 54), styleMask: [.borderless, .nonactivatingPanel, .resizable, .fullSizeContentView], backing: .buffered, defer: false)
             window.title = "Быстрая заметка — Doompile"
+            window.identifier = NSUserInterfaceItemIdentifier("quick-capture-panel")
             window.isReleasedWhenClosed = false
             window.isFloatingPanel = true; window.level = .floating
             window.hidesOnDeactivate = false; window.becomesKeyOnlyIfNeeded = false
@@ -75,7 +76,7 @@ import UniformTypeIdentifiers
         draftTask?.cancel(); panel?.orderOut(nil); panel = nil
         bridge.reset()
         drafts = MacCaptureDraftStore(directory:Storage.shared.directory)
-        note = (try? drafts.load()) ?? Note(); error = nil; richMounted = !note.body.isPlainParagraphDocument
+        note = (try? drafts.load()) ?? Note(); error = nil; richMounted = MacQuickDocument.needsRichEditor(note)
     }
     func show() {
         Telemetry.shared.record(.screenViewed, ["screen": "capture"])
@@ -94,10 +95,19 @@ import UniformTypeIdentifiers
         DispatchQueue.main.async { [weak self] in self?.focused = true; if self?.richMounted == true { self?.bridge.focus() } }
     }
     var compactHeight: CGFloat {
-        max(54, (richMounted ? 43 : inputHeight) + 12) + (error == nil ? 0 : 44) + (startingVoice || voice.recording ? 30 : 0) + (showsCompactAttachments ? 52 : 0)
+        max(54, (richMounted ? 43 : inputHeight) + 12) + (error == nil ? 0 : 44) + (showsCompactAttachments ? 52 : 0)
     }
-    var compactAttachments: [Attachment] { richMounted ? note.attachments.filter { $0.mimeType.hasPrefix("audio/") } : note.attachments }
-    var showsCompactAttachments: Bool { !expanded && !compactAttachments.isEmpty }
+    var compactAttachments: [Attachment] {
+        richMounted && bridge.ready ? MacQuickDocument.referencedFiles(in: note) : note.attachments
+    }
+    var showsCompactAttachments: Bool {
+        !expanded && (startingVoice || voice.recording || !compactAttachments.isEmpty)
+    }
+    var hasContent: Bool {
+        var draft = note
+        draft.attachments = compactAttachments
+        return EditorLifecycle.shouldSave(draft, existing: false)
+    }
     func resizeForContent() { if !expanded { resize(to: NSSize(width: panel?.frame.width ?? 680, height: compactHeight)) } }
     func setExpanded(_ value: Bool) {
         guard !busy else { return }
@@ -163,7 +173,8 @@ import UniformTypeIdentifiers
         do {
             if voice.recording { try finishRecording() }
             try await snapshot()
-            let value = EditorLifecycle.prepared(note)
+            var value = EditorLifecycle.prepared(note)
+            if richMounted { value.attachments = MacQuickDocument.referencedFiles(in: value) }
             guard EditorLifecycle.shouldSave(value, existing: false) else { return }
             guard let saved = library.save(value) else { throw DoompileError.message(library.error ?? "Не удалось сохранить заметку на Mac.") }
             note = saved
@@ -178,7 +189,7 @@ import UniformTypeIdentifiers
         switch EditorAction(rawValue: action) {
         case .sendCapture: Task { await submit() }
         case .expandCapture: setExpanded(true)
-        case .file, .image: setExpanded(true); showFiles = true
+        case .file, .image: showFiles = true
         case .drawing: setExpanded(true); showDrawing = true
         case .voice: Task { await startRecording() }
         case .stopVoice:
@@ -192,7 +203,8 @@ import UniformTypeIdentifiers
         guard Connection.signedIn, Connection.scope == accountScope, !startingVoice, !voice.recording, !busy, !dismissing else { return }
         startingVoice = true; defer { startingVoice = false }
         do {
-            guard note.attachments.count < NoteLimits.attachments else { throw DoompileError.message("В одной заметке может быть до 100 вложений.") }
+            guard compactAttachments.count < NoteLimits.attachments else { throw DoompileError.message("В одной заметке может быть до 100 вложений.") }
+            if !hasContent { note.createdAt = Note.now() }
             try drafts.save(note)
             try await voice.start(noteID: note.id)
             error = nil
@@ -207,19 +219,24 @@ import UniformTypeIdentifiers
     func storeFile(_ data: Data, name: String, mime: String) throws -> Attachment {
         guard Connection.signedIn, Connection.scope == accountScope else { throw DoompileError.authentication }
         let reserved = voice.recording || startingVoice ? 1 : 0
-        guard data.count <= 30 * 1024 * 1024, note.attachments.count + reserved < NoteLimits.attachments else { throw DoompileError.message("До 100 вложений, не более 30 МБ каждое.") }
+        guard data.count <= 30 * 1024 * 1024, compactAttachments.count + reserved < NoteLimits.attachments else { throw DoompileError.message("До 100 вложений, не более 30 МБ каждое.") }
+        if !voice.recording, !hasContent { note.createdAt = Note.now() }
         let attachment = try Storage.shared.addFile(data, name: name, mimeType: mime)
         note.attachments.append(attachment)
         return attachment
     }
     func removeCompactAttachment(_ id: String) {
-        guard !richMounted else { return }
+        if richMounted {
+            if let file = note.attachments.first(where: { $0.id == id }) { bridge.removeAttachment(file) }
+            return
+        }
         note.attachments.removeAll { $0.id == id }
         note = MacQuickDocument.updating(note, text: note.plainText)
     }
     private func finishRecording() throws {
         let id = voice.id
         let data = try voice.finish()
+        guard data.count <= 30 * 1024 * 1024, compactAttachments.count < NoteLimits.attachments else { throw DoompileError.message("До 100 вложений, не более 30 МБ каждое.") }
         let attachment = try Storage.shared.addFile(data, name: "Голосовая заметка.m4a", mimeType: "audio/mp4")
         note.attachments.append(attachment); note.body = note.body.finishingRecording(id, attachment: attachment)
         if richMounted { bridge.completeRecording(id, attachment: attachment) }
@@ -288,7 +305,7 @@ struct QuickCaptureRoot: View {
     @ObservedObject var bridge: MacRichEditorBridge
     @ObservedObject var voice: MacVoiceRecorder
     @State private var editorHeight: CGFloat = 300
-    private var sendDisabled: Bool { capture.busy || capture.startingVoice || (!voice.recording && !EditorLifecycle.shouldSave(capture.note, existing: false)) }
+    private var sendDisabled: Bool { capture.busy || capture.startingVoice || (!voice.recording && !capture.hasContent) }
     var body: some View {
         panel
             .fileImporter(isPresented: $capture.showFiles, allowedContentTypes: [.item], allowsMultipleSelection: true, onCompletion: importFiles)
@@ -317,10 +334,9 @@ struct QuickCaptureRoot: View {
                 header
                 MacNoteTags(selected: $capture.note.tags, available: library.tags)
             }
-            if capture.startingVoice || (voice.recording && !capture.expanded) {
+            if capture.expanded && capture.startingVoice {
                 MacRecordingSnippet(starting: capture.startingVoice, seconds: voice.seconds) { capture.action("stopVoice") }
             }
-            if capture.showsCompactAttachments { attachments }
             composerInput
             if let error = capture.error { Text(error).font(.system(size: 11)).foregroundStyle(MacPalette.orange).lineLimit(3).padding(.horizontal, 14).padding(.vertical, 7).frame(maxWidth: .infinity, alignment: .leading) }
             if capture.expanded { footer }
@@ -336,16 +352,25 @@ struct QuickCaptureRoot: View {
             Button { Task { await capture.dismiss() } } label: { DoompileSymbol(systemName: "xmark").frame(width: 28, height: 28) }.help("Скрыть панель · Esc").accessibilityLabel("Скрыть панель")
         }.buttonStyle(.plain).foregroundStyle(MacPalette.muted).padding(.horizontal, 18).frame(height: 50)
     }
-    private var attachments: some View {
-        let onRemove: ((String) -> Void)? = capture.richMounted ? nil : { id in capture.removeCompactAttachment(id) }
-        return MacComposerAttachmentStrip(attachments: capture.compactAttachments, onRemove: onRemove)
-            .padding(.horizontal, 6).frame(height: 52)
-    }
     private var composerInput: some View {
-        HStack(alignment: .bottom, spacing: 5) {
-            if capture.richMounted { richInput }
-            else { nativeInput }
-            if !capture.expanded { compactButtons }
+        VStack(spacing: 6) {
+            if capture.showsCompactAttachments {
+                MacComposerAttachmentStrip(attachments: capture.compactAttachments, starting: capture.startingVoice, recording: voice.recording,
+                                           seconds: voice.seconds, onRemove: capture.removeCompactAttachment) { capture.action("stopVoice") }
+            }
+            HStack(alignment: .center, spacing: 5) {
+                if !capture.expanded {
+                    MacComposerButton(icon: "paperclip", label: "Прикрепить файл", disabled: capture.busy, identifier: "quick-composer-attach") { capture.action("file") }
+                }
+                if capture.richMounted { richInput }
+                else { nativeInput }
+                if !capture.expanded {
+                    MacComposerButton(icon: "arrow.up.left.and.arrow.down.right", label: "Развернуть редактор", disabled: capture.busy, identifier: "quick-composer-expand") { capture.setExpanded(true) }
+                    MacComposerPrimaryButton(canSend: voice.recording || capture.hasContent, starting: capture.startingVoice, busy: capture.busy,
+                                             onStart: { capture.action("voice") }, onSend: submit,
+                                             onHoldRelease: { if voice.recording { submit() } })
+                }
+            }
         }.padding(capture.expanded ? 0 : 6).frame(maxHeight: capture.expanded ? .infinity : nil)
     }
     private var richInput: some View {
@@ -353,28 +378,23 @@ struct QuickCaptureRoot: View {
             Task { await capture.dismiss(); if let url = NoteLinks.appURL(id: id) { NSWorkspace.shared.open(url) } }
         }, onRequestLink: { capture.link = $0; capture.showLink = true }, onAction: capture.action, onPasteImage: capture.storeFile)
         .id(capture.note.id)
+        .accessibilityIdentifier("quick-composer-input")
         .frame(maxWidth: .infinity, minHeight: capture.expanded ? 240 : 43, maxHeight: capture.expanded ? .infinity : 43)
     }
     private var nativeInput: some View {
         MacQuickInput(text: Binding(get: { capture.note.plainText }, set: capture.updateText), height: $capture.inputHeight, focused: $capture.focused, onSubmit: submit, onPasteImage: pasteQuickImage)
-            .frame(height: capture.inputHeight).padding(.leading, 8)
+            .frame(height: capture.inputHeight).padding(.horizontal, 4)
     }
     private func pasteQuickImage(_ data: Data) {
         do { try capture.addFile(data, name: "Изображение.png", mime: "image/png") }
         catch { capture.error = error.localizedDescription }
-    }
-    @ViewBuilder private var compactButtons: some View {
-        MacComposerButton(icon: "mic", label: "Записать голосовую заметку", disabled: capture.startingVoice || voice.recording || capture.busy) { capture.action("voice") }
-        MacComposerButton(icon: "paperclip", label: "Прикрепить файл") { capture.action("file") }
-        MacComposerButton(icon: "arrow.up.left.and.arrow.down.right", label: "Развернуть редактор") { capture.setExpanded(true) }
-        MacComposerButton(icon: "arrow.up", label: "Сохранить заметку · Enter", send: true, disabled: sendDisabled, action: submit)
     }
     private var footer: some View {
         HStack {
             Text("Esc — скрыть · черновик останется на Mac").font(.system(size: 10)).foregroundStyle(MacPalette.muted)
             Spacer()
             Text("⌘ ↵").font(.system(size: 10)).foregroundStyle(MacPalette.muted)
-            MacComposerButton(icon: "arrow.up", label: "Сохранить заметку", send: true, disabled: sendDisabled, action: submit)
+            MacComposerButton(icon: "arrow.up", label: "Отправить заметку", send: true, disabled: sendDisabled, action: submit)
         }.padding(12)
     }
     private func submit() { Task { await capture.submit() } }

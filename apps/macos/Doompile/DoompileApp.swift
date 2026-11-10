@@ -29,22 +29,41 @@ extension Notification.Name {
 }
 
 @MainActor final class DesktopLibrary: ObservableObject {
-    private let fixedScope: String?
-    var isCurrentAccount: Bool { Connection.signedIn && (fixedScope == nil || fixedScope == Connection.scope) }
+    private var accountScope = Connection.scope
+    var isCurrentAccount: Bool { Connection.signedIn && accountScope == Connection.scope }
     @Published var notes: [Note] = []
     @Published var pending = 0
     @Published var syncing = false
     @Published var error: String?
     @Published var notice: String?
     @Published private(set) var tags: [String] = []
-    init(fixedAccount: Bool = false) { fixedScope = fixedAccount ? Connection.scope : nil; reload() }
+    @Published private(set) var uploadStates: [String: AttachmentUploadState] = [:]
+    private var syncWorker: Task<Void, Never>?
+    private var syncRequested = false
+    private var pullRequested = false
+
+    init() { reload() }
+    func accountChanged() {
+        accountScope = Connection.scope
+        notes = []
+        tags = []
+        pending = 0
+        uploadStates = [:]
+        notice = nil
+        error = nil
+        syncRequested = false
+        pullRequested = false
+        syncWorker?.cancel()
+        reload()
+    }
     func reload() {
         do {
             let state = try Storage.shared.snapshot()
             let snapshot = state.notes.values.filter { $0.deletedAt == nil }.sorted(by: Note.newestFirst)
             if snapshot != notes { notes = snapshot }
-            tags = TagCatalog.all(noteTags: notes.flatMap(\.tags))
-            pending = state.dirty.count
+            let catalog = TagCatalog.all(noteTags: snapshot.flatMap(\.tags))
+            if catalog != tags { tags = catalog }
+            if pending != state.dirty.count { pending = state.dirty.count }
         } catch { self.error = error.localizedDescription }
     }
     @discardableResult func save(_ original: Note) -> Note? {
@@ -70,12 +89,40 @@ extension Notification.Name {
         _ = save(deleted)
     }
     func sync(pull: Bool = true) async {
-        guard isCurrentAccount, !syncing else { return }
+        guard isCurrentAccount else { return }
+        syncRequested = true
+        pullRequested = pullRequested || pull
+        if let syncWorker {
+            await syncWorker.value
+            if syncRequested { await sync(pull: false) }
+            return
+        }
+        let worker = Task { await drainSyncRequests() }
+        syncWorker = worker
+        await worker.value
+    }
+
+    private func drainSyncRequests() async {
         syncing = true
-        defer { syncing = false; reload() }
-        let scope = Connection.scope
-        do { try await SyncService.shared.sync(pull: pull); if scope == Connection.scope { error = nil } }
-        catch { if scope == Connection.scope { self.error = error.localizedDescription } }
+        defer { syncing = false; syncWorker = nil; reload() }
+        while syncRequested && isCurrentAccount && !Task.isCancelled {
+            let scope = accountScope
+            let pull = pullRequested
+            syncRequested = false
+            pullRequested = false
+            do {
+                try await SyncService.shared.sync(pull: pull, onProgress: { @MainActor [weak self] in
+                    guard let self, self.accountScope == scope, self.isCurrentAccount else { return }
+                    self.reload()
+                }, onUpload: { @MainActor [weak self] id, state in
+                    guard let self, self.accountScope == scope, self.isCurrentAccount else { return }
+                    self.uploadStates[id] = state
+                })
+                if accountScope == scope, isCurrentAccount { error = nil }
+            } catch {
+                if accountScope == scope, isCurrentAccount { self.error = error.localizedDescription }
+            }
+        }
     }
 }
 
@@ -90,7 +137,7 @@ extension Notification.Name {
     var body: some Scene {
         Window("Doompile", id: "main") {
             Group {
-                if account.account != nil { SignedInDesktop().id(account.scope) }
+                if account.account != nil { DesktopHome().id(account.scope) }
                 else { AccountLoginView().frame(maxWidth:.infinity,maxHeight:.infinity) }
             }.environmentObject(library).tint(MacPalette.lime).preferredColorScheme(appearance.colorScheme)
                 .frame(minWidth: 900, minHeight: 600)
@@ -127,6 +174,9 @@ extension Notification.Name {
     private var terminating = false
     private var accountObservation: AnyCancellable?
     override init() {
+        #if DEBUG
+        MacComposerReview.configure()
+        #endif
         _ = Telemetry.shared
         NativeDiagnostics.shared.start()
         let library = DesktopLibrary()
@@ -138,11 +188,16 @@ extension Notification.Name {
         super.init()
         capture.onOpenMainWindow = { [weak presence] in presence?.revealMainWindow() }
         accountObservation = AccountSession.shared.$account.map { $0?.scope ?? "signed-out" }.removeDuplicates().dropFirst()
-            .sink { [weak self] _ in self?.library.reload(); self?.capture.accountChanged() }
+            .sink { [weak self] _ in self?.library.accountChanged(); self?.capture.accountChanged() }
     }
     func applicationDidFinishLaunching(_ notification: Notification) {
         presence.start(inBackground: MacLaunchContext.isBackgroundLaunch(NSAppleEventManager.shared().currentAppleEvent))
         capture.prepare()
+        #if DEBUG
+        if MacComposerReview.launchGlobal {
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) { self.capture.toggle() }
+        }
+        #endif
     }
     func applicationShouldOpenUntitledFile(_ sender: NSApplication) -> Bool { !MacLaunchContext.isBackgroundLaunch(NSAppleEventManager.shared().currentAppleEvent) }
     func applicationShouldHandleReopen(_ sender: NSApplication, hasVisibleWindows flag: Bool) -> Bool { !presence.openMainWindow() }
@@ -159,11 +214,6 @@ extension Notification.Name {
         return .terminateLater
     }
     func applicationWillTerminate(_ notification: Notification) { capture.persistOnTermination() }
-}
-
-struct SignedInDesktop: View {
-    @StateObject private var library = DesktopLibrary(fixedAccount:true)
-    var body: some View { DesktopHome().environmentObject(library) }
 }
 
 struct CapturedSnippet: View {
@@ -426,15 +476,31 @@ struct NoteWorkspace: View {
     func start(noteID: String) async throws {
         guard !recording else { return }
         let request = UUID(); startRequest = request
-        let permitted = await AVCaptureDevice.requestAccess(for: .audio)
+        #if DEBUG
+        let useFixture = MacComposerReview.voiceFixture
+        #else
+        let useFixture = false
+        #endif
+        let permitted: Bool
+        if useFixture { permitted = true }
+        else { permitted = await AVCaptureDevice.requestAccess(for: .audio) }
         try Task.checkCancellation()
         guard startRequest == request else { throw CancellationError() }
         guard permitted else { throw DoompileError.message("Разреши доступ к микрофону в настройках macOS.") }
         try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
         let id = UUID().uuidString.lowercased(), url = directory.appendingPathComponent(id + ".m4a")
-        let recorder = try AVAudioRecorder(url: url, settings: [AVFormatIDKey: kAudioFormatMPEG4AAC, AVSampleRateKey: 44100, AVNumberOfChannelsKey: 1, AVEncoderAudioQualityKey: AVAudioQuality.high.rawValue])
+        let settings: [String: Any] = [AVFormatIDKey: kAudioFormatMPEG4AAC, AVSampleRateKey: 44100, AVNumberOfChannelsKey: 1, AVEncoderAudioQualityKey: AVAudioQuality.high.rawValue]
+        let recorder: AVAudioRecorder?
+        if useFixture {
+            #if DEBUG
+            try MacComposerReview.writeVoiceFixture(to: url, settings: settings)
+            #endif
+            recorder = nil
+        } else {
+            recorder = try AVAudioRecorder(url: url, settings: settings)
+        }
         try JSONEncoder().encode(Manifest(id: id, noteID: noteID)).write(to: directory.appendingPathComponent(id + ".json"), options: .atomic)
-        guard recorder.record() else { throw DoompileError.message("Не удалось начать запись.") }
+        if let recorder, !recorder.record() { throw DoompileError.message("Не удалось начать запись.") }
         self.id = id; self.url = url; self.recorder = recorder; recording = true; seconds = 0; startedAt = Date()
         Telemetry.shared.record(.recordingStarted)
         timer = Timer.scheduledTimer(withTimeInterval: 0.5, repeats: true) { [weak self] _ in Task { @MainActor in guard let self else { return }; self.seconds = Int(Date().timeIntervalSince(self.startedAt)) } }
@@ -458,6 +524,52 @@ struct NoteWorkspace: View {
     }
     func cancel() { startRequest = UUID(); recorder?.stop(); recorder = nil; recording = false; timer?.invalidate(); timer = nil }
 }
+
+#if DEBUG
+@MainActor private enum MacComposerReview {
+    private static let environment = ProcessInfo.processInfo.environment
+    private static var enabled: Bool {
+        environment["DOOMPILE_MAC_UI_TESTING"] == "1" && !(environment["DOOMPILE_MAC_UI_ROOT"] ?? "").isEmpty
+    }
+    static var launchGlobal: Bool { enabled && environment["DOOMPILE_MAC_CAPTURE_GLOBAL"] == "1" }
+    static var voiceFixture: Bool { enabled && environment["DOOMPILE_MAC_VOICE_FIXTURE"] == "1" }
+
+    static func configure() {
+        guard enabled else { return }
+        let endpoint = environment["DOOMPILE_MAC_UI_ENDPOINT"] ?? "http://localhost:1"
+        guard let url = URL(string: endpoint), ["localhost", "127.0.0.1"].contains(url.host ?? "") else { return }
+        do {
+            try Connection.install(NativeAccount(id: "11111111-1111-4111-8111-111111111111", email: "review@localhost", name: "Проверка Doompile", endpoint: endpoint), token: String(repeating: "t", count: 43))
+            Connection.defaults.set(environment["DOOMPILE_TEST_APPEARANCE"] ?? "light", forKey: AppearanceMode.storageKey)
+            AccountSession.shared.refresh()
+            if environment["DOOMPILE_MAC_CAPTURE_ATTACHMENT"] == "1" {
+                // Valid empty ZIP fixture (end-of-central-directory record).
+                let data = Data([0x50, 0x4b, 0x05, 0x06] + [UInt8](repeating: 0, count: 18))
+                let attachment = try Storage.shared.addFile(data, name: "review-archive.zip", mimeType: "application/zip")
+                var note = Note()
+                note.attachments = [attachment]
+                let filename = launchGlobal ? "mac-quick-capture.json" : "mac-main-composer.json"
+                let store = MacCaptureDraftStore(directory: Storage.shared.directory, filename: filename)
+                try store.save(MacQuickDocument.updating(note, text: ""))
+            }
+        } catch {
+            assertionFailure("Не удалось подготовить изолированные данные ревью: \(error.localizedDescription)")
+        }
+    }
+
+    static func writeVoiceFixture(to url: URL, settings: [String: Any]) throws {
+        guard let format = AVAudioFormat(standardFormatWithSampleRate: 44100, channels: 1),
+              let buffer = AVAudioPCMBuffer(pcmFormat: format, frameCapacity: 22050),
+              let samples = buffer.floatChannelData?.pointee else {
+            throw DoompileError.message("Не удалось подготовить тестовую запись.")
+        }
+        buffer.frameLength = buffer.frameCapacity
+        samples.initialize(repeating: 0, count: Int(buffer.frameLength))
+        let file = try AVAudioFile(forWriting: url, settings: settings, commonFormat: .pcmFormatFloat32, interleaved: false)
+        try file.write(from: buffer)
+    }
+}
+#endif
 
 struct MacDrawing: View {
     @Environment(\.dismiss) private var dismiss

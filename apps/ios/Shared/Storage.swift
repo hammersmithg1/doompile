@@ -37,7 +37,19 @@ enum Connection {
         current: (Bundle.main.object(forInfoDictionaryKey: "DoompilePublicURL") as? String) ?? "http://localhost:3000",
         previous: Bundle.main.object(forInfoDictionaryKey: "DoompilePreviousPublicURL") as? String
     )
-    static var defaults: UserDefaults { UserDefaults(suiteName: group) ?? .standard }
+    #if DEBUG && os(macOS)
+    private static let reviewDirectory: URL? = {
+        let environment = ProcessInfo.processInfo.environment
+        guard environment["DOOMPILE_MAC_UI_TESTING"] == "1", let path = environment["DOOMPILE_MAC_UI_ROOT"], !path.isEmpty else { return nil }
+        return URL(fileURLWithPath: path, isDirectory: true)
+    }()
+    #endif
+    static var defaults: UserDefaults {
+        #if DEBUG && os(macOS)
+        if let reviewDirectory { return UserDefaults(suiteName: "app.doompile.macos.review." + scope(endpoint: reviewDirectory.path, userID: "review"))! }
+        #endif
+        return UserDefaults(suiteName: group) ?? .standard
+    }
     static var defaultEndpoint: String { origins.current }
     static var endpoint: String {
         get { origins.networkEndpoint(defaults.string(forKey: "endpoint") ?? defaultEndpoint) }
@@ -54,7 +66,10 @@ enum Connection {
     static var scope: String { account?.scope ?? "signed-out" }
     static var signedIn: Bool { account != nil && !token.isEmpty }
     static var directory: URL {
-        FileManager.default.containerURL(forSecurityApplicationGroupIdentifier: group)
+        #if DEBUG && os(macOS)
+        if let reviewDirectory { return reviewDirectory }
+        #endif
+        return FileManager.default.containerURL(forSecurityApplicationGroupIdentifier: group)
             ?? FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0].appendingPathComponent("Doompile")
     }
     #if os(macOS)
@@ -239,8 +254,17 @@ final class Storage: @unchecked Sendable {
 
 }
 
-final class NoRedirects: NSObject, URLSessionTaskDelegate {
+final class NoRedirects: NSObject, URLSessionTaskDelegate, @unchecked Sendable {
+    private let progress: AsyncStream<Int>.Continuation?
+    init(progress: AsyncStream<Int>.Continuation? = nil) { self.progress = progress }
+
     func urlSession(_ session: URLSession, task: URLSessionTask, willPerformHTTPRedirection response: HTTPURLResponse, newRequest request: URLRequest, completionHandler: @escaping (URLRequest?) -> Void) { completionHandler(nil) }
+
+    func urlSession(_ session: URLSession, task: URLSessionTask, didSendBodyData bytesSent: Int64, totalBytesSent: Int64, totalBytesExpectedToSend: Int64) {
+        guard totalBytesExpectedToSend > 0 else { return }
+        // The file is still being processed after the request body reaches the server.
+        progress?.yield(Int(min(0.99, Double(totalBytesSent) / Double(totalBytesExpectedToSend)) * 100))
+    }
 }
 
 enum AttachmentFiles {
@@ -290,16 +314,47 @@ actor SyncService {
         request.setValue(connection.account.id, forHTTPHeaderField: "X-Doompile-User-ID")
         return request
     }
-    private func response(_ request: URLRequest) async throws -> (Data, Int) {
+    private func response(_ request: URLRequest, upload: Data? = nil, delegate: URLSessionTaskDelegate? = nil) async throws -> (Data, Int) {
         guard let lease = syncLease, lease.storage.renewSyncLock(lease.owner) else { throw URLError(.cancelled) }
-        let (data, response) = try await Telemetry.network(session, request: request, parent: syncTrace)
+        let (data, response) = try await Telemetry.network(session, request: request, parent: syncTrace, upload: upload, delegate: delegate)
         // After suspension another process may own the queue. Do not apply a stale response.
         guard lease.storage.renewSyncLock(lease.owner) else { throw URLError(.cancelled) }
         guard let response = response as? HTTPURLResponse else { throw DoompileError.message("Некорректный ответ хранилища.") }
         if response.statusCode == 401 { throw DoompileError.authentication }
         return (data, response.statusCode)
     }
-    func sync(pull: Bool = true, onProgress: (@Sendable () async -> Void)? = nil) async throws {
+    typealias UploadObserver = @Sendable (String, AttachmentUploadState?) async -> Void
+
+    private func upload(_ attachment: Attachment, file: URL, onUpload: UploadObserver?) async throws -> Attachment {
+        let boundary = UUID().uuidString
+        let safeName = attachment.name.replacingOccurrences(of: "\"", with: "").replacingOccurrences(of: "\r", with: "").replacingOccurrences(of: "\n", with: "")
+        var payload = Data("--\(boundary)\r\nContent-Disposition: form-data; name=\"file\"; filename=\"\(safeName)\"\r\nContent-Type: \(attachment.mimeType)\r\n\r\n".utf8)
+        payload.append(try Data(contentsOf: file))
+        payload.append(Data("\r\n--\(boundary)--\r\n".utf8))
+        var request = try self.request("/api/attachments", method: "POST", contentType: "multipart/form-data; boundary=\(boundary)")
+        request.timeoutInterval = 120
+        request.setValue(attachment.id, forHTTPHeaderField: "X-Doompile-Upload-ID")
+
+        let (stream, progress) = AsyncStream.makeStream(of: Int.self, bufferingPolicy: .bufferingNewest(1))
+        let observer = Task {
+            var previous = -1
+            for await percent in stream where percent > previous {
+                previous = percent
+                await onUpload?(attachment.id, .uploading(Double(percent) / 100))
+            }
+        }
+        let data: Data, status: Int
+        do { (data, status) = try await response(request, upload: payload, delegate: NoRedirects(progress: progress)) }
+        catch { progress.finish(); await observer.value; throw error }
+        progress.finish()
+        await observer.value
+        guard status == 200 || status == 201 else { throw DoompileError.message("Не удалось отправить вложение (\(status)). Файл сохранён на устройстве.") }
+        var uploaded = try JSONDecoder().decode(Upload.self, from: data).attachment
+        uploaded.id = attachment.id
+        return uploaded
+    }
+
+    func sync(pull: Bool = true, onProgress: (@Sendable () async -> Void)? = nil, onUpload: UploadObserver? = nil) async throws {
         guard !running else { return }
         guard let account = Connection.account, Connection.signedIn else { return }
         let storage = Storage.shared
@@ -338,28 +393,26 @@ actor SyncService {
             var note = originalNote
             let local = note
             do {
-                for original in local.attachments where original.url.hasPrefix("local:") {
-                    guard let index = note.attachments.firstIndex(where: { $0.id == original.id && $0.url == original.url }) else { continue }
-                    guard let file = storage.fileURL(original) else { throw DoompileError.message("Ожидающее отправки вложение не найдено на устройстве.") }
-                    let boundary = UUID().uuidString
-                    var payload = Data()
-                    let safeName = original.name.replacingOccurrences(of: "\"", with: "").replacingOccurrences(of: "\r", with: "").replacingOccurrences(of: "\n", with: "")
-                    payload.append(Data("--\(boundary)\r\nContent-Disposition: form-data; name=\"file\"; filename=\"\(safeName)\"\r\nContent-Type: \(original.mimeType)\r\n\r\n".utf8))
-                    payload.append(try Data(contentsOf: file))
-                    payload.append(Data("\r\n--\(boundary)--\r\n".utf8))
-                    var uploadRequest = try request("/api/attachments", method: "POST", body: payload, contentType: "multipart/form-data; boundary=\(boundary)")
-                    uploadRequest.timeoutInterval = 120
-                    uploadRequest.setValue(original.id, forHTTPHeaderField: "X-Doompile-Upload-ID")
-                    let (data, status) = try await response(uploadRequest)
-                    guard status == 200 || status == 201 else { throw DoompileError.message("Не удалось отправить вложение (\(status)). Файл сохранён на устройстве.") }
-                    var uploaded = try JSONDecoder().decode(Upload.self, from: data).attachment
-                    uploaded.id = original.id
-                    note.attachments[index] = uploaded
-                    note.body = note.body.replacingString(original.url, with: uploaded.url)
-                    // Preserve each successful upload even if a later file fails.
-                    note = try storage.checkpointUploads(note, matching: local)
-                }
                 note = try storage.checkpointUploads(note, matching: local)
+                while let index = note.attachments.firstIndex(where: { $0.url.hasPrefix("local:") }) {
+                    let before = note, original = before.attachments[index]
+                    do {
+                        guard let file = storage.fileURL(original) else { throw DoompileError.message("Ожидающее отправки вложение не найдено на устройстве.") }
+                        await onUpload?(original.id, .uploading(nil))
+                        let uploaded = try await upload(original, file: file, onUpload: onUpload)
+                        guard !uploaded.url.hasPrefix("local:") else { throw DoompileError.message("Хранилище вернуло некорректный адрес вложения.") }
+                        note.attachments[index] = uploaded
+                        note.body = note.body.replacingString(original.url, with: uploaded.url)
+                        // Refresh each successful upload before the next file or note request.
+                        note = try storage.checkpointUploads(note, matching: before)
+                        await onProgress?()
+                        await onUpload?(original.id, nil)
+                    } catch {
+                        let code = (error as? URLError)?.code
+                        await onUpload?(original.id, code == .notConnectedToInternet || code == .cancelled ? .queued : .failed)
+                        throw error
+                    }
+                }
                 let checkpoint = note
                 let (data, status) = try await response(request("/api/notes/\(note.id)", method: "PUT", body: JSONEncoder().encode(Put(note: note, baseRevision: note.revision))))
                 if status == 409 {

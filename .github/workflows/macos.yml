@@ -21,6 +21,10 @@ on:
         required: false
   workflow_dispatch:
     inputs:
+      review_composer:
+        description: "Capture the native composer and upload states with local fixtures"
+        type: boolean
+        default: false
       publish_release:
         description: "Publish a personal ad-hoc release signed with the existing Sparkle key"
         type: boolean
@@ -108,6 +112,33 @@ jobs:
           -configuration Debug -destination 'generic/platform=macOS'
           -derivedDataPath "$RUNNER_TEMP/MacDerivedData"
           CODE_SIGNING_ALLOWED=NO DEBUG_INFORMATION_FORMAT=dwarf-with-dsym build
+      - name: Review the native Mac composer
+        if: inputs.review_composer
+        run: |
+          python3 apps/macos/scripts/composer-fixture.py > "$RUNNER_TEMP/mac-composer-fixture.log" 2>&1 &
+          fixture_pid=$!
+          trap 'kill "$fixture_pid" 2>/dev/null || true' EXIT
+          curl --fail --silent --retry 10 --retry-connrefused http://127.0.0.1:18743/api/notes >/dev/null
+          xcodebuild -project apps/macos/Doompile.xcodeproj -scheme Doompile \
+            -configuration Debug -destination 'platform=macOS' -parallel-testing-enabled NO \
+            -derivedDataPath "$RUNNER_TEMP/MacDerivedData" -resultBundlePath "$RUNNER_TEMP/MacComposer.xcresult" \
+            CODE_SIGN_IDENTITY=- CODE_SIGN_ENTITLEMENTS= test
+      - name: Export Mac composer review captures
+        if: always() && inputs.review_composer
+        run: |
+          if [[ -d "$RUNNER_TEMP/MacComposer.xcresult" ]]; then
+            xcrun xcresulttool export attachments --path "$RUNNER_TEMP/MacComposer.xcresult" --output-path "$RUNNER_TEMP/MacComposer-attachments"
+          fi
+      - name: Preserve Mac composer review results
+        if: always() && inputs.review_composer
+        uses: actions/upload-artifact@v4
+        with:
+          name: macos-composer-review
+          path: |
+            ${{ runner.temp }}/MacComposer-attachments
+            ${{ runner.temp }}/mac-composer-fixture.log
+          if-no-files-found: warn
+          retention-days: 14
       - name: Verify signed update delivery with an ephemeral test key
         run: >-
           python3 apps/macos/scripts/test-update-delivery.py

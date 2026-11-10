@@ -138,6 +138,18 @@ jobs:
           fi
 
           simulator_id=$(python3 .agents/ci/select_ios_simulator.py --os "$IOS_SIMULATOR_OS")
+          if [[ -z "$IOS_TEST_FILTER" || "$IOS_TEST_FILTER" == */testCompactComposerAttachmentAndVoiceStates ]]; then
+            python3 apps/macos/scripts/composer-fixture.py > "$RUNNER_TEMP/ios-composer-fixture.log" 2>&1 &
+            fixture_pid=$!
+            stop_fixture() {
+              kill "$fixture_pid" 2>/dev/null || true
+              wait "$fixture_pid" 2>/dev/null || true
+            }
+            trap stop_fixture EXIT
+            curl --silent --show-error --fail --retry 5 --retry-connrefused http://127.0.0.1:18743/api/notes > /dev/null
+          else
+            stop_fixture() { :; }
+          fi
           if [[ "$IOS_RECORD_MOTION" == true ]]; then
             (
               until xcrun simctl spawn "$simulator_id" launchctl print system >/dev/null 2>&1; do sleep 1; done
@@ -153,7 +165,7 @@ jobs:
               kill -KILL "$video_pid" 2>/dev/null || true
               wait "$video_pid" || true
             }
-            trap stop_video EXIT
+            trap 'stop_video; stop_fixture' EXIT
           fi
           xcodebuild -project apps/ios/Doompile.xcodeproj -scheme Doompile \
             "${filter_args[@]}" -destination "platform=iOS Simulator,id=$simulator_id" \

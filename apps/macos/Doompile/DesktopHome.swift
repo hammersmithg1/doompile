@@ -214,34 +214,44 @@ struct DesktopHome: View {
                 MacNoteTags(selected: $quick.note.tags, available: library.tags)
             }
             if let error = quick.error { Text(error).font(.system(size: 11)).foregroundStyle(MacPalette.orange).textSelection(.enabled) }
-            if quick.startingVoice || (quick.voice.recording && !quickExpanded) {
+            if quickExpanded && quick.startingVoice {
                 MacRecordingSnippet(starting: quick.startingVoice, seconds: quick.voice.seconds, onStop: quick.stopRecording)
             }
-            if !quickExpanded { composerAttachments }
             composerInput
-            if quickExpanded { HStack(spacing: 5) { Spacer(); composerButtons }.padding(.vertical, 5) }
+            if quickExpanded {
+                HStack(spacing: 5) {
+                    Spacer()
+                    attachButton
+                    MacComposerButton(icon: "mic", label: "Записать голосовую заметку", disabled: quick.startingVoice || quick.voice.recording || quick.busy) { Task { await quick.startRecording() } }
+                    MacComposerButton(icon: "arrow.up", label: "Отправить заметку", send: true, disabled: quick.startingVoice || quick.busy || (!quick.voice.recording && !quick.hasContent), action: saveQuick)
+                }.padding(.vertical, 5)
+            }
         }.padding(.horizontal, 14).padding(.top, 8).padding(.bottom, 12)
         .onChange(of: quick.voice.seconds, updateRecordingTime)
     }
     private func updateRecordingTime(from _: Int, to seconds: Int) {
         if quick.voice.recording { quick.bridge.recordingState(id: quick.voice.id, seconds: seconds) }
     }
-    @ViewBuilder private var composerAttachments: some View {
-        if quick.richMounted {
-            let audio = quick.note.attachments.filter { $0.mimeType.hasPrefix("audio/") }
-            if !audio.isEmpty { MacComposerAttachmentStrip(attachments: audio, onRemove: nil).frame(height: 52) }
-        } else if !quick.note.attachments.isEmpty {
-            MacComposerAttachmentStrip(attachments: quick.note.attachments, onRemove: { quick.removeFile($0) }).frame(maxHeight: 165)
-        }
-    }
     private var composerInput: some View {
-        HStack(alignment: .bottom, spacing: 5) {
-            if quick.richMounted { richComposerInput }
-            else {
-                MacQuickInput(text: Binding(get: { quick.note.plainText }, set: quick.updateText), height: $quickHeight, focused: $quickFocused, onSubmit: saveQuick, onPasteImage: pasteQuickImage)
-                    .frame(height: quickHeight).padding(.leading, 8)
+        VStack(spacing: 6) {
+            if !quickExpanded && (quick.startingVoice || quick.voice.recording || !quick.attachments.isEmpty) {
+                MacComposerAttachmentStrip(attachments: quick.attachments, starting: quick.startingVoice, recording: quick.voice.recording,
+                                           seconds: quick.voice.seconds, onRemove: quick.removeFile, onStop: quick.stopRecording)
             }
-            if !quickExpanded { composerButtons }
+            HStack(alignment: .center, spacing: 5) {
+                if !quickExpanded { attachButton }
+                if quick.richMounted { richComposerInput }
+                else {
+                    MacQuickInput(text: Binding(get: { quick.note.plainText }, set: quick.updateText), height: $quickHeight, focused: $quickFocused, onSubmit: saveQuick, onPasteImage: pasteQuickImage)
+                        .frame(height: quickHeight).padding(.horizontal, 4)
+                }
+                if !quickExpanded {
+                    MacComposerButton(icon: "arrow.up.left.and.arrow.down.right", label: "Развернуть редактор", disabled: quick.busy, identifier: "quick-composer-expand") { compose() }
+                    MacComposerPrimaryButton(canSend: quick.voice.recording || quick.hasContent, starting: quick.startingVoice, busy: quick.busy,
+                                             onStart: { Task { await quick.startRecording() } }, onSend: saveQuick,
+                                             onHoldRelease: { if quick.voice.recording { saveQuick() } })
+                }
+            }
         }
         .padding(6)
         .background(MacPalette.surface, in: RoundedRectangle(cornerRadius: 15))
@@ -257,14 +267,12 @@ struct DesktopHome: View {
             if let note = library.notes.first(where: { $0.id == id }) { open(note) }
         }, onRequestLink: { quickLinkValue = $0; quickLink = true }, onAction: composerAction, onPasteImage: quick.storeFile)
         .id(quick.note.id)
+        .accessibilityIdentifier("quick-composer-input")
         .frame(maxWidth: .infinity, minHeight: quickExpanded ? 180 : 43, maxHeight: quickExpanded ? .infinity : 43)
         .onReceive(quick.bridge.$ready) { ready in if ready { quick.editorReady() } }
     }
-    @ViewBuilder private var composerButtons: some View {
-        MacComposerButton(icon: "mic", label: "Записать голосовую заметку", disabled: quick.startingVoice || quick.voice.recording || quick.busy) { Task { await quick.startRecording() } }
-        MacComposerButton(icon: "paperclip", label: "Прикрепить файл") { quickFiles = true }
-        if !quickExpanded { MacComposerButton(icon: "arrow.up.left.and.arrow.down.right", label: "Развернуть редактор") { compose() } }
-        MacComposerButton(icon: "arrow.up", label: "Сохранить заметку", send: true, disabled: quick.startingVoice || quick.busy || (!quick.voice.recording && !MacPreview.hasContent(quick.note)), action: saveQuick)
+    private var attachButton: some View {
+        MacComposerButton(icon: "paperclip", label: "Прикрепить файл", disabled: quick.busy, identifier: "quick-composer-attach") { quickFiles = true }
     }
     private func composerAction(_ action: String) {
         switch EditorAction(rawValue: action) {

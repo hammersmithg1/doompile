@@ -145,13 +145,17 @@ final class Telemetry: @unchecked Sendable {
         if values["stack"] == nil { values["stack"] = "\(file):\(line):0" }
         record(name, values, trace: trace)
     }
-    static func network(_ session: URLSession, request original: URLRequest, parent: TelemetryTrace? = nil) async throws -> (Data, URLResponse) {
-        guard original.url?.path.hasPrefix("/api/") == true, original.url?.path != "/api/telemetry" else { return try await session.data(for: original) }
+    static func network(_ session: URLSession, request original: URLRequest, parent: TelemetryTrace? = nil, upload: Data? = nil, delegate: URLSessionTaskDelegate? = nil) async throws -> (Data, URLResponse) {
+        func perform(_ request: URLRequest) async throws -> (Data, URLResponse) {
+            if let upload { return try await session.upload(for: request, from: upload, delegate: delegate) }
+            return try await session.data(for: request)
+        }
+        guard original.url?.path.hasPrefix("/api/") == true, original.url?.path != "/api/telemetry" else { return try await perform(original) }
         let telemetry = Self.shared, trace = TelemetryTrace(parent: parent), started = Date()
         var request = original; request.setValue(trace.header, forHTTPHeaderField: "traceparent")
         let properties: [String: Any] = ["method": request.httpMethod ?? "GET", "route": TelemetryPrivacy.route(request.url?.path ?? "")]
         do {
-            let result = try await session.data(for: request)
+            let result = try await perform(request)
             let status = (result.1 as? HTTPURLResponse)?.statusCode ?? 0
             telemetry.record(status >= 500 ? .httpFailed : .httpCompleted, properties.merging(["status": status, "duration_ms": Date().timeIntervalSince(started) * 1000]) { _, value in value }, trace: trace)
             return result

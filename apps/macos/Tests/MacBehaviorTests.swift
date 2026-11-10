@@ -13,6 +13,12 @@ final class MacBehaviorTests: XCTestCase {
         XCTAssertEqual(edited.attachments, [file]); XCTAssertEqual(edited.plainText, "New text\nSecond line")
         XCTAssertTrue(edited.body.hasFinishedRecording("recording-one"))
         XCTAssertTrue(EditorLifecycle.shouldSave(MacQuickDocument.updating(edited, text: ""), existing: false))
+        XCTAssertFalse(MacQuickDocument.needsRichEditor(edited))
+        XCTAssertEqual(MacQuickDocument.referencedFiles(in: edited), [file])
+        var afterRemoval = edited
+        afterRemoval.body = .document("New text")
+        XCTAssertTrue(MacQuickDocument.referencedFiles(in: afterRemoval).isEmpty)
+        XCTAssertEqual(afterRemoval.attachments, [file])
     }
     func testTimelineReturnsToCreationDateAfterFlagsChange() {
         var older = Note.text("Older"); older.createdAt = "2026-10-01T12:00:00.000Z"
