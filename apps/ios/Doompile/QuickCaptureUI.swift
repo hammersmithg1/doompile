@@ -90,7 +90,7 @@ struct QuickVoiceControl: UIViewRepresentable {
             isAccessibilityElement = true
         }
 
-        required init?(coder: NSCoder) { nil }
+        required init?(coder: NSCoder) { return nil }
 
         override func beginTracking(_ touch: UITouch, with event: UIEvent?) -> Bool {
             guard let configuration, configuration.enabled else { return false }
