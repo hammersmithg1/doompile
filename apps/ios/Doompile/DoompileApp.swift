@@ -578,11 +578,11 @@ struct Home: View {
     }
     private var quickAttachmentMenu: some View {
         Menu {
-            Button { focused = false; quickBridge.blur(); quickImporter = true } label: {
-                DoompileLabel("Файл", systemImage: "doc")
+            Button("Файл", systemImage: "doc") {
+                focused = false; quickBridge.blur(); quickImporter = true
             }
-            Button { focused = false; quickBridge.blur(); quickPhotoPicker = true } label: {
-                DoompileLabel("Фото", systemImage: "photo")
+            Button("Фото", systemImage: "photo") {
+                focused = false; quickBridge.blur(); quickPhotoPicker = true
             }
         } label: {
             quickToolIcon("paperclip")
