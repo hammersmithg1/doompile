@@ -16,6 +16,13 @@ struct NoteSwipeRow<Content: View>: View {
     private var open: Bool { revealedID == note.id }
     private var offset: CGFloat { dragOffset ?? (open ? -revealWidth : 0) }
     private var progress: CGFloat { min(1, max(0, -offset / revealWidth)) }
+    private var accessibilitySummary: String {
+        var parts = [note.plainText.isEmpty ? note.displayTitle : note.plainText]
+        if let quote = note.editorSource?.quote, !quote.isEmpty { parts.append(quote) }
+        parts += note.attachments.map(\.name)
+        var seen = Set<String>()
+        return parts.filter { !$0.isEmpty && seen.insert($0).inserted }.joined(separator: ", ")
+    }
     private func settle(_ initialVelocity: Double = 0) -> Animation {
         UIAccessibility.isReduceMotionEnabled ? .linear(duration: 0.01)
             : .interpolatingSpring(stiffness: 380, damping: 34, initialVelocity: initialVelocity)
@@ -43,7 +50,7 @@ struct NoteSwipeRow<Content: View>: View {
                     if open { close() } else { revealedID = nil; onOpen() }
                 }
                 .accessibilityElement(children: .contain).accessibilityAddTraits(.isButton)
-                .accessibilityLabel(note.plainText.isEmpty ? note.displayTitle : note.plainText)
+                .accessibilityLabel(accessibilitySummary)
                 .accessibilityAction { if open { close() } else { revealedID = nil; onOpen() } }
                 .environment(\.openURL, OpenURLAction { url in
                     guard Date() >= ignoreTapUntil else { return .handled }

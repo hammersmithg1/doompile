@@ -66,7 +66,8 @@ final class TouchUXTests: XCTestCase {
     }
     private func openSidebar(over row: XCUIElement? = nil) {
         let frame = app.frame
-        let x = row.map { ($0.frame.minX + 1 - frame.minX) / frame.width } ?? 0.015
+        // The drawer starts at the screen edge, even when a row has a wider inset.
+        let x = row.map { min(20, $0.frame.minX + 1 - frame.minX) / frame.width } ?? 0.015
         let y = row.map { ($0.frame.midY - frame.minY) / frame.height } ?? 0.4
         let start = app.coordinate(withNormalizedOffset: CGVector(dx: x, dy: y))
         let end = app.coordinate(withNormalizedOffset: CGVector(dx: 0.8, dy: y))
