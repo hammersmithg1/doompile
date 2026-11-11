@@ -427,8 +427,15 @@ final class TouchUXTests: XCTestCase {
         app.buttons["expand-editor"].tap()
         let webView = app.webViews.firstMatch
         let editor = webView.textViews.firstMatch
-        XCTAssertTrue(editor.waitForExistence(timeout: 8), app.debugDescription)
-        editor.typeText("Alpha bravo charlie delta\nSecond line preserved\nThird line preserved")
+        XCTAssertTrue(editor.waitForExistence(timeout: 18), app.debugDescription)
+        editor.tap()
+        XCTAssertTrue(app.keyboards.firstMatch.waitForExistence(timeout: 5), app.debugDescription)
+        let fixture = "Alpha bravo charlie delta\nSecond line preserved\nThird line preserved"
+        editor.typeText(fixture)
+        let textEntered = expectation(for: NSPredicate { _, _ in
+            (editor.value as? String ?? "").contains(fixture)
+        }, evaluatedWith: editor)
+        wait(for: [textEntered], timeout: 5)
         app.buttons["dismiss-editor-keyboard"].tap()
         XCTAssertTrue(app.keyboards.firstMatch.waitForNonExistence(timeout: 3))
         screenshot("editor-edge-indent-baseline")
