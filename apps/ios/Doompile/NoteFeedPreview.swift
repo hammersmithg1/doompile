@@ -54,7 +54,10 @@ struct NoteCard: View {
                                     .clipShape(RoundedRectangle(cornerRadius: DesignTokens.radiusCard))
                                     .overlay(alignment: .bottomTrailing) {
                                         if let state = transfer(for: file) {
-                                            AttachmentTransferBadge(state: state).padding(8).background(Palette.card).padding(8)
+                                            AttachmentTransferBadge(state: state)
+                                                .padding(.horizontal, 8).padding(.vertical, 6)
+                                                .background(Palette.card, in: RoundedRectangle(cornerRadius: DesignTokens.radiusControl))
+                                                .padding(8)
                                         }
                                     }
                             } else {
