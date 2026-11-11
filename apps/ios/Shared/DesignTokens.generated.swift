@@ -24,6 +24,7 @@ enum DesignTokens {
     static let surface = adaptive(0xFFFEFD, 0x1E1E20)
     static let sidebar = adaptive(0xEFEDE9, 0x1A1A1C)
     static let text = adaptive(0x191A23, 0xEFEDEF)
+    static let link = adaptive(0x327BC1, 0x7DB6F0)
     static let muted = adaptive(0x81818A, 0x939096)
     static let line = adaptive(0xE7E4E0, 0x303033)
     static let lime = adaptive(0xCFF641, 0xCFF641)

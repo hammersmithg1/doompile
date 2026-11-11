@@ -225,7 +225,7 @@
   }
   .note-row {
     padding: 15px 2px;
-    /* Desktop's negative margins get cropped by the swipe-action wrapper. */
+    /* Keep the resting row aligned with the feed padding. */
     margin-inline: 0;
   }
   .note-preview-text {
@@ -299,9 +299,8 @@
   }
   .mobile-note-row {
     position: relative;
-    overflow: hidden;
-    border-radius: 9px;
-    background: var(--sidebar);
+    /* The feed viewport clips a translated note at the screen edge. */
+    overflow: visible;
   }
   .mobile-row-content {
     position: relative;
@@ -319,10 +318,13 @@
     gap: 4px;
     padding-inline: 4px;
     align-items: center;
-    transform: translate3d(calc((1 - var(--row-progress, 0)) * 18px), 0, 0);
+    overflow: hidden;
+    border-radius: 9px;
+    background: var(--sidebar);
     opacity: clamp(0, calc(var(--row-progress, 0) * 2.8), 1);
   }
   .mobile-row-actions button {
+    transform: translate3d(calc((1 - var(--row-progress, 0)) * 18px), 0, 0);
     flex: 1;
     height: 44px;
     border-radius: 12px;

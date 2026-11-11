@@ -1,6 +1,20 @@
 import XCTest
 @testable import DoompileCore
 final class SourceLinkTests: XCTestCase {
+    func testFeedLinksKeepUnicodeOffsetsAndSentencePunctuation() {
+        let text = "Мысль 🌀 (https://example.com/a_(b)). Ещё: www.example.org/page, https://example.net/?q=да!"
+        let links = FeedLinks.links(in: text)
+        XCTAssertEqual(links.map { (text as NSString).substring(with: $0.range) }, [
+            "https://example.com/a_(b)", "www.example.org/page", "https://example.net/?q=да"
+        ])
+        XCTAssertEqual(links[1].url.absoluteString, "https://www.example.org/page")
+        XCTAssertEqual(links[2].url.query?.removingPercentEncoding, "q=да")
+    }
+    func testFeedLinksOnlyNavigateToWebURLs() {
+        XCTAssertTrue(FeedLinks.links(in: "javascript:alert(1) file:///tmp/test mailto:test@example.com").isEmpty)
+        XCTAssertEqual(FeedLinks.links(in: "https://example.com [http://example.org/x].").map(\.url.absoluteString),
+            ["https://example.com", "http://example.org/x"])
+    }
     struct Fixture: Decodable { let name: String; let source: NoteSource; let expected: String }
     func testCrossPlatformSourceLinkFixtures() throws {
         let file = URL(fileURLWithPath: #filePath).deletingLastPathComponent().appendingPathComponent("../../../packages/core/test-fixtures/source-links.json").standardizedFileURL

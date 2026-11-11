@@ -146,6 +146,23 @@ private enum FeedItem: Identifiable {
                     try? Storage.shared.save(deleted)
                 }
             }
+            if environment["DOOMPILE_UI_FEED_FIXTURE"] == "1" {
+                let samples = [
+                    "Первая строка остаётся частью текста\nВторая строка\nТретья строка\nЧетвёртая строка\nПятая строка\nШестая строка тоже видна",
+                    "Ссылка в тексте\nhttps://example.com/?doompile=inline",
+                    "Мой комментарий к сохранённой цитате",
+                    (1...24).map { "Строка длинной заметки \($0)" }.joined(separator: "\n")
+                ]
+                for (index, text) in samples.enumerated() {
+                    var note = Note.text(text)
+                    note.id = "a0000000-0000-4000-8000-00000000000\(index + 1)"
+                    note.createdAt = "2026-10-30T10:0\(4 - index):00.000Z"
+                    if index == 2 {
+                        note.source = NoteSource(url: "https://example.com/?doompile=source", title: "Сохранённая статья", quote: "Цитата отделена от комментария, как в вебе.")
+                    }
+                    try? Storage.shared.save(note)
+                }
+            }
             if ProcessInfo.processInfo.environment["DOOMPILE_UI_SCROLL_FIXTURE"] == "1" {
                 for index in 0..<24 {
                     var note = Note.text("Scroll fixture \(String(format: "%02d", index))\nSecond line for the scrolling fixture")
@@ -526,7 +543,7 @@ struct Home: View {
             onOpen: { focused = false; editor = note },
             onPin: { togglePinned(note) }, onUrgent: { toggleUrgent(note) },
             onDelete: { library.remove(note) }) { NoteCard(note: note, uploadStates: library.uploadStates) }
-            .padding(.horizontal, 20).padding(.vertical, 6)
+            .padding(.horizontal, 22).padding(.vertical, note.urgent ? 4 : 0)
     }
 
     private var quickHasPayload: Bool {
@@ -972,67 +989,6 @@ struct Home: View {
         focused = false
         UserDefaults.standard.removeObject(forKey: quickComposerKey)
         return true
-    }
-}
-
-struct NoteCard: View {
-    let note: Note
-    var uploadStates: [String: AttachmentUploadState] = [:]
-    private func transfer(for attachment: Attachment) -> AttachmentUploadState? {
-        attachment.url.hasPrefix("local:") ? uploadStates[attachment.id] ?? .queued : nil
-    }
-    private var excerpt: String {
-        var lines = note.plainText.components(separatedBy: .newlines)
-        if lines.first?.trimmingCharacters(in: .whitespacesAndNewlines) == note.displayTitle.trimmingCharacters(in: .whitespacesAndNewlines) { lines.removeFirst() }
-        return lines.joined(separator: "\n").trimmingCharacters(in: .whitespacesAndNewlines)
-    }
-    private var image: Attachment? { note.attachments.first { $0.mimeType.hasPrefix("image/") } }
-    private var showTitle: Bool {
-        guard !note.attachments.isEmpty else { return true }
-        return !note.title.isEmpty && !note.attachments.contains { $0.name == note.title }
-    }
-    var body: some View {
-        VStack(alignment: .leading, spacing: 0) {
-            if let image {
-                AttachmentImage(attachment: image).frame(maxWidth: .infinity).frame(height: 200).clipped()
-                    .overlay(alignment: .bottomTrailing) {
-                        if let state = transfer(for: image) {
-                            AttachmentTransferBadge(state: state)
-                                .padding(.horizontal, 8).padding(.vertical, 6)
-                                .background(Palette.card, in: RoundedRectangle(cornerRadius: DesignTokens.radiusControl))
-                                .padding(8)
-                        }
-                    }
-            }
-            VStack(alignment: .leading, spacing: 8) {
-                if showTitle {
-                    HStack(spacing: 6) {
-                        if note.urgent { DoompileSymbol(systemName: "flame.fill").foregroundStyle(Palette.orange) }
-                        Text(note.displayTitle).font(.system(size: 16, weight: .semibold)).lineLimit(2)
-                        Spacer(minLength: 0)
-                        if note.pinned { DoompileSymbol(systemName: "pin.fill", size: 11).foregroundStyle(Palette.accent) }
-                    }
-                }
-                if let quote = note.source?.quote, !quote.isEmpty {
-                    Text(quote).font(.system(size: 13)).foregroundStyle(Palette.muted).lineLimit(3)
-                }
-                if !excerpt.isEmpty { Text(excerpt).font(.system(size: 14)).foregroundStyle(Palette.muted).lineLimit(5).lineSpacing(3) }
-                ForEach(note.attachments.filter { $0.id != image?.id }) { file in
-                    CaptureAttachmentSnippet(attachment: file, transfer: transfer(for: file))
-                }
-                HStack(spacing: 6) {
-                    if let source = note.source, let host = URL(string: source.url)?.host {
-                        Text(host.replacingOccurrences(of: "www.", with: "")).lineLimit(1)
-                        if let time = source.timestampSeconds { Text("· " + Note.timeLabel(time)) }
-                    }
-                    Spacer(minLength: 4)
-                    ForEach(note.tags.prefix(2), id: \.self) { Text("#" + $0).lineLimit(1) }
-                }.font(.system(size: 10)).foregroundStyle(Palette.muted).frame(minHeight: image == nil ? 0 : 12)
-            }.padding(.horizontal, 15).padding(.vertical, image != nil && !showTitle && excerpt.isEmpty ? 8 : 13)
-        }.foregroundStyle(Palette.text).frame(maxWidth: .infinity, alignment: .leading)
-            .background(note.urgent ? Palette.urgent : Palette.card)
-            .clipShape(RoundedRectangle(cornerRadius: 13))
-            .overlay(RoundedRectangle(cornerRadius: 13).stroke(note.urgent ? Palette.orange.opacity(0.22) : Palette.line.opacity(0.75)))
     }
 }
 

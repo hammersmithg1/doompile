@@ -42,8 +42,15 @@ struct NoteSwipeRow<Content: View>: View {
                     guard Date() >= ignoreTapUntil else { return }
                     if open { close() } else { revealedID = nil; onOpen() }
                 }
-                .accessibilityElement(children: .combine).accessibilityAddTraits(.isButton)
+                .accessibilityElement(children: .contain).accessibilityAddTraits(.isButton)
+                .accessibilityLabel(note.plainText.isEmpty ? note.displayTitle : note.plainText)
                 .accessibilityAction { if open { close() } else { revealedID = nil; onOpen() } }
+                .environment(\.openURL, OpenURLAction { url in
+                    guard Date() >= ignoreTapUntil else { return .handled }
+                    if open { close(); return .handled }
+                    revealedID = nil
+                    return .systemAction
+                })
                 .offset(x: offset)
                 .accessibilityIdentifier("note-" + note.id)
                 .contextMenu {
@@ -52,7 +59,6 @@ struct NoteSwipeRow<Content: View>: View {
                     Button("Удалить", systemImage: "trash", role: .destructive, action: onDelete)
                 }
         }
-        .clipShape(RoundedRectangle(cornerRadius: 14))
         .contentShape(Rectangle())
         .modifier(HorizontalDragModifier(target: .noteRow(open: open),
             onChanged: { translation, _ in changeDrag(translation.width) },

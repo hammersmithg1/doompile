@@ -12,6 +12,9 @@ final class TouchUXTests: XCTestCase {
         if name.contains("testQuickComposerGrowsToFifteenLinesThenScrolls") {
             app.launchEnvironment["DOOMPILE_UI_SCROLL_FIXTURE"] = "1"
         }
+        if name.contains("testFeedPreview") {
+            app.launchEnvironment["DOOMPILE_UI_FEED_FIXTURE"] = "1"
+        }
         app.launch()
         XCTAssertTrue(app.textFields["quick-input"].waitForExistence(timeout: 10))
     }
@@ -47,6 +50,53 @@ final class TouchUXTests: XCTestCase {
         let end = app.coordinate(withNormalizedOffset: CGVector(dx: 0.8, dy: y))
         start.press(forDuration: 0.05, thenDragTo: end)
         XCTAssertTrue(app.textFields["sidebar-search"].waitForExistence(timeout: 5))
+    }
+    func testFeedPreviewMatchesWebAndSwipesPastViewport() {
+        let row = noteRow("Первая строка остаётся частью текста")
+        XCTAssertTrue(row.waitForExistence(timeout: 5))
+        XCTAssertTrue(app.staticTexts["Первая строка остаётся частью текста\nВторая строка\nТретья строка\nЧетвёртая строка\nПятая строка\nШестая строка тоже видна"].exists)
+        screenshot("feed-preview-light")
+        let original = row.frame
+        row.swipeLeft()
+        XCTAssertTrue(app.buttons["swipe-action-pin-a0000000-0000-4000-8000-000000000001"].waitForExistence(timeout: 3))
+        XCTAssertLessThanOrEqual(row.frame.minX, 1, "The translated note reaches the screen edge instead of being clipped at the feed inset")
+        XCTAssertEqual(row.frame.minY, original.minY, accuracy: 2)
+        screenshot("feed-swipe-open")
+        let y = row.frame.midY / app.frame.height
+        app.coordinate(withNormalizedOffset: CGVector(dx: 0.18, dy: y)).press(forDuration: 0.05,
+            thenDragTo: app.coordinate(withNormalizedOffset: CGVector(dx: 0.8, dy: y)))
+        XCTAssertTrue(app.buttons["swipe-action-pin-a0000000-0000-4000-8000-000000000001"].waitForNonExistence(timeout: 3))
+        XCTAssertFalse(app.buttons["close-editor"].exists)
+        screenshot("feed-swipe-closed")
+        app.scrollViews["note-feed"].swipeUp()
+        XCTAssertTrue(app.staticTexts["Читать дальше"].waitForExistence(timeout: 3))
+        screenshot("feed-source-and-long-note")
+        app.terminate()
+        app.launchEnvironment["DOOMPILE_TEST_APPEARANCE"] = "dark"
+        app.launch()
+        XCTAssertTrue(noteRow("Первая строка остаётся частью текста").waitForExistence(timeout: 5))
+        screenshot("feed-preview-dark")
+        noteRow("Первая строка остаётся частью текста").swipeLeft()
+        XCTAssertTrue(app.buttons["swipe-action-delete-a0000000-0000-4000-8000-000000000001"].waitForExistence(timeout: 3))
+        screenshot("feed-swipe-dark")
+    }
+    func testFeedPreviewLinksOpenSourceWithoutOpeningEditor() {
+        let safari = XCUIApplication(bundleIdentifier: "com.apple.mobilesafari")
+        let inline = app.links["https://example.com/?doompile=inline"]
+        XCTAssertTrue(inline.waitForExistence(timeout: 5), app.debugDescription)
+        inline.tap()
+        XCTAssertTrue(safari.wait(for: .runningForeground, timeout: 8))
+        app.activate()
+        XCTAssertFalse(app.buttons["close-editor"].exists, "A link tap must not also open the note")
+        let source = app.descendants(matching: .any)["feed-source-link"].firstMatch
+        if !source.isHittable { app.scrollViews["note-feed"].swipeUp() }
+        XCTAssertTrue(source.waitForExistence(timeout: 5) && source.isHittable, app.debugDescription)
+        source.tap()
+        XCTAssertTrue(safari.wait(for: .runningForeground, timeout: 8))
+        app.activate()
+        XCTAssertFalse(app.buttons["close-editor"].exists)
+        noteRow("Мой комментарий к сохранённой цитате").tap()
+        XCTAssertTrue(app.buttons["close-editor"].waitForExistence(timeout: 5), "Tapping the note body still opens reading mode")
     }
     func testQuickKeyboardDismissesWhenTappingFeed() {
         let input = app.textFields["quick-input"]

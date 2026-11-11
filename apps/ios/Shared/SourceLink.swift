@@ -1,5 +1,29 @@
 import Foundation
 
+/// Match the web feed's HTTP/HTTPS and www links without swallowing sentence punctuation.
+enum FeedLinks {
+    struct Link: Equatable {
+        let range: NSRange
+        let url: URL
+    }
+    private static let expression = try! NSRegularExpression(pattern: #"(?:https?://|www\.)[^\s<>"']+"#, options: .caseInsensitive)
+    static func links(in text: String) -> [Link] {
+        expression.matches(in: text, range: NSRange(text.startIndex..., in: text)).compactMap { match in
+            guard let range = Range(match.range, in: text) else { return nil }
+            var value = String(text[range])
+            while let last = value.last, ".,!?;:".contains(last) { value.removeLast() }
+            for (open, close) in [("(", ")"), ("[", "]"), ("{", "}")] {
+                while value.hasSuffix(close) && value.components(separatedBy: close).count > value.components(separatedBy: open).count {
+                    value.removeLast()
+                }
+            }
+            guard let url = URL(string: value.lowercased().hasPrefix("www.") ? "https://" + value : value),
+                  let scheme = url.scheme?.lowercased(), ["http", "https"].contains(scheme), url.host != nil else { return nil }
+            return Link(range: NSRange(location: match.range.location, length: value.utf16.count), url: url)
+        }
+    }
+}
+
 /// Keep the source canonical; a text directive belongs only on the outgoing link.
 extension NoteSource {
     var quoteContext: (prefix: String, suffix: String) {
