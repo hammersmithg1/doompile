@@ -542,6 +542,7 @@ test("source snippet and paragraphs can be reordered by drag handle", async ({
   const handle = page.getByRole("button", {
     name: "Перетащить блок",
     exact: true,
+    includeHidden: true,
   });
   await expect(handle).toBeVisible();
   const target = page.locator(".tiptap > p").last();
@@ -1008,6 +1009,64 @@ async function swipeParagraph(
   );
 }
 
+test("touch pointer movement keeps the block handle hidden and mouse hover reveals it", async ({
+  page,
+}) => {
+  await page.setViewportSize({ width: 390, height: 720 });
+  await page.goto("/");
+  await setDoc(page, doc(paragraph("Touch keeps this text unobstructed")));
+  const line = page.locator(".tiptap > p");
+  const handle = page.getByRole("button", {
+    name: "Перетащить блок",
+    exact: true,
+  });
+  const before = await json(page);
+  await expect(handle).toBeHidden();
+  await line.dispatchEvent("pointermove", { pointerType: "touch" });
+  await expect(handle).toBeHidden();
+  expect(await json(page)).toEqual(before);
+  await line.hover();
+  await expect(handle).toBeVisible();
+  await line.dispatchEvent("pointermove", { pointerType: "touch" });
+  await expect(handle).toBeHidden();
+  await line.hover({ position: { x: 30, y: 8 } });
+  await expect(handle).toBeVisible();
+});
+
+test("touch caret changes keep passive block handles hidden and explicit block actions available", async ({
+  page,
+  browser,
+}) => {
+  const context = await browser.newContext({
+    viewport: { width: 390, height: 720 },
+    hasTouch: true,
+  });
+  try {
+    const touchPage = await context.newPage();
+    await touchPage.goto(new URL("/", page.url()).href);
+    expect(
+      await touchPage.evaluate(() => matchMedia("(pointer: coarse)").matches),
+    ).toBe(true);
+    await setDoc(touchPage, doc(paragraph("Touch keeps this text unobstructed")));
+    const handle = touchPage.getByRole("button", {
+      name: "Перетащить блок",
+      exact: true,
+      includeHidden: true,
+    });
+    await expect(handle).toHaveJSProperty("hidden", true);
+    await touchPage.evaluate(() =>
+      (window as any).testEditor.commands.setTextSelection(3),
+    );
+    await expect(handle).toHaveJSProperty("hidden", true);
+    await touchPage.evaluate(() => (window as any).controller.openBlockActions());
+    await expect(
+      touchPage.getByRole("menu", { name: "Действия с блоком", exact: true }),
+    ).toBeVisible();
+  } finally {
+    await context.close();
+  }
+});
+
 test("touch indentation starts in the paragraph gutter and keeps the typing caret", async ({
   page,
 }) => {
@@ -1056,7 +1115,15 @@ test("touches inside text keep selection and caret gestures available", async ({
       await page.evaluate(() => window.doompileEditor.getDocument()),
     ).toEqual(before);
   }
-  await line.dblclick();
+  await line.dblclick({ position: { x: 24, y: 12 } });
+  await expect
+    .poll(() =>
+      line.evaluate((element) => {
+        const editor = (element.closest(".tiptap") as any).editor;
+        return !editor.state.selection.empty && !getSelection()?.isCollapsed;
+      }),
+    )
+    .toBe(true);
   const selected = await page.evaluate(() => {
     const editor = (document.querySelector(".tiptap") as any).editor;
     return {
