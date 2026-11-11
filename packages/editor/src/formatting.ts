@@ -183,7 +183,11 @@ function touchIndent(editor: Editor, view: EditorView) {
       )
         return;
       const start = event.touches[0];
-      if (start.clientX < 8 || start.clientX > window.innerWidth - 24) return;
+      if (
+        dom.ownerDocument.documentElement.dataset.nativeCapture !== "compact" &&
+        (start.clientX < 8 || start.clientX > window.innerWidth - 24)
+      )
+        return;
       const target = event.target;
       if (
         !(target instanceof Element) ||

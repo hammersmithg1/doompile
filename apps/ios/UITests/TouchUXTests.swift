@@ -447,6 +447,8 @@ final class TouchUXTests: XCTestCase {
         screenshot("editor-edge-outdented")
 
         let word = origin.withOffset(CGVector(dx: 44, dy: firstLineY))
+        word.tap()
+        XCTAssertTrue(app.keyboards.firstMatch.waitForExistence(timeout: 3))
         word.doubleTap()
         let copy = app.descendants(matching: .any).matching(NSPredicate(format: "label == %@ OR label == %@", "Copy", "Копировать")).firstMatch
         XCTAssertTrue(copy.waitForExistence(timeout: 3), app.debugDescription)
