@@ -1,4 +1,4 @@
-import { test, expect, type Page } from "@playwright/test";
+import { test, expect, type Locator, type Page } from "@playwright/test";
 test("unknown blocks show a local error and survive editing and reload", async ({
   page,
 }) => {
@@ -918,62 +918,283 @@ test("native touch commands preserve the caret, support lists and report selecte
   await expect(page.getByRole("textbox")).toBeFocused();
 });
 
-test("touch swipes change the touched paragraph or list item by one level", async ({ page }) => {
-  await page.setViewportSize({ width: 390, height: 720 });
+async function openTouchDocument(page: Page, body: unknown, width = 390) {
+  await page.setViewportSize({ width, height: 720 });
   await page.goto("/editor.html");
   await page.evaluate((body) => {
     const api = window.doompileEditor;
     api.setTouchMode(true);
     api.setDocument(body);
-  }, doc(paragraph("Caret"), paragraph("Target"), {
-    type: "taskList",
-    content: ["First", "Second"].map((text) => ({
-      type: "taskItem",
-      content: [paragraph(text)],
-    })),
-  }));
+  }, body);
+}
+
+async function swipeParagraph(
+  line: Locator,
+  dx: number,
+  options: {
+    dy?: number;
+    start?: "interior" | "text-edge" | "outside-gutter" | "viewport-edge";
+    visualLine?: number;
+    gutterInset?: number;
+    hold?: boolean;
+    cancel?: boolean;
+    interrupt?: "selection" | "contextmenu" | "multitouch";
+    verticalFirst?: boolean;
+  } = {},
+) {
+  return line.evaluate(
+    async (element, { dx, options }) => {
+      const rect = element.getBoundingClientRect();
+      const range = document.createRange();
+      range.selectNodeContents(element);
+      const textLine = range.getClientRects()[options.visualLine || 0];
+      const y = textLine
+        ? (textLine.top + textLine.bottom) / 2
+        : rect.top + rect.height / 2;
+      const x =
+        options.start === "interior"
+          ? rect.left + Math.min(100, rect.width / 2)
+          : options.start === "text-edge"
+            ? rect.left + 2
+            : options.start === "outside-gutter"
+              ? rect.left - 27
+              : options.start === "viewport-edge"
+                ? 4
+              : rect.left - (options.gutterInset ?? 4);
+      const target = document.elementFromPoint(x, y);
+      if (!target) throw new Error("Touch point must be in the viewport");
+      const origin = { identifier: 0, clientX: x, clientY: y };
+      const end = {
+        ...origin,
+        clientX: x + dx,
+        clientY: y + (options.dy || 0),
+      };
+      function dispatch(
+        type: string,
+        touches: (typeof origin)[],
+        changed = end,
+      ) {
+        const event = new Event(type, { bubbles: true, cancelable: true });
+        Object.assign(event, { touches, changedTouches: [changed] });
+        target.dispatchEvent(event);
+        return event.defaultPrevented;
+      }
+      dispatch("touchstart", [origin], origin);
+      if (options.hold)
+        await new Promise((resolve) => setTimeout(resolve, 320));
+      if (options.interrupt === "selection") {
+        const editor = (document.querySelector(".tiptap") as any).editor;
+        editor.commands.setTextSelection({ from: 1, to: 4 });
+        document.dispatchEvent(new Event("selectionchange"));
+      }
+      if (options.interrupt === "contextmenu")
+        target.dispatchEvent(
+          new MouseEvent("contextmenu", { bubbles: true, cancelable: true }),
+        );
+      if (options.interrupt === "multitouch")
+        dispatch("touchmove", [origin, { ...origin, identifier: 1 }]);
+      if (options.verticalFirst)
+        dispatch("touchmove", [{ ...origin, clientX: x + 2, clientY: y + 30 }]);
+      const moved = dispatch("touchmove", [end]);
+      const ended = dispatch(options.cancel ? "touchcancel" : "touchend", []);
+      return {
+        moved,
+        ended,
+        startsOutsideText: x < rect.left,
+        targetInsideText: element.contains(target),
+      };
+    },
+    { dx, options },
+  );
+}
+
+test("touch indentation starts in the paragraph gutter and keeps the typing caret", async ({
+  page,
+}) => {
+  await openTouchDocument(page, doc(paragraph("Caret"), paragraph("Target")));
   const caret = page.locator(".tiptap > p").first();
   const target = page.getByText("Target", { exact: true });
-  const second = page.getByText("Second", { exact: true });
   await caret.click();
   await page.keyboard.press("End");
-  async function swipe(line: typeof target, dx: number, dy = 0, cancel = false) {
-    return line.evaluate((element, { dx, dy, cancel }) => {
-      const origin = { identifier: 0, clientX: 140, clientY: 180 };
-      const end = { ...origin, clientX: origin.clientX + dx, clientY: origin.clientY + dy };
-      function dispatch(type: string, touches: typeof origin[]) {
-        const event = new Event(type, { bubbles: true, cancelable: true });
-        Object.assign(event, { touches, changedTouches: touches.length ? touches : [end] });
-        return element.dispatchEvent(event);
-      }
-      dispatch("touchstart", [origin]);
-      const scrolled = dispatch("touchmove", [end]);
-      dispatch(cancel ? "touchcancel" : "touchend", []);
-      return scrolled;
-    }, { dx, dy, cancel });
-  }
-  expect(await swipe(target, 60, 110)).toBe(true);
-  await swipe(target, 85, 0, true);
-  await swipe(target, 25);
+  expect(await swipeParagraph(target, 60, { dy: 110 })).toMatchObject({
+    moved: false,
+    ended: false,
+  });
+  await swipeParagraph(target, 85, { cancel: true });
+  await swipeParagraph(target, 20);
   await expect(target).not.toHaveAttribute("data-indent");
-
-  expect(await swipe(target, 85)).toBe(false);
+  expect(await swipeParagraph(target, 85)).toEqual({
+    moved: true,
+    ended: true,
+    startsOutsideText: true,
+    targetInsideText: false,
+  });
   await expect(target).toHaveAttribute("data-indent", "1");
-  await swipe(target, 85);
+  await swipeParagraph(target, 85);
   await expect(target).toHaveAttribute("data-indent", "2");
-  await swipe(target, -85);
+  await swipeParagraph(target, -30);
+  await expect(target).toHaveAttribute("data-indent", "1");
+  await swipeParagraph(target, -30);
+  await expect(target).not.toHaveAttribute("data-indent");
+  await page.keyboard.type("!");
+  await expect(caret).toHaveText("Caret!");
+  await expect(caret).not.toHaveAttribute("data-indent");
+});
+
+test("touches inside text keep selection and caret gestures available", async ({
+  page,
+}) => {
+  await openTouchDocument(page, doc(paragraph("Select these words")));
+  const line = page.locator(".tiptap > p").first();
+  const before = await page.evaluate(() => window.doompileEditor.getDocument());
+  for (const start of ["text-edge", "interior"] as const) {
+    expect(await swipeParagraph(line, 85, { start })).toMatchObject({
+      moved: false,
+      ended: false,
+    });
+    expect(
+      await page.evaluate(() => window.doompileEditor.getDocument()),
+    ).toEqual(before);
+  }
+  await line.dblclick();
+  const selected = await page.evaluate(() => {
+    const editor = (document.querySelector(".tiptap") as any).editor;
+    return {
+      text: getSelection()?.toString(),
+      selection: editor.state.selection.toJSON(),
+    };
+  });
+  expect(selected.text?.length).toBeGreaterThan(0);
+  expect(await swipeParagraph(line, 85)).toMatchObject({
+    moved: false,
+    ended: false,
+  });
+  expect(
+    await page.evaluate(() =>
+      (
+        document.querySelector(".tiptap") as any
+      ).editor.state.selection.toJSON(),
+    ),
+  ).toEqual(selected.selection);
+  expect(await page.evaluate(() => getSelection()?.toString())).toBe(
+    selected.text,
+  );
+  await line.click();
+  await page.keyboard.press("ControlOrMeta+End");
+  await page.keyboard.type("!");
+  await expect(line).toHaveText("Select these words!");
+  await expect(line).not.toHaveAttribute("data-indent");
+});
+
+test("selection changes, long presses and interrupted or vertical gestures do not indent", async ({
+  page,
+}) => {
+  for (const options of [
+    { hold: true },
+    { interrupt: "selection" },
+    { interrupt: "contextmenu" },
+    { interrupt: "multitouch" },
+    { verticalFirst: true },
+    { start: "viewport-edge" },
+  ] as const) {
+    await openTouchDocument(page, doc(paragraph("Preserve this paragraph")));
+    const line = page.locator(".tiptap > p").first();
+    expect(await swipeParagraph(line, 85, options)).toMatchObject({
+      moved: false,
+      ended: false,
+    });
+    await expect(line).not.toHaveAttribute("data-indent");
+  }
+});
+
+test("the gutter follows wrapped and already indented paragraphs on phone and tablet", async ({
+  page,
+}) => {
+  const text =
+    "A wrapped paragraph keeps all its words while its leading gutter follows the current indentation.";
+  for (const width of [390, 1024]) {
+    await openTouchDocument(
+      page,
+      doc(paragraph("Caret"), { ...paragraph(text), attrs: { indent: 2 } }),
+      width,
+    );
+    if (width > 390)
+      await page.addStyleTag({
+        content: ".tiptap { font-size: 30px !important; }",
+      });
+    const line = page.locator(".tiptap > p").nth(1);
+    const visualLines = await line.evaluate((element) => {
+      const range = document.createRange();
+      range.selectNodeContents(element);
+      return range.getClientRects().length;
+    });
+    expect(visualLines).toBeGreaterThan(1);
+    expect(
+      await swipeParagraph(line, 85, { start: "outside-gutter" }),
+    ).toMatchObject({ moved: false, ended: false });
+    expect(await swipeParagraph(line, 85, { visualLine: 1 })).toMatchObject({
+      moved: true,
+      ended: true,
+      startsOutsideText: true,
+      targetInsideText: false,
+    });
+    await expect(line).toHaveAttribute("data-indent", "3");
+    await swipeParagraph(line, -30, { visualLine: 1 });
+    await expect(line).toHaveAttribute("data-indent", "2");
+    await expect(line).toHaveText(text);
+  }
+});
+
+test("gutter swipes nest and lift bullet, ordered and task list items", async ({
+  page,
+}) => {
+  for (const type of ["bulletList", "orderedList", "taskList"]) {
+    const itemType = type === "taskList" ? "taskItem" : "listItem";
+    await openTouchDocument(
+      page,
+      doc(paragraph("Caret"), {
+        type,
+        content: ["First", "Second"].map((text) => ({
+          type: itemType,
+          content: [paragraph(text)],
+        })),
+      }),
+    );
+    const second = page.getByText("Second", { exact: true });
+    expect(await swipeParagraph(second, 85)).toMatchObject({
+      moved: true,
+      ended: true,
+      startsOutsideText: true,
+      targetInsideText: false,
+    });
+    await expect(page.locator("li li p")).toHaveText("Second");
+    await swipeParagraph(second, -30);
+    await expect(page.locator("li li")).toHaveCount(0);
+    await swipeParagraph(second, -30);
+    await expect(page.locator(".tiptap > :is(ul, ol) > li")).toHaveCount(2);
+  }
+});
+
+test("compact native capture accepts its narrow gutter and keeps the typing caret", async ({ page }) => {
+  await openTouchDocument(page, doc(paragraph("Caret"), paragraph("Target")));
+  await page.evaluate(() => {
+    window.doompileEditor.setTouchMode(false);
+    window.doompileEditor.setCaptureMode(true);
+  });
+  const caret = page.locator(".tiptap > p").first();
+  const target = page.locator(".tiptap > p").nth(1);
+  await caret.click();
+  await page.keyboard.press("End");
+  expect(await swipeParagraph(target, 85, { gutterInset: 2 })).toMatchObject({
+    moved: true,
+    ended: true,
+    startsOutsideText: true,
+    targetInsideText: false,
+  });
   await expect(target).toHaveAttribute("data-indent", "1");
   await page.keyboard.type("!");
   await expect(caret).toHaveText("Caret!");
   await expect(caret).not.toHaveAttribute("data-indent");
-
-  await swipe(second, 85);
-  const nested = page.locator("li ul li p");
-  await expect(nested).toHaveText("Second");
-  await swipe(second, -85);
-  await expect(nested).toHaveCount(0);
-  await swipe(second, -85);
-  await expect(page.locator(".tiptap > ul > li")).toHaveCount(2);
 });
 
 test("native image paste stores the image bytes before inserting it", async ({ page }) => {
