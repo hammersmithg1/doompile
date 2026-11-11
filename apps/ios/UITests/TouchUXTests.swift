@@ -121,10 +121,12 @@ final class TouchUXTests: XCTestCase {
         let reduced = settings.switches.matching(NSPredicate(format: "label CONTAINS %@", "Reduce Motion")).firstMatch
         XCTAssertTrue(reduced.waitForExistence(timeout: 5), settings.debugDescription)
         let wasEnabled = reduced.value as? String == "1"
-        if !wasEnabled { reduced.tap() }
-        XCTAssertEqual(reduced.value as? String, "1")
+        let toggle = reduced.coordinate(withNormalizedOffset: CGVector(dx: 0.93, dy: 0.5))
+        if !wasEnabled { toggle.tap() }
+        let enabled = expectation(for: NSPredicate(format: "value == %@", "1"), evaluatedWith: reduced)
+        wait(for: [enabled], timeout: 5)
         defer {
-            if !wasEnabled { settings.activate(); reduced.tap() }
+            if !wasEnabled { settings.activate(); toggle.tap() }
             app.activate()
         }
         app.activate()
