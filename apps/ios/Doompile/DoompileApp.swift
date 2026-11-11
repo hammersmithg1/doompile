@@ -146,6 +146,25 @@ private enum FeedItem: Identifiable {
                     try? Storage.shared.save(deleted)
                 }
             }
+            if environment["DOOMPILE_UI_FEED_MEDIA_FIXTURE"] == "1" {
+                if let data = UIImage(named: "dp-void")?.pngData(),
+                   let file = try? Storage.shared.addFile(data, name: "Изображение.png", mimeType: "image/png") {
+                    var note = Note.text("")
+                    note.id = "a0000000-0000-4000-8000-000000000005"
+                    note.kind = "image"; note.attachments = [file]; note.body = note.body.appendingQuickAttachment(file)
+                    note.createdAt = "2026-10-30T10:06:00.000Z"
+                    try? Storage.shared.save(note)
+                }
+                if let file = try? Storage.shared.addFile(Data("Тестовое вложение".utf8), name: "Документ.txt", mimeType: "text/plain") {
+                    var note = Note.text("Комментарий к файлу")
+                    note.kind = "file"; note.attachments = [file]; note.body = note.body.appendingQuickAttachment(file)
+                    note.createdAt = "2026-10-30T10:05:00.000Z"
+                    try? Storage.shared.save(note)
+                }
+                var important = Note.text("Важная заметка со штатным выделением")
+                important.urgent = true
+                try? Storage.shared.save(important)
+            }
             if environment["DOOMPILE_UI_FEED_FIXTURE"] == "1" {
                 let samples = [
                     "Первая строка остаётся частью текста\nВторая строка\nТретья строка\nЧетвёртая строка\nПятая строка\nШестая строка тоже видна",

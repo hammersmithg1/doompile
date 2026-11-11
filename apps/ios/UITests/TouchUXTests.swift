@@ -105,6 +105,23 @@ final class TouchUXTests: XCTestCase {
         XCTAssertTrue(app.buttons["swipe-action-delete-a0000000-0000-4000-8000-000000000001"].waitForExistence(timeout: 3))
         screenshot("feed-swipe-dark")
     }
+    func testFeedPreviewMediaAndUrgentStates() {
+        app.terminate()
+        app.launchEnvironment["DOOMPILE_UI_FEED_FIXTURE"] = "0"
+        app.launchEnvironment["DOOMPILE_UI_FEED_MEDIA_FIXTURE"] = "1"
+        for appearance in ["light", "dark"] {
+            app.launchEnvironment["DOOMPILE_TEST_APPEARANCE"] = appearance
+            app.launch()
+            let image = app.buttons["note-a0000000-0000-4000-8000-000000000005"]
+            XCTAssertTrue(image.waitForExistence(timeout: 8))
+            let loaded = expectation(for: NSPredicate { _, _ in image.frame.height > 180 }, evaluatedWith: image)
+            wait(for: [loaded], timeout: 8)
+            XCTAssertTrue(noteRow("Важная заметка со штатным выделением").exists)
+            XCTAssertTrue(app.staticTexts["Документ.txt"].exists)
+            screenshot("feed-media-" + appearance)
+            app.terminate()
+        }
+    }
     func testFeedPreviewWithSystemReduceMotion() {
         let settings = XCUIApplication(bundleIdentifier: "com.apple.Preferences")
         settings.launch()
