@@ -80,6 +80,43 @@ final class TouchUXTests: XCTestCase {
         XCTAssertTrue(app.buttons["swipe-action-delete-a0000000-0000-4000-8000-000000000001"].waitForExistence(timeout: 3))
         screenshot("feed-swipe-dark")
     }
+    func testFeedPreviewWithSystemReduceMotion() {
+        let settings = XCUIApplication(bundleIdentifier: "com.apple.Preferences")
+        settings.launch()
+        let accessibility = settings.descendants(matching: .any).matching(NSPredicate(format: "label == %@", "Accessibility")).firstMatch
+        for _ in 0..<5 {
+            if accessibility.exists && accessibility.isHittable { break }
+            settings.swipeUp()
+        }
+        XCTAssertTrue(accessibility.waitForExistence(timeout: 5) && accessibility.isHittable, settings.debugDescription)
+        accessibility.tap()
+        let motion = settings.descendants(matching: .any).matching(NSPredicate(format: "label == %@", "Motion")).firstMatch
+        XCTAssertTrue(motion.waitForExistence(timeout: 5), settings.debugDescription)
+        motion.tap()
+        let reduced = settings.switches.matching(NSPredicate(format: "label CONTAINS %@", "Reduce Motion")).firstMatch
+        XCTAssertTrue(reduced.waitForExistence(timeout: 5), settings.debugDescription)
+        let wasEnabled = reduced.value as? String == "1"
+        if !wasEnabled { reduced.tap() }
+        XCTAssertEqual(reduced.value as? String, "1")
+        defer {
+            if !wasEnabled { settings.activate(); reduced.tap() }
+            app.activate()
+        }
+        app.activate()
+        let row = noteRow("Первая строка остаётся частью текста")
+        XCTAssertTrue(row.waitForExistence(timeout: 5))
+        row.swipeLeft()
+        let pin = app.buttons["swipe-action-pin-a0000000-0000-4000-8000-000000000001"]
+        XCTAssertTrue(pin.waitForExistence(timeout: 3))
+        XCTAssertLessThanOrEqual(row.frame.minX, 1)
+        screenshot("feed-system-reduce-motion-open")
+        let y = row.frame.midY / app.frame.height
+        app.coordinate(withNormalizedOffset: CGVector(dx: 0.18, dy: y)).press(forDuration: 0.05,
+            thenDragTo: app.coordinate(withNormalizedOffset: CGVector(dx: 0.8, dy: y)))
+        XCTAssertTrue(pin.waitForNonExistence(timeout: 3))
+        XCTAssertFalse(app.buttons["close-editor"].exists)
+        screenshot("feed-system-reduce-motion-closed")
+    }
     func testFeedPreviewLinksOpenSourceWithoutOpeningEditor() {
         let safari = XCUIApplication(bundleIdentifier: "com.apple.mobilesafari")
         let inline = app.links["https://example.com/?doompile=inline"]
