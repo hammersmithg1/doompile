@@ -134,7 +134,8 @@ private struct FeedTextExcerpt: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 5) {
             if long {
-                Label("Заметка", systemImage: "doc.text").font(.system(size: 10)).foregroundStyle(Palette.muted)
+                HStack(spacing: 5) { DoompileSymbol(systemName: "doc.text", size: 12); Text("Заметка") }
+                    .font(.system(size: 10)).foregroundStyle(Palette.muted)
             }
             FeedLinkedText(text: text)
                 .font(.system(size: font.pointSize))
