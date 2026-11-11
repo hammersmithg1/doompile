@@ -498,6 +498,60 @@ final class TouchUXTests: XCTestCase {
         XCTAssertTrue(noteRow("Task one").waitForExistence(timeout: 5))
     }
 
+    func testEditorEdgeIndentKeepsInteriorSelection() {
+        app.buttons["expand-editor"].tap()
+        let webView = app.webViews.firstMatch
+        let editor = webView.textViews.firstMatch
+        XCTAssertTrue(editor.waitForExistence(timeout: 18), app.debugDescription)
+        editor.tap()
+        XCTAssertTrue(app.keyboards.firstMatch.waitForExistence(timeout: 5), app.debugDescription)
+        let fixture = "Alpha bravo charlie delta\nSecond line preserved\nThird line preserved"
+        editor.typeText(fixture)
+        let textEntered = expectation(for: NSPredicate { _, _ in
+            (editor.value as? String ?? "").contains(fixture)
+        }, evaluatedWith: editor)
+        wait(for: [textEntered], timeout: 5)
+        app.buttons["dismiss-editor-keyboard"].tap()
+        XCTAssertTrue(app.keyboards.firstMatch.waitForNonExistence(timeout: 3))
+        screenshot("editor-edge-indent-baseline")
+
+        let origin = webView.coordinate(withNormalizedOffset: .zero)
+        let firstLineY: CGFloat = 31.6
+        let indentStart = origin.withOffset(CGVector(dx: 14, dy: firstLineY))
+        let indentEnd = origin.withOffset(CGVector(dx: 116, dy: firstLineY))
+        indentStart.press(forDuration: 0.03, thenDragTo: indentEnd)
+        screenshot("editor-edge-indented")
+        XCTAssertTrue((editor.value as? String ?? "").contains("Alpha bravo charlie delta"))
+
+        let outdentStart = origin.withOffset(CGVector(dx: 38, dy: firstLineY))
+        let outdentEnd = origin.withOffset(CGVector(dx: 8, dy: firstLineY))
+        outdentStart.press(forDuration: 0.03, thenDragTo: outdentEnd)
+        screenshot("editor-edge-outdented")
+
+        let word = origin.withOffset(CGVector(dx: 44, dy: firstLineY))
+        word.tap()
+        XCTAssertTrue(app.keyboards.firstMatch.waitForExistence(timeout: 3))
+        word.doubleTap()
+        let copy = app.descendants(matching: .any).matching(NSPredicate(format: "label IN %@", ["Copy", "Копировать", "Скопировать"])).firstMatch
+        XCTAssertTrue(copy.waitForExistence(timeout: 3), app.debugDescription)
+        screenshot("editor-interior-word-selected")
+        let selectionHandle = origin.withOffset(CGVector(dx: 66, dy: 46))
+        let selectionEnd = origin.withOffset(CGVector(dx: 232, dy: firstLineY))
+        selectionHandle.press(forDuration: 0.05, thenDragTo: selectionEnd, withVelocity: .slow, thenHoldForDuration: 0.1)
+        screenshot("editor-interior-selection-extended")
+        editor.typeText("Selected replacement")
+        let text = editor.value as? String ?? ""
+        XCTAssertTrue(text.contains("Selected replacement"))
+        XCTAssertFalse(text.contains("Alpha"))
+        XCTAssertFalse(text.contains("bravo"))
+        XCTAssertFalse(text.contains("charlie"))
+        XCTAssertTrue(text.contains("Second line preserved"))
+        XCTAssertTrue(text.contains("Third line preserved"))
+        screenshot("editor-interior-selection-replaced")
+        app.buttons["send-expanded-capture"].tap()
+        XCTAssertTrue(noteRow("Selected replacement").waitForExistence(timeout: 5))
+    }
+
     func testSharedEditorAliasSettingsOpenFromNativeSettings() {
         openSidebar(); app.buttons["sidebar-settings"].tap()
         XCTAssertTrue(app.navigationBars["Настройки"].waitForExistence(timeout: 5))

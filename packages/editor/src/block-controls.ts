@@ -169,6 +169,10 @@ export function createBlockControls(
     menu.style.top = `${Math.max(8, Math.min(y, innerHeight - menu.offsetHeight - 8))}px`;
   }
   const pointer = (event: PointerEvent) => {
+    if (event.pointerType === "touch") {
+      if (!origin && menu.hidden) handle.hidden = true;
+      return;
+    }
     if (!origin) {
       const block = blockAt(event.target);
       if (block) showHandle(block);
@@ -363,13 +367,9 @@ export function createBlockControls(
       if (
         (matchMedia("(pointer:coarse)").matches ||
           document.documentElement.dataset.nativeTouch === "true") &&
-        !origin
+        !origin && menu.hidden
       ) {
-        const dom = editor.view.domAtPos(editor.state.selection.from).node;
-        const element = blockAt(
-          dom instanceof HTMLElement ? dom : dom.parentElement,
-        );
-        if (element) showHandle(element);
+        handle.hidden = true;
       }
     },
     destroy() {
