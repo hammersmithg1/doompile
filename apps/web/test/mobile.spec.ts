@@ -109,55 +109,136 @@ test("mobile feed keeps text and timestamps inside swipe wrappers at narrow widt
   });
 });
 
-test("swiped notes cross the feed inset and clip only at the viewport edge", async ({ page }, info) => {
+test("feed previews preserve the full short note and open source links separately", async ({ page, context }, info) => {
   test.skip(info.project.name !== "iphone-webkit");
-  await setup(page);
-  const row = page.locator(".mobile-note-row");
-  const content = ".mobile-row-content";
-  const pin = page.getByRole("button", { name: "Закрепить заметку", exact: true });
+  test.setTimeout(120_000);
+  const samples = [
+    "Первая строка остаётся частью текста\nВторая строка\nТретья строка\nЧетвёртая строка\nПятая строка\nШестая строка тоже видна",
+    "Ссылка в тексте\nhttps://example.com/?doompile=inline",
+    "Мой комментарий к сохранённой цитате",
+    Array.from({ length: 24 }, (_, index) => `Строка длинной заметки ${index + 1}`).join("\n"),
+  ];
+  const notes = samples.map((plainText, index) => createNote({
+    plainText,
+    createdAt: `2026-10-30T10:0${4 - index}:00.000Z`,
+    ...(index === 2 ? { source: { url: "https://example.com/?doompile=source", title: "Сохранённая статья", quote: "Цитата отделена от комментария, как в вебе." } } : {}),
+  }));
+  await context.route("https://example.com/**", route => route.fulfill({ contentType: "text/html", body: "<p>Источник</p>" }));
+  await setup(page, false, notes);
+  await expect(page.locator(".note-preview-text").first()).toHaveText(samples[0]);
+  await expect(page.locator(".note-copy h3")).toHaveCount(0);
+  await expect(page.locator(".note-preview--long")).toHaveCount(1);
   for (const colorScheme of ["light", "dark"] as const) {
+    await page.emulateMedia({ colorScheme });
+    await page.locator(".main-scroll").evaluate(node => node.scrollTop = 0);
+    await page.screenshot({ path: `test-results/mobile-web/feed-preview-${colorScheme}.png` });
+    await page.locator(".note-preview--long").scrollIntoViewIfNeeded();
+    await page.screenshot({ path: `test-results/mobile-web/feed-preview-${colorScheme}-long.png` });
+  }
+  for (const link of [page.locator(".note-preview-text a"), page.locator(".source-snippet a")]) {
+    const opened = page.waitForEvent("popup");
+    await link.click();
+    const popup = await opened;
+    await popup.waitForLoadState();
+    expect(popup.url()).toMatch(/^https:\/\/example\.com\//);
+    await expect(page.getByRole("textbox", { name: "Текст заметки" })).toHaveCount(0);
+    await popup.close();
+  }
+});
+
+for (const colorScheme of ["light", "dark"] as const) {
+  test(`swiped notes cross the feed inset and clip only at the viewport edge (${colorScheme})`, async ({
+    page,
+  }, info) => {
+    test.skip(info.project.name !== "iphone-webkit");
+    test.setTimeout(120_000);
+    await setup(page);
+    const row = page.locator(".mobile-note-row");
+    const content = ".mobile-row-content";
+    const pin = page.getByRole("button", {
+      name: "Закрепить заметку",
+      exact: true,
+    });
     await page.emulateMedia({ colorScheme });
     for (const width of [320, 390, 740]) {
       await page.setViewportSize({ width, height: 844 });
       const bounds = (await row.boundingBox())!;
       const y = bounds.y + bounds.height / 2;
       expect(bounds.x).toBeGreaterThan(10);
-      await page.screenshot({ path: `test-results/mobile-web/feed-${colorScheme}-${width}-closed.png` });
+      if (width === 390)
+        await page.screenshot({
+          path: `test-results/mobile-web/feed-${colorScheme}-${width}-closed.png`,
+        });
       await dispatchTouch(page, content, "start", 250, y);
       await dispatchTouch(page, content, "move", 190, y);
-      const paintsToEdge = () => row.evaluate((row, y) => {
-        const hit = document.elementFromPoint(4, y);
-        return row.querySelector(".mobile-row-content")!.contains(hit);
-      }, y);
-      await page.screenshot({ path: `test-results/mobile-web/feed-${colorScheme}-${width}-drag.png` });
+      const paintsToEdge = () =>
+        row.evaluate((row, y) => {
+          const hit = document.elementFromPoint(4, y);
+          return row.querySelector(".mobile-row-content")!.contains(hit);
+        }, y);
+      await page.screenshot({
+        path: `test-results/mobile-web/feed-${colorScheme}-${width}-drag.png`,
+      });
       expect(await paintsToEdge()).toBe(true);
       await expect(pin).toHaveCount(0);
       await dispatchTouch(page, content, "move", 120, y);
       await dispatchTouch(page, content, "end", 120, y);
       await expect(row).toHaveAttribute("data-revealed", "true");
       await expect(pin).toBeVisible();
-      await expect.poll(() => row.evaluate((node) => parseFloat(node.style.getPropertyValue("--row-position")))).toBe(-156);
+      await expect
+        .poll(() =>
+          row.evaluate((node) =>
+            parseFloat(node.style.getPropertyValue("--row-position")),
+          ),
+        )
+        .toBe(-156);
       expect(await paintsToEdge()).toBe(true);
-      await page.screenshot({ path: `test-results/mobile-web/feed-${colorScheme}-${width}-open.png` });
+      if (width === 390)
+        await page.screenshot({
+          path: `test-results/mobile-web/feed-${colorScheme}-${width}-open.png`,
+        });
       await dispatchTouch(page, content, "start", 100, y);
       await dispatchTouch(page, content, "move", 140, y);
-      await page.screenshot({ path: `test-results/mobile-web/feed-${colorScheme}-${width}-reverse.png` });
+      if (width === 390)
+        await page.screenshot({
+          path: `test-results/mobile-web/feed-${colorScheme}-${width}-reverse.png`,
+        });
       await dispatchTouch(page, content, "cancel", 140, y);
-      await expect.poll(() => row.evaluate((node) => parseFloat(node.style.getPropertyValue("--row-position")))).toBe(-156);
+      await expect
+        .poll(() =>
+          row.evaluate((node) =>
+            parseFloat(node.style.getPropertyValue("--row-position")),
+          ),
+        )
+        .toBe(-156);
       await swipe(page, content, 170);
-      await expect.poll(() => row.evaluate((node) => parseFloat(node.style.getPropertyValue("--row-position")))).toBe(0);
-      expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
+      await expect
+        .poll(() =>
+          row.evaluate((node) =>
+            parseFloat(node.style.getPropertyValue("--row-position")),
+          ),
+        )
+        .toBe(0);
+      expect(
+        await page.evaluate(
+          () => document.documentElement.scrollWidth <= innerWidth,
+        ),
+      ).toBe(true);
     }
-  }
-  await page.emulateMedia({ reducedMotion: "reduce" });
-  await swipe(page, content, -130);
-  await expect(pin).toBeVisible();
-  await page.screenshot({ path: "test-results/mobile-web/feed-reduced-motion-open.png" });
-  await swipe(page, content, 170);
-  await expect(pin).toHaveCount(0);
-  await page.locator(".note-main").click();
-  await expect(page.getByRole("textbox", { name: "Текст заметки" })).toBeVisible();
-});
+    await page.emulateMedia({ reducedMotion: "reduce" });
+    await swipe(page, content, -130);
+    await expect(pin).toBeVisible();
+    await page.screenshot({
+      path: `test-results/mobile-web/feed-${colorScheme}-reduced-motion-open.png`,
+    });
+    await swipe(page, content, 170);
+    await expect(pin).toHaveCount(0);
+    await page.locator(".note-main").click();
+    await expect(
+      page.getByRole("textbox", { name: "Текст заметки" }),
+    ).toBeVisible();
+  });
+}
 
 test("sidebar follows the finger, reverses, cancels and settles using release momentum", async ({
   page,
