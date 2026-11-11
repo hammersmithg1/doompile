@@ -22,6 +22,28 @@ final class TouchUXTests: XCTestCase {
         let image = XCTAttachment(screenshot: app.screenshot())
         image.name = name; image.lifetime = .keepAlways; add(image)
     }
+    /// Accessibility keeps the row's container bounds while its pixels translate outside it.
+    private func changedPixels(from before: XCUIScreenshot, to after: XCUIScreenshot, in rect: CGRect) -> Int {
+        guard let first = before.image.cgImage, let second = after.image.cgImage,
+              first.width == second.width, first.height == second.height,
+              first.bitsPerComponent == 8, second.bitsPerComponent == 8,
+              let firstData = first.dataProvider?.data, let secondData = second.dataProvider?.data,
+              let a = CFDataGetBytePtr(firstData), let b = CFDataGetBytePtr(secondData) else { return 0 }
+        let xScale = CGFloat(second.width) / app.frame.width, yScale = CGFloat(second.height) / app.frame.height
+        let x0 = max(0, Int(rect.minX * xScale)), x1 = min(second.width, Int(rect.maxX * xScale))
+        let y0 = max(0, Int(rect.minY * yScale)), y1 = min(second.height, Int(rect.maxY * yScale))
+        guard x1 > x0, y1 > y0 else { return 0 }
+        var changed = 0
+        for y in y0..<y1 {
+            for x in x0..<x1 {
+                let i = y * first.bytesPerRow + x * first.bitsPerPixel / 8
+                let j = y * second.bytesPerRow + x * second.bitsPerPixel / 8
+                let difference = (0..<3).reduce(0) { $0 + abs(Int(a[i + $1]) - Int(b[j + $1])) }
+                if difference > 120 { changed += 1 }
+            }
+        }
+        return changed
+    }
     private func backgroundBrightness() -> Double {
         guard let image = app.screenshot().image.cgImage,
               let data = image.dataProvider?.data, let bytes = CFDataGetBytePtr(data) else { return 1 }
@@ -57,9 +79,12 @@ final class TouchUXTests: XCTestCase {
         XCTAssertTrue(app.staticTexts["Первая строка остаётся частью текста\nВторая строка\nТретья строка\nЧетвёртая строка\nПятая строка\nШестая строка тоже видна"].exists)
         screenshot("feed-preview-light")
         let original = row.frame
+        let closed = app.screenshot()
         row.swipeLeft()
         XCTAssertTrue(app.buttons["swipe-action-pin-a0000000-0000-4000-8000-000000000001"].waitForExistence(timeout: 3))
-        XCTAssertLessThanOrEqual(row.frame.minX, 1, "The translated note reaches the screen edge instead of being clipped at the feed inset")
+        let inset = CGRect(x: 2, y: original.minY + 2, width: original.minX - 4, height: original.height - 4)
+        XCTAssertGreaterThan(changedPixels(from: closed, to: app.screenshot(), in: inset), 10,
+            "The note must paint through the empty feed inset to the screen edge")
         XCTAssertEqual(row.frame.minY, original.minY, accuracy: 2)
         screenshot("feed-swipe-open")
         let y = row.frame.midY / app.frame.height
@@ -105,10 +130,12 @@ final class TouchUXTests: XCTestCase {
         app.activate()
         let row = noteRow("Первая строка остаётся частью текста")
         XCTAssertTrue(row.waitForExistence(timeout: 5))
+        let original = row.frame, closed = app.screenshot()
         row.swipeLeft()
         let pin = app.buttons["swipe-action-pin-a0000000-0000-4000-8000-000000000001"]
         XCTAssertTrue(pin.waitForExistence(timeout: 3))
-        XCTAssertLessThanOrEqual(row.frame.minX, 1)
+        let inset = CGRect(x: 2, y: original.minY + 2, width: original.minX - 4, height: original.height - 4)
+        XCTAssertGreaterThan(changedPixels(from: closed, to: app.screenshot(), in: inset), 10)
         screenshot("feed-system-reduce-motion-open")
         let y = row.frame.midY / app.frame.height
         app.coordinate(withNormalizedOffset: CGVector(dx: 0.18, dy: y)).press(forDuration: 0.05,
