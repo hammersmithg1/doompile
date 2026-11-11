@@ -450,7 +450,7 @@ final class TouchUXTests: XCTestCase {
         word.tap()
         XCTAssertTrue(app.keyboards.firstMatch.waitForExistence(timeout: 3))
         word.doubleTap()
-        let copy = app.descendants(matching: .any).matching(NSPredicate(format: "label == %@ OR label == %@", "Copy", "Копировать")).firstMatch
+        let copy = app.descendants(matching: .any).matching(NSPredicate(format: "label IN %@", ["Copy", "Копировать", "Скопировать"])).firstMatch
         XCTAssertTrue(copy.waitForExistence(timeout: 3), app.debugDescription)
         screenshot("editor-interior-word-selected")
         let selectionHandle = origin.withOffset(CGVector(dx: 66, dy: 46))
