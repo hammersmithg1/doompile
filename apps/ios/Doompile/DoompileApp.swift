@@ -539,7 +539,7 @@ struct Home: View {
         }.padding(.top, 20).padding(.bottom, 8).padding(.horizontal, 22)
     }
     private func noteRow(_ note: Note, urgent: Bool = false) -> some View {
-        NoteSwipeRow(note: note, revealedID: $revealedNoteID,
+        NoteSwipeRow(note: note, revealedID: $revealedNoteID, uploadStates: library.uploadStates,
             onOpen: { focused = false; editor = note },
             onPin: { togglePinned(note) }, onUrgent: { toggleUrgent(note) },
             onDelete: { library.remove(note) }) { NoteCard(note: note, uploadStates: library.uploadStates) }

@@ -4,6 +4,7 @@ import UIKit
 struct NoteSwipeRow<Content: View>: View {
     let note: Note
     @Binding var revealedID: String?
+    var uploadStates: [String: AttachmentUploadState] = [:]
     let onOpen: () -> Void
     let onPin: () -> Void
     let onUrgent: () -> Void
@@ -19,7 +20,12 @@ struct NoteSwipeRow<Content: View>: View {
     private var accessibilitySummary: String {
         var parts = [note.plainText.isEmpty ? note.displayTitle : note.plainText]
         if let quote = note.editorSource?.quote, !quote.isEmpty { parts.append(quote) }
-        parts += note.attachments.map(\.name)
+        for attachment in note.attachments {
+            parts.append(attachment.name)
+            if attachment.url.hasPrefix("local:") {
+                parts.append((uploadStates[attachment.id] ?? .queued).label)
+            }
+        }
         var seen = Set<String>()
         return parts.filter { !$0.isEmpty && seen.insert($0).inserted }.joined(separator: ", ")
     }
