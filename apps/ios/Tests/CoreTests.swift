@@ -141,6 +141,186 @@ final class CoreTests: XCTestCase {
         XCTAssertEqual(state.notes[original.id]?.revision, 1)
         XCTAssertTrue(state.dirty.contains(original.id))
     }
+    func testRepeatedAutosavesFromAnOlderEditorUseTheirOwnAcknowledgements() throws {
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let store = Storage(directory: directory)
+        var opened = Note.text("Opened")
+        opened.revision = 1
+        try store.merge([opened])
+        for revision in 2...12 {
+            // The next edit is already queued in the editor before its library reloads.
+            var edited = opened
+            edited.plainText = "Typing \(revision)"
+            edited.body = .document(edited.plainText)
+            let saved = try store.save(edited)
+            XCTAssertEqual(saved.revision, revision - 1)
+            let pending = try XCTUnwrap(store.pendingNotes().first)
+            XCTAssertEqual(pending, saved)
+            var server = pending
+            server.revision = revision
+            try store.accept(server, matching: pending)
+            // A routine pull of our own save must retain this writer's provenance.
+            try store.merge([server])
+            XCTAssertEqual(try store.snapshot().notes.count, 1)
+            XCTAssertTrue(try store.pendingNotes().isEmpty)
+        }
+    }
+    func testAutosaveAfterAnAcknowledgementWithNewerTypingKeepsTheLatestBase() throws {
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let store = Storage(directory: directory)
+        let opened = Note.text("First save")
+        try store.save(opened)
+        var typing = opened
+        typing.plainText = "Typing while the request runs"
+        try store.save(typing)
+        var server = opened
+        server.revision = 1
+        try store.accept(server, matching: opened)
+        typing.plainText = "The next queued autosave"
+        XCTAssertEqual(try store.save(typing).revision, 1)
+        let pending = try XCTUnwrap(store.pendingNotes().first)
+        XCTAssertEqual(pending.plainText, typing.plainText)
+        XCTAssertEqual(pending.revision, 1)
+    }
+    func testRemoteMergeStillConflictsWithAStaleEditor() throws {
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let store = Storage(directory: directory)
+        let opened = Note.text("Opened")
+        try store.save(opened)
+        var server = opened
+        server.revision = 1
+        try store.accept(server, matching: opened)
+        server.plainText = "Written on another device"
+        server.revision = 2
+        try store.merge([server])
+        var edited = opened
+        edited.plainText = "Unsynced phone typing"
+        let pending = try store.save(edited)
+        XCTAssertEqual(pending.revision, opened.revision)
+        try store.conflict(local: pending, server: server)
+        let state = try store.snapshot()
+        XCTAssertEqual(state.notes.count, 2)
+        XCTAssertEqual(state.notes[opened.id], server)
+        XCTAssertEqual(state.notes.values.first { $0.id != opened.id }?.plainText, edited.plainText)
+    }
+    func testAnotherProcessAcknowledgementDoesNotRebaseThisEditorsStaleWrite() throws {
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let app = Storage(directory: directory), other = Storage(directory: directory)
+        let opened = Note.text("Opened")
+        try app.save(opened)
+        var acknowledged = opened
+        acknowledged.revision = 1
+        try app.accept(acknowledged, matching: opened)
+        var remoteEdit = acknowledged
+        remoteEdit.plainText = "Another editor"
+        let sent = try other.save(remoteEdit)
+        var server = sent
+        server.revision = 2
+        try other.accept(server, matching: sent)
+        var local = acknowledged
+        local.plainText = "This editor"
+        XCTAssertEqual(try app.save(local).revision, 1)
+    }
+    func testUploadCheckpointsRetainTheAutosaveWriter() throws {
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let store = Storage(directory: directory)
+        let opened = Note.text("Before upload")
+        try store.save(opened)
+        let checkpoint = try store.checkpointUploads(opened, matching: opened)
+        var server = checkpoint
+        server.revision = 1
+        try store.accept(server, matching: checkpoint)
+        var edited = opened
+        edited.plainText = "After upload"
+        XCTAssertEqual(try store.save(edited).revision, 1)
+    }
+    func testStaleConflictResponseDoesNotCopyANewerQueuedSave() throws {
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let store = Storage(directory: directory)
+        let opened = Note.text("Opened")
+        try store.save(opened)
+        var server = opened
+        server.revision = 1
+        try store.accept(server, matching: opened)
+        var typed = opened
+        typed.plainText = "Newer queued text"
+        let pending = try store.save(typed)
+        XCTAssertNil(try store.conflict(local: opened, server: server))
+        let state = try store.snapshot()
+        XCTAssertEqual(state.notes.count, 1)
+        XCTAssertEqual(state.notes[opened.id], pending)
+        XCTAssertEqual(state.dirty, [opened.id])
+    }
+    func testTypingAfterARealConflictContinuesOnOneCopy() throws {
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let store = Storage(directory: directory)
+        var opened = Note.text("Opened")
+        opened.revision = 1
+        try store.merge([opened])
+        var local = opened
+        local.plainText = "Saved phone text"
+        try store.save(local)
+        var remote = opened
+        remote.plainText = "Other device text"
+        remote.body = .document(remote.plainText)
+        remote.revision = 2
+        let conflict = try XCTUnwrap(store.conflict(local: local, server: remote))
+        var current = local
+        current.plainText = "Typing while the conflict response arrives"
+        current.body = .document(current.plainText)
+        var continued = try XCTUnwrap(conflict.continuing(current)).note
+        XCTAssertEqual(continued.id, conflict.copy.id)
+        XCTAssertEqual(continued.plainText, current.plainText)
+        XCTAssertEqual(continued.body, current.body)
+        XCTAssertEqual(continued.createdAt, conflict.copy.createdAt)
+        var unrelated = remote
+        unrelated.id = UUID().uuidString.lowercased()
+        XCTAssertNil(conflict.continuing(unrelated))
+        for revision in 1...8 {
+            continued.plainText += " More typing."
+            continued.body = .document(continued.plainText)
+            let sent = try store.save(continued)
+            XCTAssertEqual(sent.revision, revision - 1)
+            var server = sent
+            server.revision = revision
+            try store.accept(server, matching: sent)
+            let state = try store.snapshot()
+            XCTAssertEqual(state.notes.count, 2)
+            XCTAssertEqual(state.notes[opened.id], remote)
+            XCTAssertEqual(state.notes[continued.id], server)
+            XCTAssertTrue(state.dirty.isEmpty)
+        }
+    }
+    func testConflictContinuationPreservesMetadataAndReconcilesUploadedMedia() throws {
+        var local = Note.text("Local text")
+        local.source = NoteSource(url: "https://example.com", quote: "A quote")
+        local.tags = ["Ideas"]
+        local.attachments = [Attachment(id: "file", name: "photo.png", mimeType: "image/png", url: "local:file", size: 12)]
+        local.body = .object(["type": .string("doc"), "content": .array([.object(["type": .string("image"), "attrs": .object(["src": .string("local:file")])])])])
+        var copy = local
+        copy.id = UUID().uuidString.lowercased()
+        copy.attachments[0].url = "/api/attachments/file"
+        copy.body = local.body.replacingString("local:file", with: copy.attachments[0].url)
+        var typed = local
+        typed.title = "Newer title"
+        typed.attachments[0].name = "Renamed photo.png"
+        let continuation = try XCTUnwrap(NoteConflict(original: local, copy: copy).continuing(typed))
+        let continued = continuation.note
+        XCTAssertEqual(continued.title, typed.title)
+        XCTAssertEqual(continued.source, typed.source)
+        XCTAssertEqual(continued.tags, typed.tags)
+        XCTAssertEqual(continued.attachments[0].name, typed.attachments[0].name)
+        XCTAssertEqual(continued.attachments[0].url, copy.attachments[0].url)
+        XCTAssertEqual(continued.body, copy.body)
+        XCTAssertEqual(continuation.replacements, [MediaURLReplacement(from: "local:file", to: copy.attachments[0].url)])
+    }
     func testConflictPreservesBothCopies() throws {
         let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
         defer { try? FileManager.default.removeItem(at: directory) }

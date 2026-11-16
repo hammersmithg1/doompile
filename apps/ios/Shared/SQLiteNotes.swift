@@ -29,6 +29,9 @@ final class SQLiteNotes {
             defer { flock(fd, LOCK_UN); close(fd) }
             guard flock(fd, LOCK_EX) == 0 else { throw DoompileError.message("Не удалось заблокировать перенос заметок.") }
             try transaction {
+                // Keep the existing notes schema usable by an older app/extension.
+                // Pair provenance with the row version so their writes invalidate it.
+                try execute("CREATE TABLE IF NOT EXISTS note_writers (id TEXT PRIMARY KEY,version INTEGER NOT NULL,writer TEXT NOT NULL)")
                 if try rows("SELECT value FROM metadata WHERE key='legacy-imported'").isEmpty {
                     let legacy = directory.appendingPathComponent("notes.json")
                     if FileManager.default.fileExists(atPath: legacy.path) {
@@ -112,13 +115,15 @@ final class SQLiteNotes {
     func pendingNotes() throws -> [Note] {
         try rows("SELECT payload FROM notes WHERE dirty=1").map { try decoder.decode(Note.self, from: Data($0[0].utf8)) }
     }
-    func note(_ id: String) throws -> (note: Note, dirty: Bool)? {
-        guard let row = try rows("SELECT payload,dirty FROM notes WHERE id=?",[id]).first else { return nil }
-        return (try decoder.decode(Note.self, from:Data(row[0].utf8)),row[1] == "1")
+    func note(_ id: String) throws -> (note: Note, dirty: Bool, writer: String)? {
+        guard let row = try rows("SELECT n.payload,n.dirty,COALESCE(w.writer,'') FROM notes n LEFT JOIN note_writers w ON n.id=w.id AND n.version=w.version WHERE n.id=?",[id]).first else { return nil }
+        return (try decoder.decode(Note.self, from:Data(row[0].utf8)),row[1] == "1",row[2])
     }
-    func put(_ note: Note, dirty: Bool) throws {
+    func put(_ note: Note, dirty: Bool, writer: String = "") throws {
         let payload = String(decoding: try encoder.encode(note), as: UTF8.self)
-        try write("INSERT INTO notes VALUES (?,?,?,?) ON CONFLICT(id) DO UPDATE SET payload=excluded.payload,dirty=excluded.dirty,version=excluded.version",[note.id,payload,dirty ? "1":"0",String(try nextVersion())])
+        let version = String(try nextVersion())
+        try write("INSERT INTO notes VALUES (?,?,?,?) ON CONFLICT(id) DO UPDATE SET payload=excluded.payload,dirty=excluded.dirty,version=excluded.version",[note.id,payload,dirty ? "1":"0",version])
+        try write("INSERT INTO note_writers VALUES (?,?,?) ON CONFLICT(id) DO UPDATE SET version=excluded.version,writer=excluded.writer",[note.id,version,writer])
     }
     func putFile(_ id: String, _ file: LocalFile) throws {
         try write("INSERT INTO files VALUES (?,?,?) ON CONFLICT(id) DO UPDATE SET payload=excluded.payload,version=excluded.version",[id,String(decoding:try encoder.encode(file),as:UTF8.self),String(try nextVersion())])

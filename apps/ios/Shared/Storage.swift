@@ -136,6 +136,7 @@ final class Storage: @unchecked Sendable {
     }
     let directory: URL
     private let lock = NSRecursiveLock()
+    private let writer = UUID().uuidString
     private var database: SQLiteNotes?
     private let observes: Bool
     init(directory: URL? = nil) {
@@ -153,25 +154,33 @@ final class Storage: @unchecked Sendable {
     var decodedSnapshotNotes: Int { (try? access { $0.decodedSnapshotNotes }) ?? 0 }
     func snapshot() throws -> DiskState { try access { try $0.snapshot() } }
     func pendingNotes() throws -> [Note] { try access { try $0.pendingNotes() } }
-    func save(_ note: Note) throws {
+    @discardableResult func save(_ original: Note) throws -> Note {
         let started = Date()
         var actions: [String] = []
-        let operation: String? = try access { db in try db.transaction {
+        let result: (note: Note, operation: String?) = try access { db in try db.transaction {
+            var note = original
             let previous = try db.note(note.id)
-            guard previous?.note != note else { return nil }
-            try db.put(note,dirty:true)
+            // An editor can still hold the revision from before its own preceding
+            // save was acknowledged. A remote merge or another writer must not
+            // grant that older editor permission to overwrite unrelated changes.
+            if let previous, previous.dirty || previous.writer == writer {
+                note.revision = max(note.revision, previous.note.revision)
+            }
+            guard previous?.note != note else { return (note,nil) }
+            try db.put(note,dirty:true,writer:writer)
             if (previous?.note.pinned ?? false) != note.pinned { actions.append("pin") }
             if (previous?.note.urgent ?? false) != note.urgent { actions.append("urgent") }
             if Set(previous?.note.tags ?? []) != Set(note.tags) { actions.append("tag") }
-            return previous?.note == note ? nil : note.deletedAt != nil ? "delete" : previous == nil ? "create" : "update"
+            return (note,note.deletedAt != nil ? "delete" : previous == nil ? "create" : "update")
         } }
-        if observes, let operation { Telemetry.shared.record(.noteSaved, ["note_id": note.id, "operation": operation, "kind": note.kind, "duration_ms": Date().timeIntervalSince(started) * 1000]) }
+        if observes, let operation = result.operation { Telemetry.shared.record(.noteSaved, ["note_id": original.id, "operation": operation, "kind": original.kind, "duration_ms": Date().timeIntervalSince(started) * 1000]) }
         if observes { for action in actions { Telemetry.shared.record(.editorAction, ["action": action]) } }
+        return result.note
     }
     func accept(_ server: Note, matching local: Note) throws {
         try access { db in try db.transaction {
             guard let record = try db.note(local.id) else { return }
-            if record.note == local { try db.put(server,dirty:false) }
+            if record.note == local { try db.put(server,dirty:false,writer:record.writer) }
             else if record.note.revision <= server.revision {
                 var newer = record.note
                 newer.revision = server.revision
@@ -182,7 +191,7 @@ final class Storage: @unchecked Sendable {
                         newer.body = newer.body.replacingString(previousURL, with: attachment.url)
                     }
                 }
-                try db.put(newer,dirty:true)
+                try db.put(newer,dirty:true,writer:record.writer)
             }
         } }
     }
@@ -197,7 +206,7 @@ final class Storage: @unchecked Sendable {
                 current.attachments[index] = file
                 current.body = current.body.replacingString(previous.url, with: file.url)
             }
-            try db.put(current,dirty:true)
+            try db.put(current,dirty:true,writer:record.writer)
             return current
         } }
     }
@@ -210,17 +219,20 @@ final class Storage: @unchecked Sendable {
             }
         } }
     }
-    func conflict(local: Note, server: Note) throws {
-        try access { db in try db.transaction {
-            guard let current = try db.note(local.id), current.dirty else { return }
+    @discardableResult func conflict(local: Note, server: Note) throws -> NoteConflict? {
+        let conflict: NoteConflict? = try access { db in try db.transaction {
+            guard let current = try db.note(local.id), current.dirty,
+                  current.note.revision <= local.revision else { return nil }
             var copy = current.note
             copy.id = UUID().uuidString.lowercased()
             copy.title = String(copy.displayTitle.prefix(NoteLimits.generatedTitle)) + " (конфликтная копия)"
             copy.revision = 0; copy.createdAt = Note.now(); copy.updatedAt = Note.now()
-            try db.put(copy,dirty:true)
+            try db.put(copy,dirty:true,writer:current.writer)
             try db.put(server,dirty:false)
+            return NoteConflict(original: current.note, copy: copy)
         } }
-        if observes { Telemetry.shared.record(.syncConflict, ["note_id": local.id]) }
+        if observes && conflict != nil { Telemetry.shared.record(.syncConflict, ["note_id": local.id]) }
+        return conflict
     }
     func addFile(_ data: Data, name: String, mimeType: String) throws -> Attachment {
         let id = UUID().uuidString.lowercased()
@@ -354,7 +366,7 @@ actor SyncService {
         return uploaded
     }
 
-    func sync(pull: Bool = true, onProgress: (@Sendable () async -> Void)? = nil, onUpload: UploadObserver? = nil) async throws {
+    func sync(pull: Bool = true, onProgress: (@Sendable () async -> Void)? = nil, onUpload: UploadObserver? = nil, onConflict: (@Sendable (NoteConflict) async -> Void)? = nil) async throws {
         guard !running else { return }
         guard let account = Connection.account, Connection.signedIn else { return }
         let storage = Storage.shared
@@ -417,7 +429,9 @@ actor SyncService {
                 let (data, status) = try await response(request("/api/notes/\(note.id)", method: "PUT", body: JSONEncoder().encode(Put(note: note, baseRevision: note.revision))))
                 if status == 409 {
                     let server = try JSONDecoder().decode(Conflict.self, from: data).current
-                    try storage.conflict(local: checkpoint, server: server)
+                    if let conflict = try storage.conflict(local: checkpoint, server: server) {
+                        await onConflict?(conflict)
+                    }
                 } else {
                     guard status == 200 || status == 201 else { throw DoompileError.message("Не удалось синхронизировать заметку (\(status)). Она сохранена на устройстве.") }
                     let server = try JSONDecoder().decode(One.self, from: data).note

@@ -7,6 +7,7 @@ import AVFoundation
 import PencilKit
 import QuickLook
 import AppIntents
+import Combine
 
 typealias Palette = DoompilePalette
 
@@ -23,6 +24,7 @@ private enum FeedItem: Identifiable {
 }
 
 @MainActor final class Library: ObservableObject {
+    let conflicts = PassthroughSubject<NoteConflict, Never>()
     private let accountScope = Connection.scope
     private let storage = Storage.shared
     var isCurrentAccount: Bool { accountScope == Connection.scope && Connection.signedIn }
@@ -100,7 +102,12 @@ private enum FeedItem: Identifiable {
             syncRequested = false; pullRequested = false
             do {
                 try await SyncService.shared.sync(pull: pull, onProgress: { @MainActor [weak self] in self?.reload() },
-                    onUpload: { @MainActor [weak self] id, state in self?.uploadStates[id] = state })
+                    onUpload: { @MainActor [weak self] id, state in self?.uploadStates[id] = state },
+                    onConflict: { @MainActor [weak self] conflict in
+                        guard let self, self.isCurrentAccount else { return }
+                        self.conflicts.send(conflict)
+                        self.syncRequested = true
+                    })
                 error = nil
             } catch { self.error = error.localizedDescription }
             reload()
@@ -1144,6 +1151,15 @@ struct NoteEditor: View {
             if library.notes.contains(where: { $0.id == note.id }) { Telemetry.shared.record(.noteOpened, ["note_id": note.id, "kind": note.kind]) }
             // Persist the incoming quick draft even if its WebKit surface hasn't opened yet.
             saveKnownState()
+        }
+        .onReceive(library.conflicts) { conflict in
+            guard capture == nil, let continuation = conflict.continuing(EditorLifecycle.prepared(note, plainText: text)) else { return }
+            autosaveTask?.cancel()
+            do { try EditorDrafts.save(continuation.note); EditorDrafts.clear(conflict.original.id) }
+            catch { error = error.localizedDescription }
+            note = continuation.note
+            lastSaved = conflict.copy
+            if !continuation.replacements.isEmpty { editorBridge.reconcileAttachments(continuation.replacements) }
         }
         .onReceive(library.$notes) { notes in
             guard let saved = lastSaved, let server = notes.first(where: { $0.id == note.id }),

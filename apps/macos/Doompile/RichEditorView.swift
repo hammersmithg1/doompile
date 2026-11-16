@@ -119,7 +119,7 @@ struct MacRichEditorView: NSViewRepresentable {
     }
     func updateNSView(_ webView: WKWebView, context: Context) {
         context.coordinator.parent = self
-        if bridge.ready { context.coordinator.applyTheme(); context.coordinator.applyCaptureMode() }
+        if bridge.ready { context.coordinator.applyTheme(); context.coordinator.applyNoteURL(); context.coordinator.applyCaptureMode() }
         // A transaction updates the SwiftUI binding. Resetting document here would lose the caret.
     }
     static func dismantleNSView(_ webView: WKWebView, coordinator: Coordinator) {
@@ -132,11 +132,19 @@ struct MacRichEditorView: NSViewRepresentable {
         var parent: MacRichEditorView
         let media = MacMediaSchemeHandler()
         private var appliedTheme: String?
+        private var appliedNoteURL: String?
         private var appliedCapture: Bool?
         init(parent: MacRichEditorView) { self.parent = parent }
         func userContentController(_ userContentController: WKUserContentController, didReceive message: WKScriptMessage, replyHandler: @escaping (Any?, String?) -> Void) {
             do { replyHandler(try EditorImagePaste.store(message, in: parent.bridge.webView, using: parent.onPasteImage), nil) }
             catch { replyHandler(nil, error.localizedDescription) }
+        }
+        func applyNoteURL() {
+            let url = parent.noteID.flatMap { NoteLinks.shareURL(id: $0) }?.absoluteString ?? ""
+            guard url != appliedNoteURL, let data = try? JSONEncoder().encode(url),
+                  let json = String(data: data, encoding: .utf8) else { return }
+            appliedNoteURL = url
+            parent.bridge.webView?.evaluateJavaScript("window.doompileEditor.setNoteURL?.(\(json))")
         }
         func applyTheme() {
             let theme = parent.colorScheme == .dark ? "dark" : "light"
@@ -167,6 +175,7 @@ struct MacRichEditorView: NSViewRepresentable {
                     guard error == nil else { if let error { Telemetry.shared.failure(.editorFailed, error) }; return }
                     self?.appliedTheme = theme
                     self?.parent.bridge.markReady()
+                    self?.applyNoteURL()
                     self?.applyCaptureMode()
                     if self?.parent.focusOnLoad == true { self?.parent.bridge.webView?.evaluateJavaScript("window.doompileEditor.focus?.()") }
                 }

@@ -1,8 +1,35 @@
 import XCTest
 import UniformTypeIdentifiers
+import SQLite3
 @testable import DoompileCore
 
 final class SQLiteMigrationTests: XCTestCase {
+    func testWriterTrackingKeepsLegacySQLiteRecordsAndOlderExtensionWritesCompatible() throws {
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let database = try SQLiteNotes(directory: directory)
+        let note = Note.text("Existing SQLite note")
+        try database.transaction { try database.put(note, dirty: false) }
+        var legacy: OpaquePointer?
+        XCTAssertEqual(sqlite3_open(directory.appendingPathComponent("notes.sqlite").path, &legacy), SQLITE_OK)
+        defer { sqlite3_close(legacy) }
+        // Reproduce the SQLite schema installed before writer tracking was introduced.
+        XCTAssertEqual(sqlite3_exec(legacy, "DROP TABLE note_writers", nil, nil, nil), SQLITE_OK)
+        let store = Storage(directory: directory)
+        XCTAssertEqual(try store.snapshot().notes[note.id], note)
+        var edited = note
+        edited.plainText = "New app edit"
+        try store.save(edited)
+        XCTAssertFalse(try XCTUnwrap(database.note(note.id)).writer.isEmpty)
+        // Older extensions still use four-column positional writes and do not know
+        // about provenance. Their new row version must invalidate the old writer.
+        XCTAssertEqual(sqlite3_exec(legacy, "BEGIN IMMEDIATE; UPDATE metadata SET value=value+1 WHERE key='version'; INSERT OR REPLACE INTO notes SELECT id,payload,0,(SELECT value FROM metadata WHERE key='version') FROM notes; COMMIT", nil, nil, nil), SQLITE_OK)
+        let record = try XCTUnwrap(database.note(note.id))
+        XCTAssertEqual(record.note, edited)
+        XCTAssertFalse(record.dirty)
+        XCTAssertEqual(record.writer, "")
+    }
     func testLegacyMigrationPreservesQueueFilesAndOriginalBackup() throws {
         let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
         try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)

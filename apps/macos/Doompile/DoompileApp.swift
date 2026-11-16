@@ -29,6 +29,7 @@ extension Notification.Name {
 }
 
 @MainActor final class DesktopLibrary: ObservableObject {
+    let conflicts = PassthroughSubject<NoteConflict, Never>()
     private var accountScope = Connection.scope
     var isCurrentAccount: Bool { Connection.signedIn && accountScope == Connection.scope }
     @Published var notes: [Note] = []
@@ -72,7 +73,7 @@ extension Notification.Name {
         note.updatedAt = Note.now()
         do {
             try NoteValidation.validate(note)
-            try Storage.shared.save(note)
+            note = try Storage.shared.save(note)
             reload()
             Task { await sync(pull: false) }
             return note
@@ -117,6 +118,10 @@ extension Notification.Name {
                 }, onUpload: { @MainActor [weak self] id, state in
                     guard let self, self.accountScope == scope, self.isCurrentAccount else { return }
                     self.uploadStates[id] = state
+                }, onConflict: { @MainActor [weak self] conflict in
+                    guard let self, self.accountScope == scope, self.isCurrentAccount else { return }
+                    self.conflicts.send(conflict)
+                    self.syncRequested = true
                 })
                 if accountScope == scope, isCurrentAccount { error = nil }
             } catch {
@@ -309,6 +314,7 @@ struct NoteWorkspace: View {
     @State private var openedExisting: Bool
     var onSelect: (Note) -> Void
     var onClose: () -> Void
+    var onConflict: (Note) -> Void
     let initialAction: String?
     @State private var note: Note
     @State private var tags: [String]
@@ -325,8 +331,9 @@ struct NoteWorkspace: View {
     @State private var linkEditorToken = UUID()
     @StateObject private var bridge = MacRichEditorBridge()
     @StateObject private var voice = MacVoiceRecorder()
-    init(initial: Note, existing: Bool, expanded: Bool, onExpand: @escaping () -> Void, onSelect: @escaping (Note) -> Void, onClose: @escaping () -> Void, initialAction: String? = nil) {
+    init(initial: Note, existing: Bool, expanded: Bool, onExpand: @escaping () -> Void, onSelect: @escaping (Note) -> Void, onClose: @escaping () -> Void, onConflict: @escaping (Note) -> Void, initialAction: String? = nil) {
         self.initial = initial; self.expanded = expanded; self.onExpand = onExpand; self.onSelect = onSelect; self.onClose = onClose
+        self.onConflict = onConflict
         self.initialAction = initialAction
         _openedExisting = State(initialValue: existing)
         _lastSaved = State(initialValue: existing ? initial : nil)
@@ -370,6 +377,16 @@ struct NoteWorkspace: View {
         .onChange(of: note) { _, _ in changed() }
         .onChange(of: tags) { _, _ in changed() }
         .onReceive(NotificationCenter.default.publisher(for: .doompileSaveWorkspace)) { _ in save() }
+        .onReceive(library.conflicts) { conflict in
+            guard let continuation = conflict.continuing(note) else { return }
+            draftTask?.cancel()
+            do { try EditorDrafts.save(continuation.note); EditorDrafts.clear(conflict.original.id) }
+            catch { error = error.localizedDescription }
+            note = continuation.note
+            lastSaved = conflict.copy
+            if !continuation.replacements.isEmpty { bridge.reconcileAttachments(continuation.replacements.map { ($0.from, $0.to) }) }
+            onConflict(continuation.note)
+        }
         .onReceive(library.$notes) { notes in
             guard let saved = lastSaved, let server = notes.first(where: { $0.id == note.id }) else { return }
             guard let acknowledgement = Note.acknowledging(saved: saved, server: server, current: note) else {

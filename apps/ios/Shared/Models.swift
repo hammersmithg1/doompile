@@ -151,6 +151,33 @@ struct NoteAcknowledgement {
     let replacements: [MediaURLReplacement]
 }
 
+struct NoteConflict {
+    let original: Note
+    let copy: Note
+
+    /// Keep unsaved typing on the preserved local branch after a real conflict.
+    func continuing(_ current: Note) -> NoteAcknowledgement? {
+        guard current.id == original.id else { return nil }
+        var updated = current
+        var replacements: [MediaURLReplacement] = []
+        updated.id = copy.id
+        updated.revision = copy.revision
+        updated.createdAt = copy.createdAt
+        updated.updatedAt = copy.updatedAt
+        for index in updated.attachments.indices {
+            let previous = updated.attachments[index]
+            guard previous.url.hasPrefix("local:"),
+                  var uploaded = copy.attachments.first(where: { $0.id == previous.id }),
+                  !uploaded.url.hasPrefix("local:") else { continue }
+            uploaded.name = previous.name
+            updated.attachments[index] = uploaded
+            updated.body = updated.body.replacingString(previous.url, with: uploaded.url)
+            replacements.append(MediaURLReplacement(from: previous.url, to: uploaded.url))
+        }
+        return NoteAcknowledgement(note: updated, replacements: replacements)
+    }
+}
+
 struct Note: Codable, Identifiable, Equatable {
     var id = UUID().uuidString.lowercased()
     var title = ""

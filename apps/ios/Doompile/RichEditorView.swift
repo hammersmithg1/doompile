@@ -147,6 +147,7 @@ struct RichEditorView: UIViewRepresentable {
         context.coordinator.parent = self
         if bridge.ready {
             context.coordinator.applyTheme()
+            context.coordinator.applyNoteURL()
             context.coordinator.applyCaptureHeightLimit()
         }
         // Native state receives every transaction. Never setDocument here: it would reset the caret.
@@ -164,6 +165,7 @@ struct RichEditorView: UIViewRepresentable {
         var parent: RichEditorView
         let media = MediaSchemeHandler()
         private var appliedTheme: String?
+        private var appliedNoteURL: String?
         private var appliedCaptureHeightLimit: CGFloat?
         private var initialFocusScheduled = false
         func focusAfterPresentation() {
@@ -185,6 +187,13 @@ struct RichEditorView: UIViewRepresentable {
                 responder = current.next
             }
             focus()
+        }
+        func applyNoteURL() {
+            let url = parent.noteID.flatMap { NoteLinks.shareURL(id: $0) }?.absoluteString ?? ""
+            guard url != appliedNoteURL, let data = try? JSONEncoder().encode(url),
+                  let json = String(data: data, encoding: .utf8) else { return }
+            appliedNoteURL = url
+            parent.bridge.webView?.evaluateJavaScript("window.doompileEditor.setNoteURL?.(\(json))")
         }
         func applyTheme() {
             let theme = parent.colorScheme == .dark ? "dark" : "light"
@@ -233,6 +242,7 @@ struct RichEditorView: UIViewRepresentable {
                     guard let self, let webView, parent.bridge.webView === webView else { return }
                     appliedTheme = theme
                     parent.bridge.markReady(webView)
+                    applyNoteURL()
                     applyCaptureHeightLimit()
                     focusAfterPresentation()
                 }

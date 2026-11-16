@@ -12,6 +12,7 @@ struct DesktopHome: View {
     @State private var filter = "all"
     @State private var query = ""
     @State private var selected: Note?
+    @State private var workspaceID = UUID()
     @State private var noteExpanded = false
     @State private var quickExpanded = false
     @State private var quickFocused = true
@@ -58,8 +59,8 @@ struct DesktopHome: View {
                 .frame(width: showFullNote ? 0 : geometry.size.width - (selected == nil || quickExpanded ? 0 : inspectorWidth), height: geometry.size.height)
                 .clipped().opacity(showFullNote ? 0 : 1).allowsHitTesting(!showFullNote).accessibilityHidden(showFullNote)
                 if let selected {
-                    NoteWorkspace(initial: selected, existing: library.notes.contains { $0.id == selected.id }, expanded: noteExpanded, onExpand: { withAnimation(motion) { noteExpanded.toggle() } }, onSelect: { open($0) }, onClose: close)
-                        .id(selected.id)
+                    NoteWorkspace(initial: selected, existing: library.notes.contains { $0.id == selected.id }, expanded: noteExpanded, onExpand: { withAnimation(motion) { noteExpanded.toggle() } }, onSelect: { open($0) }, onClose: close, onConflict: { self.selected = $0 })
+                        .id(workspaceID)
                         .frame(width: quickExpanded ? 0 : inspectorWidth, height: geometry.size.height)
                         .overlay(alignment: .leading) { if !noteExpanded { resizeHandle(total: geometry.size.width) } }
                         .clipped().opacity(quickExpanded ? 0 : 1).allowsHitTesting(!quickExpanded).accessibilityHidden(quickExpanded)
@@ -350,7 +351,7 @@ struct DesktopHome: View {
             guard await prepareNavigation(), navigationRequest == request else { return }
             let latest = library.notes.first { $0.id == note.id } ?? note
             quickFocused = false
-            withAnimation(motion) { quickExpanded = false; selected = EditorDrafts.load(latest) }
+            withAnimation(motion) { quickExpanded = false; workspaceID = UUID(); selected = EditorDrafts.load(latest) }
         }
     }
     private func compose() {
