@@ -1,3 +1,5 @@
+import { mockNotes } from "./note-server";
+export { mockNotes } from "./note-server";
 import { test as base, type Page } from "@playwright/test";
 export { expect, type Page } from "@playwright/test";
 export const browserTestUser = {
@@ -23,9 +25,7 @@ export const test = base.extend({
         },
       }),
     );
-    await context.route("**/api/notes", (route) =>
-      route.fulfill({ json: { notes: [] } }),
-    );
+    await mockNotes(page);
     await context.route("**/api/link-preview?**", (route) => {
       const url = new URL(route.request().url()).searchParams.get("url")!;
       return route.fulfill({

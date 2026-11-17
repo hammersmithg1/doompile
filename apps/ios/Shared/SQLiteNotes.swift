@@ -5,7 +5,7 @@ import Darwin
 /// One connection per Storage instance; its caller serializes access. SQLite coordinates processes.
 final class SQLiteNotes {
     private var handle: OpaquePointer?
-    private let encoder = JSONEncoder()
+    private let encoder: JSONEncoder = { let value = JSONEncoder(); value.outputFormatting = [.sortedKeys]; return value }()
     private let decoder = JSONDecoder()
     private var cached = DiskState()
     private var cachedVersion: Int64 = 0
@@ -32,6 +32,7 @@ final class SQLiteNotes {
                 // Keep the existing notes schema usable by an older app/extension.
                 // Pair provenance with the row version so their writes invalidate it.
                 try execute("CREATE TABLE IF NOT EXISTS note_writers (id TEXT PRIMARY KEY,version INTEGER NOT NULL,writer TEXT NOT NULL)")
+                try execute("CREATE TABLE IF NOT EXISTS note_sync_state (id TEXT PRIMARY KEY,payload TEXT NOT NULL); CREATE TABLE IF NOT EXISTS note_journal (seq INTEGER PRIMARY KEY AUTOINCREMENT,note_id TEXT NOT NULL,change_id TEXT NOT NULL,payload TEXT NOT NULL,UNIQUE(note_id,change_id)); CREATE INDEX IF NOT EXISTS note_journal_order ON note_journal(note_id,seq)")
                 if try rows("SELECT value FROM metadata WHERE key='legacy-imported'").isEmpty {
                     let legacy = directory.appendingPathComponent("notes.json")
                     if FileManager.default.fileExists(atPath: legacy.path) {
@@ -125,6 +126,31 @@ final class SQLiteNotes {
         try write("INSERT INTO notes VALUES (?,?,?,?) ON CONFLICT(id) DO UPDATE SET payload=excluded.payload,dirty=excluded.dirty,version=excluded.version",[note.id,payload,dirty ? "1":"0",version])
         try write("INSERT INTO note_writers VALUES (?,?,?) ON CONFLICT(id) DO UPDATE SET version=excluded.version,writer=excluded.writer",[note.id,version,writer])
     }
+    func journal(_ id: String, limit: Int = 64) throws -> [NoteJournalEntry] {
+        try rows("SELECT payload FROM note_journal WHERE note_id=? ORDER BY seq LIMIT ?", [id, String(limit)]).map { try decoder.decode(NoteJournalEntry.self, from: Data($0[0].utf8)) }
+    }
+    func hasJournal(_ id: String) throws -> Bool { try !rows("SELECT 1 FROM note_journal WHERE note_id=? LIMIT 1", [id]).isEmpty }
+    func append(_ id: String, _ entry: NoteJournalEntry) throws {
+        let payload = String(decoding: try encoder.encode(entry), as: UTF8.self)
+        // The identifier and payload are immutable across upload retries.
+        if let existing = try rows("SELECT payload FROM note_journal WHERE note_id=? AND change_id=?", [id, entry.id]).first {
+            guard existing[0] == payload else { throw DoompileError.message("Повторное изменение имеет другое содержимое.") }
+            return
+        }
+        try write("INSERT INTO note_journal(note_id,change_id,payload) VALUES (?,?,?)", [id, entry.id, payload])
+    }
+    func acknowledge(_ id: String, _ changes: [String]) throws {
+        for change in changes { try write("DELETE FROM note_journal WHERE note_id=? AND change_id=?", [id, change]) }
+    }
+    func syncState(_ id: String) throws -> NoteSyncState {
+        guard let row = try rows("SELECT payload FROM note_sync_state WHERE id=?", [id]).first else { return NoteSyncState() }
+        return try decoder.decode(NoteSyncState.self, from: Data(row[0].utf8))
+    }
+    func putSyncState(_ id: String, _ state: NoteSyncState) throws {
+        try write("INSERT INTO note_sync_state VALUES (?,?) ON CONFLICT(id) DO UPDATE SET payload=excluded.payload", [id, String(decoding: try encoder.encode(state), as: UTF8.self)])
+    }
+    func cursor() throws -> Int { Int(try rows("SELECT value FROM metadata WHERE key='collection-cursor'").first?.first ?? "0") ?? 0 }
+    func putCursor(_ cursor: Int) throws { try write("INSERT INTO metadata(key,value) VALUES ('collection-cursor',?) ON CONFLICT(key) DO UPDATE SET value=excluded.value", [String(cursor)]) }
     func putFile(_ id: String, _ file: LocalFile) throws {
         try write("INSERT INTO files VALUES (?,?,?) ON CONFLICT(id) DO UPDATE SET payload=excluded.payload,version=excluded.version",[id,String(decoding:try encoder.encode(file),as:UTF8.self),String(try nextVersion())])
     }

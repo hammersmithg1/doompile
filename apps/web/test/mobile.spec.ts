@@ -1,3 +1,4 @@
+import { mockNotes } from "../../../packages/editor/test/note-server";
 import { createNote, type Note } from "../../../packages/core/src/index";
 import {
   test,
@@ -36,17 +37,7 @@ async function setup(page: Page, populated = true, additionalNotes: Note[] = [])
       ]
     : [];
   notes.push(...additionalNotes);
-  await page.route("**/api/notes", (route) =>
-    route.fulfill({ json: { notes } }),
-  );
-  await page.route("**/api/notes/*", async (route) => {
-    const { note } = route.request().postDataJSON();
-    const saved = { ...note, revision: note.revision + 1 };
-    const i = notes.findIndex((n) => n.id === note.id);
-    if (i < 0) notes.push(saved);
-    else notes[i] = saved;
-    await route.fulfill({ json: { note: saved } });
-  });
+  await mockNotes(page, notes);
   await page.goto("/");
   await expect(
     page.getByRole("textbox", { name: "Быстрая заметка" }),
@@ -746,7 +737,7 @@ test("legacy IndexedDB pending notes migrate atomically and only once", async ({
   await page.route("**/api/notes", (route) =>
     route.fulfill({ json: { notes: [] } }),
   );
-  await page.route("**/api/notes/*", (route) =>
+  await page.route("**/api/notes/**", (route) =>
     route.fulfill({ status: 503, json: { error: "Offline fixture" } }),
   );
   await page.goto("/");

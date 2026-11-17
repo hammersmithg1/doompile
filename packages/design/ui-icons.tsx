@@ -63,5 +63,6 @@ export const Minus = glyph("minus");
 export const Settings2 = glyph("settings2");
 export const GripVertical = glyph("grip-vertical");
 export const LockKeyhole = glyph("lock-keyhole");
+export const History = glyph("history");
 export const ImageIcon = glyph("image");
 export const Globe = glyph("globe2");

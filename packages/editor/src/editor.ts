@@ -55,6 +55,8 @@ function height() {
 const controller = createBlockEditor(editorElement, {
   onTelemetry: (name, properties) => post({ type: "telemetry", name, properties }),
   mediaURL,
+  onReplica: (note, change) => { post({ type: "replica", note, change }); height(); },
+  onSyncError: message => { pasteFeedback.textContent = message; pasteFeedback.hidden = false; },
   onChange: (body, plainText) => {
     post({ type: "change", body, plainText });
     height();
@@ -130,6 +132,7 @@ editor.view.dom.addEventListener("keydown", (event) => {
   }
 }, true);
 const api = {
+  setNote(note: import("../../core/src/index").Note) { controller.setNote(note); height(); },
   setCaptureMode(compact: boolean) {
     document.documentElement.dataset.nativeCapture = compact ? "compact" : "expanded";
     height();
@@ -316,7 +319,8 @@ const api = {
     return editor.getJSON();
   },
   getState() {
-    return { body: editor.getJSON(), plainText: documentPlainText(editor) };
+    const note = controller.getNote();
+    return note ? { body: note.body, plainText: note.plainText } : { body: editor.getJSON(), plainText: documentPlainText(editor) };
   },
 };
 function formats() {

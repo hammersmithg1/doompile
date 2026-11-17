@@ -2657,3 +2657,27 @@ html[data-theme="dark"] .theme-choice .selected {
 }
 
 .document-render-error { display: inline-block; padding: var(--spacing-small, 8px); border: 1px dashed var(--orange); border-radius: var(--radius-control, 8px); color: var(--muted); }
+
+.modal.note-history { width: min(1000px, calc(100vw - 40px)); max-width: 1000px; height: min(760px, calc(100dvh - 48px)); display: flex; flex-direction: column; padding: 0; overflow: hidden; }
+.history-header, .history-footer { display: flex; justify-content: space-between; align-items: center; gap: 16px; padding: 20px 24px; }
+.history-header { border-bottom: 1px solid var(--line); }
+.history-header h2 { margin: 0 0 8px; font-size: 19px; }
+.history-header p { margin: 0; font-size: 13px; }
+.history-content { display: grid; grid-template-columns: 240px minmax(0, 1fr); min-height: 0; flex: 1; }
+.history-versions { overflow: auto; padding: 12px; border-right: 1px solid var(--line); }
+.history-versions button { display: flex; flex-direction: column; align-items: flex-start; gap: 6px; width: 100%; text-align: left; background: transparent; border: 0; padding: 12px; border-radius: 10px; color: var(--text); }
+.history-versions button[aria-pressed="true"] { background: var(--lime-soft); }
+.history-versions button span { font-size: 12px; color: var(--muted); }
+.history-preview { overflow: auto; min-width: 0; padding: 20px 28px; }
+.history-authored { display: flex; gap: 8px; align-items: center; color: var(--muted); font-size: 13px; margin-bottom: 24px; }
+.history-footer { border-top: 1px solid var(--line); font-size: 12px; }
+.history-feedback { padding: 12px 24px; color: var(--orange); display: flex; justify-content: space-between; gap: 12px; }
+@media (max-width: 760px) {
+  .modal.note-history { width: calc(100vw - 16px); height: calc(100dvh - 24px); }
+  .history-header, .history-footer { padding: 16px; }
+  .history-content { display: flex; flex-direction: column; }
+  .history-versions { display: flex; flex: 0 0 auto; max-height: 120px; border-right: 0; border-bottom: 1px solid var(--line); }
+  .history-versions button { flex: 0 0 170px; }
+  .history-preview { flex: 1; padding: 16px; }
+  .history-footer { flex-wrap: wrap; }
+}

@@ -29,7 +29,6 @@ extension Notification.Name {
 }
 
 @MainActor final class DesktopLibrary: ObservableObject {
-    let conflicts = PassthroughSubject<NoteConflict, Never>()
     private var accountScope = Connection.scope
     var isCurrentAccount: Bool { Connection.signedIn && accountScope == Connection.scope }
     @Published var notes: [Note] = []
@@ -40,6 +39,7 @@ extension Notification.Name {
     @Published private(set) var tags: [String] = []
     @Published private(set) var uploadStates: [String: AttachmentUploadState] = [:]
     private var syncWorker: Task<Void, Never>?
+    private var replicaSyncTask: Task<Void, Never>?
     private var syncRequested = false
     private var pullRequested = false
 
@@ -66,6 +66,22 @@ extension Notification.Name {
             if catalog != tags { tags = catalog }
             if pending != state.dirty.count { pending = state.dirty.count }
         } catch { self.error = error.localizedDescription }
+    }
+    func saveReplica(_ note: Note, change: NoteChange) {
+        guard isCurrentAccount else { return }
+        let storage = Storage.shared
+        NoteWriter.shared.enqueue(note, change: change, storage: storage) { [weak self] failure in
+            Task { @MainActor [weak self] in
+                guard let self, self.isCurrentAccount else { return }
+                if let failure { self.error = failure.localizedDescription; return }
+                self.reload()
+                self.replicaSyncTask?.cancel()
+                self.replicaSyncTask = Task { @MainActor [weak self] in
+                    try? await Task.sleep(for: EditorLifecycle.autosaveDelay)
+                    if !Task.isCancelled { await self?.sync(pull: false) }
+                }
+            }
+        }
     }
     @discardableResult func save(_ original: Note) -> Note? {
         guard isCurrentAccount else { error = "Аккаунт изменился. Открой заметку заново."; return nil }
@@ -118,10 +134,6 @@ extension Notification.Name {
                 }, onUpload: { @MainActor [weak self] id, state in
                     guard let self, self.accountScope == scope, self.isCurrentAccount else { return }
                     self.uploadStates[id] = state
-                }, onConflict: { @MainActor [weak self] conflict in
-                    guard let self, self.accountScope == scope, self.isCurrentAccount else { return }
-                    self.conflicts.send(conflict)
-                    self.syncRequested = true
                 })
                 if accountScope == scope, isCurrentAccount { error = nil }
             } catch {
@@ -324,6 +336,7 @@ struct NoteWorkspace: View {
     @State private var draftTask: Task<Void, Never>?
     @State private var editorHeight: CGFloat = 300
     @State private var fileImporter = false
+    @State private var showingHistory = false
     @State private var drawing = false
     @State private var linkPrompt = false
     @State private var linkValue = ""
@@ -348,6 +361,7 @@ struct NoteWorkspace: View {
                 Spacer()
                 Button { Task { await finishEditing { if let url = NoteLinks.shareURL(id: note.id) { NSPasteboard.general.clearContents(); NSPasteboard.general.setString(url.absoluteString, forType: .string) } } } } label: { DoompileSymbol(systemName: "link").frame(width: 28, height: 28) }.foregroundStyle(MacPalette.muted).help("Скопировать ссылку на заметку").accessibilityLabel("Скопировать ссылку на заметку").disabled(!bridge.ready || saving)
                 if openedExisting {
+                    Button { Task { await finishEditing { showingHistory = true } } } label: { DoompileSymbol(systemName: "clock.arrow.circlepath").frame(width: 28, height: 28) }.foregroundStyle(MacPalette.muted).help("История версий").accessibilityLabel("История версий")
                     Button { note.pinned.toggle() } label: { DoompileSymbol(systemName: note.pinned ? "pin.fill" : "pin").frame(width: 28, height: 28) }.foregroundStyle(note.pinned ? MacPalette.adaptive(0x8B9E37, 0xC6FF00) : MacPalette.muted).help(note.pinned ? "Открепить" : "Закрепить").accessibilityLabel(note.pinned ? "Открепить" : "Закрепить")
                     Button { note.urgent.toggle() } label: { DoompileSymbol(systemName: note.urgent ? "flame.fill" : "flame").frame(width: 28, height: 28) }.foregroundStyle(note.urgent ? MacPalette.orange : MacPalette.muted).help("Важное").accessibilityLabel("Важное")
                     Button { Task { await finishEditing { draftTask?.cancel(); library.remove(note); dirty = false; onClose() } } } label: { DoompileSymbol(systemName: "trash").frame(width: 28, height: 28) }.foregroundStyle(MacPalette.muted).help("Удалить заметку").accessibilityLabel("Удалить заметку")
@@ -357,7 +371,7 @@ struct NoteWorkspace: View {
                 Button { Task { await finishEditing(onClose) } } label: { DoompileSymbol(systemName: "xmark").frame(width: 28, height: 28) }.foregroundStyle(MacPalette.muted).help("Закрыть")
             }.buttonStyle(.plain).padding(.horizontal, 20).frame(height: 56).overlay(alignment: .bottom) { Rectangle().fill(MacPalette.line).frame(height: 1) }
             MacNoteTags(selected: $tags, available: library.tags)
-            MacRichEditorView(document: $note.body, plainText: $note.plainText, height: $editorHeight, attachments: $note.attachments, noteID: note.id, notes: library.notes.filter { $0.id != note.id }, focusOnLoad: !library.notes.contains { $0.id == note.id }, bridge: bridge, onReference: { id in if let other = library.notes.first(where: { $0.id == id }) { Task { await finishEditing { onSelect(other) } } } }, onRequestLink: { linkValue = $0; linkPrompt = true }, onAction: { action in
+            MacRichEditorView(document: $note.body, plainText: $note.plainText, height: $editorHeight, attachments: $note.attachments, noteID: note.id, syncNote: note, onReplica: receiveReplica, notes: library.notes.filter { $0.id != note.id }, focusOnLoad: !library.notes.contains { $0.id == note.id }, bridge: bridge, onReference: { id in if let other = library.notes.first(where: { $0.id == id }) { Task { await finishEditing { onSelect(other) } } } }, onRequestLink: { linkValue = $0; linkPrompt = true }, onAction: { action in
                 switch EditorAction(rawValue: action) {
                 case .file, .image: fileImporter = true
                 case .drawing: drawing = true
@@ -377,28 +391,14 @@ struct NoteWorkspace: View {
         .onChange(of: note) { _, _ in changed() }
         .onChange(of: tags) { _, _ in changed() }
         .onReceive(NotificationCenter.default.publisher(for: .doompileSaveWorkspace)) { _ in save() }
-        .onReceive(library.conflicts) { conflict in
-            guard let continuation = conflict.continuing(note) else { return }
-            draftTask?.cancel()
-            do { try EditorDrafts.save(continuation.note); EditorDrafts.clear(conflict.original.id) }
-            catch { self.error = error.localizedDescription }
-            note = continuation.note
-            lastSaved = conflict.copy
-            if !continuation.replacements.isEmpty { bridge.reconcileAttachments(continuation.replacements.map { ($0.from, $0.to) }) }
-            onConflict(continuation.note)
-        }
         .onReceive(library.$notes) { notes in
-            guard let saved = lastSaved, let server = notes.first(where: { $0.id == note.id }) else { return }
-            guard let acknowledgement = Note.acknowledging(saved: saved, server: server, current: note) else {
-                if !dirty, server != saved {
-                    if note.body != server.editorDocument { bridge.replaceDocument(server.editorDocument) }
-                    note = server; note.body = server.editorDocument; tags = server.tags; lastSaved = server
-                }
-                return
-            }
-            note = acknowledgement.note
-            lastSaved = server
-            if !acknowledgement.replacements.isEmpty { bridge.reconcileAttachments(acknowledgement.replacements.map { ($0.from, $0.to) }) }
+            guard let server = notes.first(where: { $0.id == note.id }), server.replica != nil else { return }
+            do {
+                var current = note; current.tags = uniqueTags
+                let combined = try current.replica == nil ? NoteEngine.shared.migrate(current, server: server, baseline: lastSaved) : NoteEngine.shared.receive(current, server: server)
+                if combined != note { note = combined; tags = combined.tags }
+                lastSaved = server
+            } catch { self.error = error.localizedDescription }
         }
         .onReceive(NotificationCenter.default.publisher(for: NSApplication.willTerminateNotification)) { _ in if voice.recording { finishRecording(); dirty = true }; if dirty { persistDraft(); save() } }
         .onAppear { NoteLinkEditors.register(linkEditorToken) { var saved = false; await finishEditing { saved = true }; return saved } }
@@ -407,10 +407,12 @@ struct NoteWorkspace: View {
             do { for url in try result.get() { let access = url.startAccessingSecurityScopedResource(); defer { if access { url.stopAccessingSecurityScopedResource() } }; let size = try url.resourceValues(forKeys: [.fileSizeKey]).fileSize ?? 0; guard size <= 30 * 1024 * 1024 else { throw DoompileError.message("Максимальный размер вложения — 30 МБ.") }; try addFile(Data(contentsOf: url), name: url.lastPathComponent, mime: UTType(filenameExtension: url.pathExtension)?.preferredMIMEType ?? "application/octet-stream") } }
             catch { self.error = error.localizedDescription }
         }
+        .sheet(isPresented: $showingHistory) { NoteHistoryView(noteID: note.id) { restored in note = restored; tags = restored.tags; lastSaved = restored; library.reload() } }
         .sheet(isPresented: $drawing) { MacDrawing { data in do { try addFile(data, name: "Рисунок.png", mime: "image/png"); drawing = false } catch { self.error = error.localizedDescription } } }
         .alert("Адрес ссылки", isPresented: $linkPrompt) { TextField("https://…", text: $linkValue); Button("Добавить") { bridge.setLink(linkValue) }; Button("Отмена", role: .cancel) {} }
     }
     private func finishEditing(_ completion: () -> Void) async {
+        do { try await NoteWriter.shared.drain() } catch { self.error = error.localizedDescription; return }
         if voice.recording { finishRecording() }
         let before = note.body
         if bridge.ready {
@@ -422,6 +424,14 @@ struct NoteWorkspace: View {
         }
         save()
         if error == nil { completion() }
+    }
+    private func receiveReplica(_ incoming: Note, _ change: NoteChange) {
+        guard incoming.id == note.id else { return }
+        var value = note
+        value.body = incoming.body; value.plainText = incoming.plainText
+        value.replica = incoming.replica; value.revision = incoming.revision; value.updatedAt = incoming.updatedAt
+        value.tags = uniqueTags; note = value
+        library.saveReplica(value, change: change)
     }
     private func changed() {
         var compare = note

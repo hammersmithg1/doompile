@@ -2,6 +2,7 @@ import { DatabaseSync } from "node:sqlite";
 import { stat, readdir } from "node:fs/promises";
 import { existsSync, createReadStream } from "node:fs";
 import { createHash } from "node:crypto";
+import { gunzipSync } from "node:zlib";
 import path from "node:path";
 const directory = process.argv[2];
 if (!directory || !path.isAbsolute(directory))
@@ -20,6 +21,28 @@ function database(filename) {
   }
   return db;
 }
+function history(db) {
+  if (!db.prepare("SELECT 1 FROM sqlite_master WHERE type='table' AND name='note_versions'").get()) return;
+  for (const row of db.prepare("SELECT hash,payload FROM note_history_blobs").all()) {
+    let bytes;
+    try { bytes = gunzipSync(row.payload, { maxOutputLength: 16 * 1024 * 1024 }); }
+    catch { throw new Error("Backup note history has a damaged compressed blob."); }
+    if (createHash("sha256").update(bytes).digest("hex") !== row.hash) throw new Error("Backup note history hash mismatch.");
+  }
+  for (const row of db.prepare("SELECT * FROM note_versions").all()) {
+    for (const key of ["delta_hash", "checkpoint_hash", "input_hash", "snapshot_hash", "legacy_hash"]) {
+      if (row[key] && !db.prepare("SELECT 1 FROM note_history_blobs WHERE hash=?").get(row[key])) throw new Error("Backup note history references a missing blob.");
+    }
+    if (row.parent_revision !== null && !db.prepare("SELECT 1 FROM note_versions WHERE note_id=? AND revision=?").get(row.note_id, row.parent_revision)) throw new Error("Backup note history has a missing parent version.");
+  }
+  for (const row of db.prepare("SELECT note_id,state FROM note_replicas").all()) {
+    try { gunzipSync(row.state, { maxOutputLength: 16 * 1024 * 1024 }); }
+    catch { throw new Error("Backup current note state is damaged."); }
+    const latest = db.prepare("SELECT MAX(revision) AS revision FROM note_versions WHERE note_id=?").get(row.note_id);
+    const note = db.prepare("SELECT payload FROM notes WHERE id=?").get(row.note_id);
+    if (!note || JSON.parse(note.payload).revision !== latest.revision) throw new Error("Backup note and history revisions differ.");
+  }
+}
 async function file(filename, size) {
   const entry = await stat(filename);
   if (!entry.isFile() || entry.size !== size)
@@ -29,6 +52,7 @@ async function file(filename, size) {
 async function legacy(filename, files) {
   const db = database(filename);
   try {
+    history(db);
     for (const { payload } of db.prepare("SELECT payload FROM notes").all()) {
       notes++;
       for (const attachment of JSON.parse(payload).attachments || []) {
@@ -63,6 +87,7 @@ if (existsSync(identityFile)) {
       throw new Error("Backup collection has no registered owner.");
     const db = database(path.join(directory, "users", id, "doompile.sqlite"));
     try {
+      history(db);
       for (const { payload } of db.prepare("SELECT payload FROM notes").all()) {
         notes++;
         for (const attachment of JSON.parse(payload).attachments || []) {

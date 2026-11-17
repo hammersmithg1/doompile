@@ -24,7 +24,6 @@ private enum FeedItem: Identifiable {
 }
 
 @MainActor final class Library: ObservableObject {
-    let conflicts = PassthroughSubject<NoteConflict, Never>()
     private let accountScope = Connection.scope
     private let storage = Storage.shared
     var isCurrentAccount: Bool { accountScope == Connection.scope && Connection.signedIn }
@@ -36,6 +35,7 @@ private enum FeedItem: Identifiable {
     @Published private(set) var uploadStates: [String: AttachmentUploadState] = [:]
     private let connectivity = NWPathMonitor()
     private var syncWorker: Task<Void, Never>?
+    private var replicaSyncTask: Task<Void, Never>?
     private var syncRequested = false
     private var pullRequested = false
     init() {
@@ -56,6 +56,22 @@ private enum FeedItem: Identifiable {
             if tags != catalog { tags = catalog }
             if pending != state.dirty.count { pending = state.dirty.count }
         } catch { self.error = error.localizedDescription }
+    }
+    func saveReplica(_ note: Note, change: NoteChange) {
+        guard isCurrentAccount else { return }
+        let storage = Storage.shared
+        NoteWriter.shared.enqueue(note, change: change, storage: storage) { [weak self] failure in
+            Task { @MainActor [weak self] in
+                guard let self, self.isCurrentAccount else { return }
+                if let failure { self.error = failure.localizedDescription; return }
+                self.reload()
+                self.replicaSyncTask?.cancel()
+                self.replicaSyncTask = Task { @MainActor [weak self] in
+                    try? await Task.sleep(for: EditorLifecycle.autosaveDelay)
+                    if !Task.isCancelled { await self?.sync(pull: false) }
+                }
+            }
+        }
     }
     @discardableResult func save(_ original: Note, feedback: Bool = true) -> Bool {
         guard isCurrentAccount else { error = "Аккаунт изменился. Открой заметку заново."; return false }
@@ -102,12 +118,7 @@ private enum FeedItem: Identifiable {
             syncRequested = false; pullRequested = false
             do {
                 try await SyncService.shared.sync(pull: pull, onProgress: { @MainActor [weak self] in self?.reload() },
-                    onUpload: { @MainActor [weak self] id, state in self?.uploadStates[id] = state },
-                    onConflict: { @MainActor [weak self] conflict in
-                        guard let self, self.isCurrentAccount else { return }
-                        self.conflicts.send(conflict)
-                        self.syncRequested = true
-                    })
+                    onUpload: { @MainActor [weak self] id, state in self?.uploadStates[id] = state })
                 error = nil
             } catch { self.error = error.localizedDescription }
             reload()
@@ -147,7 +158,7 @@ private enum FeedItem: Identifiable {
                 }
             }
             // Each UI test starts with an empty local pile on a dedicated simulator.
-            if let state = try? Storage.shared.snapshot() {
+            if environment["DOOMPILE_UI_KEEP_NOTES"] != "1", let state = try? Storage.shared.snapshot() {
                 for original in state.notes.values where original.deletedAt == nil {
                     var deleted = original; deleted.deletedAt = Note.now()
                     try? Storage.shared.save(deleted)
@@ -312,7 +323,7 @@ struct Home: View {
             if let recovered = EditorDrafts.last() { editorFocusID = recovered.id; editor = recovered }
             await library.sync()
             while !Task.isCancelled {
-                try? await Task.sleep(for: .seconds(library.pending > 0 ? 2 : 30))
+                try? await Task.sleep(for: .seconds(library.pending > 0 ? 2 : 3))
                 guard !Task.isCancelled else { return }
                 if phase == .active { await library.sync() }
             }
@@ -1044,6 +1055,7 @@ struct NoteEditor: View {
     @State private var importer = false
     @State private var drawing = false
     @State private var editingTags = false
+    @State private var showingHistory = false
     @State private var error: String?
     @StateObject private var recorder: VoiceRecorder
     @State private var preview: URL?
@@ -1073,7 +1085,7 @@ struct NoteEditor: View {
         VStack(spacing: 0) {
             metadata
             RichEditorView(document: $note.body, plainText: $text, height: $editorHeight,
-                attachments: $note.attachments, noteID: note.id, notes: library.notes, focusOnLoad: focusOnOpen,
+                attachments: $note.attachments, noteID: note.id, syncNote: capture == nil ? note : nil, onReplica: receiveReplica, notes: library.notes, focusOnLoad: focusOnOpen,
                 bridge: editorBridge, onReference: { id in
                     if let reference = library.notes.first(where: { $0.id == id }), reference.id != note.id { referencedNote = reference }
                 }, onRequestLink: { href in linkURL = href; editorBridge.blur(); linkPrompt = true }, onAction: handleAction, onPasteImage: storeFile)
@@ -1127,6 +1139,7 @@ struct NoteEditor: View {
             } catch { self.error = error.localizedDescription }
         }
         .sheet(isPresented: $drawing) { DrawingView { data in do { try addFile(data, name: "Рисунок.png", mime: "image/png") } catch { self.error = error.localizedDescription } } }
+        .sheet(isPresented: $showingHistory) { NoteHistoryView(noteID: note.id) { restored in note = restored; text = restored.plainText; lastSaved = restored; library.reload() } }
         .sheet(isPresented: $editingTags) { NoteTagsSheet(tags: $note.tags, available: library.tags) }
         .sheet(item: $referencedNote) { other in
             AnyView(NoteEditor(note: other) { updated in
@@ -1152,29 +1165,14 @@ struct NoteEditor: View {
             // Persist the incoming quick draft even if its WebKit surface hasn't opened yet.
             saveKnownState()
         }
-        .onReceive(library.conflicts) { conflict in
-            guard capture == nil, let continuation = conflict.continuing(EditorLifecycle.prepared(note, plainText: text)) else { return }
-            autosaveTask?.cancel()
-            do { try EditorDrafts.save(continuation.note); EditorDrafts.clear(conflict.original.id) }
-            catch { self.error = error.localizedDescription }
-            note = continuation.note
-            lastSaved = conflict.copy
-            if !continuation.replacements.isEmpty { editorBridge.reconcileAttachments(continuation.replacements) }
-        }
         .onReceive(library.$notes) { notes in
-            guard let saved = lastSaved, let server = notes.first(where: { $0.id == note.id }),
-                  capture == nil, !recorder.recording, !recorder.hasPendingRecording else { return }
-            guard let acknowledgement = Note.acknowledging(saved: saved, server: server, current: note) else {
-                if EditorLifecycle.prepared(note, plainText: text) == saved, server != saved {
-                    autosaveTask?.cancel()
-                    note = server; note.body = server.editorDocument; text = server.plainText; lastSaved = server
-                    editorBridge.replaceDocument(server.editorDocument)
-                }
-                return
-            }
-            if note != acknowledgement.note { note = acknowledgement.note }
-            lastSaved = server
-            if !acknowledgement.replacements.isEmpty { editorBridge.reconcileAttachments(acknowledgement.replacements) }
+            guard capture == nil, let server = notes.first(where: { $0.id == note.id }), server.replica != nil else { return }
+            do {
+                let current = EditorLifecycle.prepared(note, plainText: text)
+                let combined = try current.replica == nil ? NoteEngine.shared.migrate(current, server: server, baseline: lastSaved) : NoteEngine.shared.receive(current, server: server)
+                if combined != note { note = combined; text = combined.plainText }
+                lastSaved = server
+            } catch { self.error = error.localizedDescription }
         }
         .onChange(of: note) { _, _ in scheduleAutosave() }
         .onChange(of: text) { _, _ in scheduleAutosave() }
@@ -1198,6 +1196,10 @@ struct NoteEditor: View {
                 }.font(.system(size: 12)).foregroundStyle(Palette.muted).padding(.horizontal, 8).frame(height: 44)
             }.accessibilityLabel("Теги заметки")
             Spacer(minLength: 4)
+            if capture == nil {
+                Button { Task { if await persistForLink() { showingHistory = true } } } label: { DoompileSymbol(systemName: "clock.arrow.circlepath").foregroundStyle(Palette.muted).frame(width: 44, height: 44) }
+                    .accessibilityLabel("История версий").disabled(saving)
+            }
             Button {
                 Task { if await persistForLink(), let url = NoteLinks.shareURL(id: note.id) { UIPasteboard.general.url = url } }
             } label: { DoompileSymbol(systemName: "link").foregroundStyle(Palette.muted).frame(width: 44, height: 44).contentShape(Rectangle()) }
@@ -1355,6 +1357,7 @@ struct NoteEditor: View {
         } catch { self.error = error.localizedDescription }
     }
     private func refreshEditorState() async throws {
+        try await NoteWriter.shared.drain()
         guard editorBridge.ready else { return }
         let before = note.body
         let snapshot = try await editorBridge.snapshot()
@@ -1399,6 +1402,14 @@ struct NoteEditor: View {
             error = "Не удалось сохранить на устройстве. Редактор остаётся открыт — попробуй ещё раз."
         } catch { self.error = error.localizedDescription }
         return false
+    }
+    private func receiveReplica(_ incoming: Note, _ change: NoteChange) {
+        guard capture == nil, incoming.id == note.id else { return }
+        var value = note
+        value.body = incoming.body; value.plainText = incoming.plainText
+        value.replica = incoming.replica; value.revision = incoming.revision; value.updatedAt = incoming.updatedAt
+        note = value; text = value.plainText
+        library.saveReplica(value, change: change)
     }
     private func recordSaved(_ value: Note) {
         let stored = library.notes.first(where: { $0.id == value.id }) ?? value

@@ -13,9 +13,17 @@ import AttachmentPreview, {
 } from "./media-preview";
 import {
   Editor,
+  Extension,
   getSchema,
   type JSONContent,
 } from "@tiptap/core";
+import * as Y from "yjs";
+import { ySyncPlugin, yUndoPlugin, yUndoPluginKey, undo as undoReplica, redo as redoReplica } from "@tiptap/y-tiptap";
+import { history, undo as undoPlain, redo as redoPlain } from "@tiptap/pm/history";
+import type { Note } from "../../core/src/index";
+import type { NoteChange } from "../../sync/changes";
+import { BODY_FIELD, REMOTE_ORIGIN, decode, encode, delta, authoredSnapshot, sameState, open, project, state, validateView } from "../../sync/model";
+import { migrateSnapshot } from "../../sync/legacy";
 import { createSourceDialog } from "./source-dialog";
 import { normalizeMedia, pastedMedia } from "./inline-media";
 import { createFormattingUI } from "./formatting-ui";
@@ -78,6 +86,10 @@ export type Media = {
   recordingId?: string;
 };
 export type EditorOptions = {
+  note?: Note;
+  origin?: "web" | "ios" | "macos";
+  onReplica?: (note: Note, change: NoteChange) => void;
+  onSyncError?: (message: string) => void;
   onTelemetry?: (name: EventName, properties?: Record<string, unknown>) => void;
   noteURL?: string;
   content?: JSONContent;
@@ -224,7 +236,33 @@ export function createBlockEditor(
   let destroyed = false;
   let selectingWithPointer = false;
   let renderedItems = "";
-  const extensions = createEditorExtensions(url, nodeViews);
+  let replicaDoc: Y.Doc | undefined;
+  let remoteDepth = 0;
+  let baselineNote = options.note;
+  let baseRevision = options.note?.revision ?? 0;
+  const plainHistory = history();
+  const noteHistory = Extension.create({
+    name: "noteHistory",
+    addProseMirrorPlugins: () => [plainHistory],
+    addCommands: () => ({
+      undo: () => ({ tr, state, dispatch }) => {
+        if (!replicaDoc) return undoPlain(state, dispatch);
+        tr.setMeta("preventDispatch", true);
+        return dispatch ? undoReplica(state) : !!yUndoPluginKey.getState(state)?.hasUndoOps;
+      },
+      redo: () => ({ tr, state, dispatch }) => {
+        if (!replicaDoc) return redoPlain(state, dispatch);
+        tr.setMeta("preventDispatch", true);
+        return dispatch ? redoReplica(state) : !!yUndoPluginKey.getState(state)?.hasRedoOps;
+      },
+    }),
+    addKeyboardShortcuts() { return {
+      "Mod-z": () => this.editor.commands.undo(),
+      "Mod-Shift-z": () => this.editor.commands.redo(),
+      "Mod-y": () => this.editor.commands.redo(),
+    }; },
+  });
+  const extensions = [...createEditorExtensions(url, nodeViews, false), noteHistory];
   const schema = getSchema(extensions);
   let editor: Editor;
   try { editor = new Editor({
@@ -351,7 +389,7 @@ export function createBlockEditor(
       },
     },
     onUpdate: () => {
-      options.onChange?.(editor.getJSON(), documentPlainText(editor));
+      if (!remoteDepth && !replicaDoc) options.onChange?.(editor.getJSON(), documentPlainText(editor));
       renderOutline();
       options.onHeight?.();
     },
@@ -841,8 +879,50 @@ export function createBlockEditor(
   });
   renderOutline();
   report("editor.ready", { duration_ms: performance.now() - started });
+  function setNote(incoming: Note) {
+    baselineNote ??= incoming;
+    if (!incoming.replica) return;
+    remoteDepth++;
+    try {
+      if (!replicaDoc) {
+        let initial = incoming;
+        const localBody = restoreDocument(editor.getJSON());
+        if (baselineNote && !baselineNote.replica && JSON.stringify(localBody) !== JSON.stringify(baselineNote.body)) {
+          initial = migrateSnapshot({ ...baselineNote, body: localBody as Note["body"], plainText: documentPlainText(editor) }, incoming, baselineNote);
+        }
+        const doc = open(initial.replica); validateView(doc);
+        replicaDoc = doc; baseRevision = incoming.revision;
+        editor.unregisterPlugin("history");
+        editor.registerPlugin(ySyncPlugin(doc.getXmlFragment(BODY_FIELD)));
+        editor.registerPlugin(yUndoPlugin());
+        doc.on("update", (update: Uint8Array, origin: unknown) => {
+          if (remoteDepth || origin === REMOTE_ORIGIN) return;
+          const note = project(doc, { revision: baseRevision, updatedAt: new Date().toISOString() });
+          baselineNote = note;
+          options.onReplica?.(note, { id: crypto.randomUUID(), update: encode(update), snapshot: encode(Y.encodeSnapshot(Y.snapshot(doc))), baseRevision, authoredAt: note.updatedAt, origin: options.origin ?? "web" });
+          options.onChange?.(note.body, note.plainText);
+        });
+        if (!sameState(initial.replica!, incoming.replica)) queueMicrotask(() => {
+          options.onReplica?.(initial, { id: crypto.randomUUID(), update: delta(initial.replica!, incoming.replica), snapshot: authoredSnapshot(initial.replica!), baseRevision: incoming.revision, authoredAt: initial.updatedAt, origin: options.origin ?? "web" });
+        });
+      } else {
+        const candidate = open(state(replicaDoc));
+        try { Y.applyUpdate(candidate, decode(incoming.replica.data), REMOTE_ORIGIN); validateView(candidate); }
+        finally { candidate.destroy(); }
+        Y.applyUpdate(replicaDoc, decode(incoming.replica.data), REMOTE_ORIGIN);
+        baseRevision = Math.max(baseRevision, incoming.revision);
+      }
+      baselineNote = project(replicaDoc, { revision: baseRevision, updatedAt: incoming.updatedAt });
+    } catch {
+      editor.setEditable(false);
+      options.onSyncError?.("Для этой версии заметки нужно обновить приложение. Содержимое сохранено.");
+    } finally { remoteDepth--; }
+  }
+  if (options.note?.replica) setNote(options.note);
   return {
     editor,
+    setNote,
+    getNote() { return replicaDoc ? project(replicaDoc, { revision: baseRevision, updatedAt: baselineNote?.updatedAt }) : undefined; },
     setDocument(body: JSONContent, emitUpdate = true) {
       // Loading a note establishes the baseline; the first Undo must only undo
       // typing, never the loaded document (including a restored capture draft).
@@ -990,6 +1070,7 @@ export function createBlockEditor(
       document.removeEventListener("pointercancel", endSelection);
       sourceDialog.destroy();
       editor.destroy();
+      replicaDoc?.destroy();
       formatting.destroy();
       preferences.destroy();
       root.replaceChildren();

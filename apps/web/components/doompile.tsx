@@ -1,5 +1,6 @@
 "use client";
 import { track } from "@/lib/client/telemetry";
+import { merge as mergeReplicas } from "../../../packages/sync/model";
 import {
   accountStorage as localStorage,
   accountFetch as fetch,
@@ -775,6 +776,12 @@ export default function Doompile({
     if (editorMode === "note" && editor?.id === activeNote.id) {
       if (editorBusy || recording.draft?.target === editor.id) return;
       const saved = editableNote(activeNote);
+      if (editor.replica && saved.replica) {
+        const combined = mergeReplicas({ ...editor, tags: editTags.split(",").map(tag => tag.trim()).filter(Boolean) }, saved);
+        editorBaseline.current = { id: saved.id, content: editorContentKey(saved) };
+        setEditor(combined); setEditTags(combined.tags.join(", "));
+        return;
+      }
       const savedContent = editorContentKey(saved);
       const currentContent = editorContentKey(
         editor,
@@ -791,7 +798,7 @@ export default function Doompile({
         savedContent === currentContent
       ) {
         editorBaseline.current = { id: saved.id, content: savedContent };
-        if (savedContent !== currentContent)
+        if (savedContent !== currentContent && !saved.replica)
           setEditorDocumentVersion((version) => version + 1);
         setEditor(saved);
         setEditTags(saved.tags.join(", "));
@@ -1466,6 +1473,7 @@ export default function Doompile({
       note={editor}
       documentVersion={editorDocumentVersion}
       apiRef={editorAPI}
+      beforeHistory={async () => { await autosave.current?.flush(); }}
       onCopyLink={() => void copyNoteLink(editor.id)}
       notes={state.notes.filter((note) => note.id !== editor.id)}
       tags={editTags
@@ -1534,6 +1542,10 @@ export default function Doompile({
           return updated;
         })
       }
+      onReplica={(note, change) => {
+        setEditor(current => current?.id === note.id ? { ...current, body: note.body, plainText: note.plainText, replica: note.replica, revision: note.revision, updatedAt: note.updatedAt } : current);
+        if (editorMode === "note") void store.saveNote(note, [], [change]).catch(() => setSaveStatus("Не удалось сохранить"));
+      }}
       onTags={(tags) => {
         setEditTags(tags.join(", "));
         const catalog = [...new Set([...tagCatalog, ...tags])];

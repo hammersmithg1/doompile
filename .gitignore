@@ -13,6 +13,7 @@ xcuserdata/
 extensions/clipper/dist/
 extensions/clipper/.test-build/
 packages/editor/dist/
+apps/ios/Shared/Resources/sync.js
 apps/ios/Doompile/EditorResources/
 apps/ios/Safari/Resources/
 apps/macos/Doompile/EditorResources/

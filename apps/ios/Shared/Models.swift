@@ -151,33 +151,6 @@ struct NoteAcknowledgement {
     let replacements: [MediaURLReplacement]
 }
 
-struct NoteConflict {
-    let original: Note
-    let copy: Note
-
-    /// Keep unsaved typing on the preserved local branch after a real conflict.
-    func continuing(_ current: Note) -> NoteAcknowledgement? {
-        guard current.id == original.id else { return nil }
-        var updated = current
-        var replacements: [MediaURLReplacement] = []
-        updated.id = copy.id
-        updated.revision = copy.revision
-        updated.createdAt = copy.createdAt
-        updated.updatedAt = copy.updatedAt
-        for index in updated.attachments.indices {
-            let previous = updated.attachments[index]
-            guard previous.url.hasPrefix("local:"),
-                  var uploaded = copy.attachments.first(where: { $0.id == previous.id }),
-                  !uploaded.url.hasPrefix("local:") else { continue }
-            uploaded.name = previous.name
-            updated.attachments[index] = uploaded
-            updated.body = updated.body.replacingString(previous.url, with: uploaded.url)
-            replacements.append(MediaURLReplacement(from: previous.url, to: uploaded.url))
-        }
-        return NoteAcknowledgement(note: updated, replacements: replacements)
-    }
-}
-
 struct Note: Codable, Identifiable, Equatable {
     var id = UUID().uuidString.lowercased()
     var title = ""
@@ -193,6 +166,7 @@ struct Note: Codable, Identifiable, Equatable {
     var updatedAt = Self.now()
     var deletedAt: String?
     var revision = 0
+    var replica: NoteReplica?
 
     /// Timeline placement is immutable across edits, pinning, urgency and sync acknowledgements.
     static func newestFirst(_ lhs: Note, _ rhs: Note) -> Bool {
@@ -344,8 +318,13 @@ struct Note: Codable, Identifiable, Equatable {
             if case .array(let children) = node["content"] { return children.map(text).joined() }
             return ""
         }
-        if case .object(let doc) = body, case .array(let content) = doc["content"], let first = content.map(text).first(where: { !$0.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }) { return String(first.prefix(120)) }
-        return editorSource?.title ?? editorSource?.url ?? attachments.first?.name ?? ""
+        if case .object(let doc) = body, case .array(let content) = doc["content"], let first = content.map(text).first(where: { !$0.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }) { return Self.generatedTitle(first) }
+        return Self.generatedTitle(editorSource?.title ?? editorSource?.url ?? attachments.first?.name ?? "")
+    }
+    private static func generatedTitle(_ value: String) -> String {
+        var units = Array(value.utf16.prefix(NoteLimits.generatedTitle))
+        if let last = units.last, (0xD800...0xDBFF).contains(last) { units.removeLast() }
+        return String(decoding: units, as: UTF16.self)
     }
     var displayTitle: String { title.isEmpty ? (source?.title ?? source?.url ?? "Без названия") : title }
     var icon: String {

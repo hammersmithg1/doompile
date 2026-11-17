@@ -138,7 +138,7 @@ jobs:
           fi
 
           simulator_id=$(python3 .agents/ci/select_ios_simulator.py --os "$IOS_SIMULATOR_OS")
-          if [[ -z "$IOS_TEST_FILTER" || "$IOS_TEST_FILTER" == */testCompactComposerAttachmentAndVoiceStates || "$IOS_TEST_FILTER" == */testAutosavesContinueOnOneConflictBranch ]]; then
+          if [[ -z "$IOS_TEST_FILTER" || "$IOS_TEST_FILTER" == */testCompactComposerAttachmentAndVoiceStates || "$IOS_TEST_FILTER" == */testOfflineEditsMergeAndHistoryRestoresSameNote ]]; then
             DOOMPILE_COMPOSER_FIXTURE_DELAY=18 python3 apps/macos/scripts/composer-fixture.py > "$RUNNER_TEMP/ios-composer-fixture.log" 2>&1 &
             fixture_pid=$!
             stop_fixture() {

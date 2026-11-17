@@ -77,6 +77,8 @@ struct MacRichEditorView: NSViewRepresentable {
     @Binding var height: CGFloat
     @Binding var attachments: [Attachment]
     var noteID: String? = nil
+    var syncNote: Note? = nil
+    var onReplica: ((Note, NoteChange) -> Void)? = nil
     let notes: [Note]
     var focusOnLoad = false
     var captureCompact: Bool? = nil
@@ -119,7 +121,8 @@ struct MacRichEditorView: NSViewRepresentable {
     }
     func updateNSView(_ webView: WKWebView, context: Context) {
         context.coordinator.parent = self
-        if bridge.ready { context.coordinator.applyTheme(); context.coordinator.applyNoteURL(); context.coordinator.applyCaptureMode() }
+        if bridge.ready { context.coordinator.applyTheme()
+            context.coordinator.applySyncNote(); context.coordinator.applyNoteURL(); context.coordinator.applyCaptureMode() }
         // A transaction updates the SwiftUI binding. Resetting document here would lose the caret.
     }
     static func dismantleNSView(_ webView: WKWebView, coordinator: Coordinator) {
@@ -131,6 +134,13 @@ struct MacRichEditorView: NSViewRepresentable {
     final class Coordinator: NSObject, WKScriptMessageHandler, WKScriptMessageHandlerWithReply, WKNavigationDelegate {
         var parent: MacRichEditorView
         let media = MacMediaSchemeHandler()
+        private var appliedReplica: String?
+        func applySyncNote() {
+            guard let note = parent.syncNote, let replica = note.replica, replica.data != appliedReplica,
+                  let data = try? JSONEncoder().encode(note), let json = String(data: data, encoding: .utf8) else { return }
+            appliedReplica = replica.data
+            parent.bridge.webView?.evaluateJavaScript("window.doompileEditor.setNote?.(\(json))")
+        }
         private var appliedTheme: String?
         private var appliedNoteURL: String?
         private var appliedCapture: Bool?
@@ -175,10 +185,23 @@ struct MacRichEditorView: NSViewRepresentable {
                     guard error == nil else { if let error { Telemetry.shared.failure(.editorFailed, error) }; return }
                     self?.appliedTheme = theme
                     self?.parent.bridge.markReady()
+                    self?.applySyncNote()
                     self?.applyNoteURL()
                     self?.applyCaptureMode()
                     if self?.parent.focusOnLoad == true { self?.parent.bridge.webView?.evaluateJavaScript("window.doompileEditor.focus?.()") }
                 }
+            case "replica":
+                guard let value = payload["note"], let raw = payload["change"],
+                      let data = try? JSONSerialization.data(withJSONObject: value),
+                      let changeData = try? JSONSerialization.data(withJSONObject: raw),
+                      let note = try? JSONDecoder().decode(Note.self, from: data),
+                      var change = try? JSONDecoder().decode(NoteChange.self, from: changeData),
+                      note.id == parent.noteID else { return }
+                change.origin = NoteEngine.origin
+                appliedReplica = note.replica?.data
+                parent.onReplica?(note, change)
+                parent.document = note.body
+                parent.plainText = note.plainText
             case "change":
                 guard let body = payload["body"], JSONSerialization.isValidJSONObject(body), let data = try? JSONSerialization.data(withJSONObject: body), let document = try? JSONDecoder().decode(JSONValue.self, from: data), let text = payload["plainText"] as? String else { return }
                 parent.document = document

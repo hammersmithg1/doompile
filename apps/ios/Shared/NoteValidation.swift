@@ -43,6 +43,8 @@ enum NoteValidation {
         guard case .object(let document) = note.body, document["type"] == .string("doc"), bounded(note.body, depth: 0) else {
             throw DoompileError.message("Слишком сложный или повреждённый документ заметки.")
         }
-        try require(try JSONEncoder().encode(note).count <= NoteLimits.requestBytes - 256, "Слишком большая заметка для синхронизации. Раздели её на несколько заметок.")
+        var projection = note; projection.replica = nil
+        try require(try JSONEncoder().encode(projection).count <= NoteLimits.requestBytes - 256, "Слишком большая заметка для синхронизации. Раздели её на несколько заметок.")
+        try require((note.replica?.data.utf8.count ?? 0) <= 16 * 1024 * 1024, "Заметке требуется обновление формата синхронизации. Её содержимое сохранено на устройстве.")
     }
 }

@@ -100,6 +100,8 @@ struct RichEditorView: UIViewRepresentable {
     @Binding var height: CGFloat
     @Binding var attachments: [Attachment]
     var noteID: String? = nil
+    var syncNote: Note? = nil
+    var onReplica: ((Note, NoteChange) -> Void)? = nil
     let notes: [Note]
     var focusOnLoad = false
     @ObservedObject var bridge: RichEditorBridge
@@ -147,6 +149,7 @@ struct RichEditorView: UIViewRepresentable {
         context.coordinator.parent = self
         if bridge.ready {
             context.coordinator.applyTheme()
+            context.coordinator.applySyncNote()
             context.coordinator.applyNoteURL()
             context.coordinator.applyCaptureHeightLimit()
         }
@@ -164,6 +167,13 @@ struct RichEditorView: UIViewRepresentable {
     final class Coordinator: NSObject, WKScriptMessageHandler, WKScriptMessageHandlerWithReply, WKNavigationDelegate {
         var parent: RichEditorView
         let media = MediaSchemeHandler()
+        private var appliedReplica: String?
+        func applySyncNote() {
+            guard let note = parent.syncNote, let replica = note.replica, replica.data != appliedReplica,
+                  let data = try? JSONEncoder().encode(note), let json = String(data: data, encoding: .utf8) else { return }
+            appliedReplica = replica.data
+            parent.bridge.webView?.evaluateJavaScript("window.doompileEditor.setNote?.(\(json))")
+        }
         private var appliedTheme: String?
         private var appliedNoteURL: String?
         private var appliedCaptureHeightLimit: CGFloat?
@@ -242,10 +252,23 @@ struct RichEditorView: UIViewRepresentable {
                     guard let self, let webView, parent.bridge.webView === webView else { return }
                     appliedTheme = theme
                     parent.bridge.markReady(webView)
+                    applySyncNote()
                     applyNoteURL()
                     applyCaptureHeightLimit()
                     focusAfterPresentation()
                 }
+            case "replica":
+                guard let value = payload["note"], let raw = payload["change"],
+                      let data = try? JSONSerialization.data(withJSONObject: value),
+                      let changeData = try? JSONSerialization.data(withJSONObject: raw),
+                      let note = try? JSONDecoder().decode(Note.self, from: data),
+                      var change = try? JSONDecoder().decode(NoteChange.self, from: changeData),
+                      note.id == parent.noteID else { return }
+                change.origin = NoteEngine.origin
+                appliedReplica = note.replica?.data
+                parent.onReplica?(note, change)
+                parent.document = note.body
+                parent.plainText = note.plainText
             case "change":
                 guard let body = payload["body"], JSONSerialization.isValidJSONObject(body),
                       let data = try? JSONSerialization.data(withJSONObject: body),

@@ -1,4 +1,4 @@
-import { test, expect, type Page } from "./web-test";
+import { test, expect, mockNotes, type Page } from "./web-test";
 const note = (id: string, text: string, tags: string[]) => ({
   id,
   title: text,
@@ -26,21 +26,7 @@ async function setup(page: Page) {
     ]),
   ];
   const writes: any[] = [];
-  await page.route("**/api/notes", (route) =>
-    route.fulfill({ json: { notes: notes.filter((note) => !note.deletedAt) } }),
-  );
-  await page.route("**/api/notes/*", async (route) => {
-    const { note } = route.request().postDataJSON();
-    const saved = {
-      ...note,
-      revision: (notes.find((item) => item.id === note.id)?.revision || 0) + 1,
-    };
-    writes.push(saved);
-    const index = notes.findIndex((item) => item.id === note.id);
-    if (index < 0) notes.push(saved);
-    else notes[index] = saved;
-    await route.fulfill({ json: { note: saved } });
-  });
+  await mockNotes(page, notes, writes);
   await page.goto("/");
   await expect(page.locator(".note-main")).toHaveCount(2);
   return { notes, writes };

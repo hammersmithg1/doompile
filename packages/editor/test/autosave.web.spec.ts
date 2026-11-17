@@ -1,14 +1,7 @@
-import { test, expect, type Page } from "./web-test";
+import { test, expect, mockNotes, type Page } from "./web-test";
 async function mockServer(page: Page) {
   const saved: any[] = [];
-  await page.route("**/api/notes", (route) =>
-    route.fulfill({ json: { notes: saved.slice(-1) } }),
-  );
-  await page.route("**/api/notes/*", async (route) => {
-    const { note } = route.request().postDataJSON();
-    saved.push({ ...note, revision: saved.length + 1 });
-    await route.fulfill({ json: { note: saved.at(-1) } });
-  });
+  await mockNotes(page, [], saved);
   await page.goto("/");
   await page
     .getByRole("button", { name: "Развернуть редактор", exact: true })
@@ -86,12 +79,7 @@ test("a failed local send keeps the draft and the editor open for retry", async 
 
 test("quick input survives expand, immediate collapse, and reload without sending", async ({ page }) => {
   const saved: any[] = [];
-  await page.route("**/api/notes", route => route.fulfill({json:{notes:saved.slice(-1)}}));
-  await page.route("**/api/notes/*", async route => {
-    const {note} = route.request().postDataJSON();
-    saved.push({...note,revision:saved.length+1});
-    await route.fulfill({json:{note:saved.at(-1)}});
-  });
+  await mockNotes(page, [], saved);
   await page.goto("/");
   const input = page.getByRole("textbox", { name: "Быстрая заметка" });
   await input.fill("До раскрытия");

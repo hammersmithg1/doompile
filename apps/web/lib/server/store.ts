@@ -3,6 +3,7 @@ import { mkdirSync } from "node:fs";
 import { resolve } from "node:path";
 import type { Attachment, Note } from "@doompile/core";
 import { dataDirectory } from "./identity";
+import { VersionStore } from "./versions";
 
 function canonical(value: unknown): string {
   if (Array.isArray(value)) return `[${value.map(canonical).join(",")}]`;
@@ -11,10 +12,11 @@ function canonical(value: unknown): string {
 }
 function content(note: Note): string { const { revision: _revision, ...rest } = note; return canonical(rest); }
 
-export type SaveResult = { ok: true; note: Note } | { ok: false; current: Note | null };
+export type SaveResult = { ok: true; note: Note } | { ok: false; current: Note | null; upgrade?: boolean };
 
 export class NoteStore {
   private database: DatabaseSync;
+  readonly versions: VersionStore;
   constructor(public directory: string) {
     mkdirSync(directory, { recursive: true, mode: 0o700 });
     this.database = new DatabaseSync(resolve(directory, "doompile.sqlite"));
@@ -25,6 +27,7 @@ export class NoteStore {
       CREATE TABLE IF NOT EXISTS attachments (id TEXT PRIMARY KEY, payload TEXT NOT NULL);
       CREATE TABLE IF NOT EXISTS attachment_objects (id TEXT PRIMARY KEY, storage_key TEXT NOT NULL);
     `);
+    this.versions = new VersionStore(this.database);
   }
   list(): Note[] {
     return (this.database.prepare("SELECT payload FROM notes ORDER BY updated_at DESC, id ASC").all() as {payload: string}[]).map((row) => JSON.parse(row.payload));
@@ -39,6 +42,11 @@ export class NoteStore {
       const current = this.get(incoming.id);
       // A response can be lost after committing. Retrying exactly the same edit is safe.
       if (current && content(current) === content(incoming)) { this.database.exec("COMMIT"); return { ok: true, note: current }; }
+      // Pre-replica clients turn 409 into a new UUID. Stop that write path with
+      // an upgrade response while retaining their local edit for migration.
+      if (current && this.database.prepare("SELECT 1 FROM note_replicas WHERE note_id=?").get(incoming.id)) {
+        this.database.exec("ROLLBACK"); return { ok: false, current, upgrade: true };
+      }
       if ((current?.revision ?? 0) !== baseRevision) { this.database.exec("ROLLBACK"); return { ok: false, current }; }
       const note: Note = { ...incoming, createdAt: current?.createdAt ?? incoming.createdAt, revision: (current?.revision ?? 0) + 1 };
       this.database.prepare("INSERT INTO notes(id, payload, updated_at) VALUES (?, ?, ?) ON CONFLICT(id) DO UPDATE SET payload = excluded.payload, updated_at = excluded.updated_at").run(note.id, JSON.stringify(note), note.updatedAt);

@@ -6,6 +6,8 @@ import { noteSchema, type Note, type NoteReplica, type DocumentNode, type Attach
 import { applySnapshot, decode, deltaForVector, documentTitle, open, prepare, project, state } from "../../../../packages/sync/model";
 
 import type { ChangeOrigin, NoteChange, VersionInfo } from "../../../../packages/sync/changes";
+import { authoredSnapshot, delta } from "../../../../packages/sync/model";
+import { migrateSnapshot, prepareLegacy } from "../../../../packages/sync/legacy";
 export type { ChangeOrigin, NoteChange, VersionInfo } from "../../../../packages/sync/changes";
 export class SyncWriteError extends Error {
   constructor(message: string, public status = 400) { super(message); }
@@ -24,7 +26,7 @@ export class VersionStore {
       CREATE TABLE IF NOT EXISTS note_versions (
         note_id TEXT NOT NULL,revision INTEGER NOT NULL,parent_revision INTEGER,
         created_at TEXT NOT NULL,authored_at TEXT NOT NULL,origin TEXT NOT NULL,kind TEXT NOT NULL,
-        delta_hash TEXT NOT NULL,checkpoint_hash TEXT,input_hash TEXT,snapshot_hash TEXT,base_revision INTEGER,
+        delta_hash TEXT NOT NULL,checkpoint_hash TEXT,input_hash TEXT,snapshot_hash TEXT,base_revision INTEGER,legacy_hash TEXT,
         PRIMARY KEY(note_id,revision)
       );
       CREATE TABLE IF NOT EXISTS note_sync_receipts (
@@ -34,6 +36,7 @@ export class VersionStore {
       CREATE TABLE IF NOT EXISTS note_changes (cursor INTEGER PRIMARY KEY AUTOINCREMENT,note_id TEXT NOT NULL,revision INTEGER NOT NULL);
       CREATE INDEX IF NOT EXISTS note_changes_by_note ON note_changes(note_id,cursor);
     `);
+    if (!(db.prepare("PRAGMA table_info(note_versions)").all() as { name: string }[]).some(row => row.name === "legacy_hash")) db.exec("ALTER TABLE note_versions ADD COLUMN legacy_hash TEXT");
   }
   private transaction<T>(run: () => T): T {
     this.db.exec("BEGIN IMMEDIATE");
@@ -78,10 +81,11 @@ export class VersionStore {
   }
   private seed(note: Note) {
     if (this.db.prepare("SELECT 1 FROM note_replicas WHERE note_id=?").get(note.id)) return;
-    const initial = prepare(note), doc = open(initial.replica);
+    const initial = prepare(prepareLegacy(note)), doc = open(initial.replica);
     try {
       // Preserve existing revision numbers and identifiers at the migration boundary.
       this.append(initial, doc, Y.encodeStateAsUpdate(doc), null, "initial", note.updatedAt, "migration");
+      this.db.prepare("UPDATE note_versions SET legacy_hash=? WHERE note_id=? AND revision=?").run(this.blob(Buffer.from(JSON.stringify(plain(note)))), note.id, note.revision);
       // Keep the pre-upgrade public projection byte-for-byte compatible until a
       // real replica edit is accepted; old capture retries compare that payload.
       this.putProjection(note);
@@ -97,7 +101,8 @@ export class VersionStore {
       const current = this.latest(id);
       if (!current) return null;
       this.seed(current);
-      return { ...this.latest(id)!, replica: this.replica(id)! };
+      const doc = open(this.replica(id));
+      try { return project(doc, this.latest(id)!); } finally { doc.destroy(); }
     });
   }
   private canonicalMedia(doc: Y.Doc) {
@@ -158,8 +163,40 @@ export class VersionStore {
         }
         if (!current) throw new SyncWriteError("Note not found", 404);
         this.putState(id, doc);
-        return { note: { ...current, replica: state(doc) }, acknowledged, update: deltaForVector(doc, clientVector), cursor: this.cursor() };
+        return { note: project(doc, current), acknowledged, update: deltaForVector(doc, clientVector), cursor: this.cursor() };
       } finally { doc.destroy(); }
+    });
+  }
+  migrate(id: string, snapshots: { id: string; note: Note; baseline?: Note; baseRevision: number; origin: ChangeOrigin }[]) {
+    return this.transaction(() => {
+      let current = this.latest(id);
+      if (current) this.seed(current);
+      const acknowledged: string[] = [];
+      for (const snapshot of snapshots) {
+        if (snapshot.note.id !== id) throw new SyncWriteError("The snapshot belongs to another note");
+        const digest = hash(JSON.stringify(snapshot));
+        const receipt = this.db.prepare("SELECT payload_hash FROM note_sync_receipts WHERE note_id=? AND change_id=?").get(id, snapshot.id) as { payload_hash: string } | undefined;
+        if (receipt) {
+          if (receipt.payload_hash !== digest) throw new SyncWriteError("A saved change identifier cannot be reused with different data");
+          acknowledged.push(snapshot.id); continue;
+        }
+        const remote = current ? { ...current, replica: this.replica(id)! } : undefined;
+        if (snapshot.baseline && snapshot.baseline.id !== id) throw new SyncWriteError("The baseline belongs to another note");
+        const base = snapshot.baseline ?? (remote && this.version(id, snapshot.baseRevision));
+        const migrated = remote ? migrateSnapshot(snapshot.note, remote, base ?? undefined) : prepare({ ...snapshot.note, replica: undefined });
+        const doc = open(migrated.replica);
+        try {
+          this.canonicalMedia(doc);
+          const next = noteSchema.parse(project(doc, { revision: (current?.revision ?? 0) + 1, updatedAt: new Date().toISOString() }));
+          const submitted: NoteChange = { id: snapshot.id, update: delta(migrated.replica!, remote?.replica), snapshot: authoredSnapshot(migrated.replica!), baseRevision: remote?.revision ?? 0, authoredAt: snapshot.note.updatedAt, origin: snapshot.origin };
+          this.append(next, doc, decode(delta(next.replica!, remote?.replica)), current?.revision ?? null, "migration", submitted.authoredAt, snapshot.origin, submitted);
+          this.db.prepare("UPDATE note_versions SET legacy_hash=? WHERE note_id=? AND revision=?").run(this.blob(Buffer.from(JSON.stringify(plain(snapshot.note)))), id, next.revision);
+          this.db.prepare("INSERT INTO note_sync_receipts VALUES (?,?,?,?)").run(id, snapshot.id, digest, next.revision);
+          this.putState(id, doc); current = plain(next); acknowledged.push(snapshot.id);
+        } finally { doc.destroy(); }
+      }
+      if (!current) throw new SyncWriteError("Note not found", 404);
+      return { note: { ...current, replica: this.replica(id)! }, acknowledged };
     });
   }
   cursor(): number {
@@ -172,7 +209,7 @@ export class VersionStore {
       const since = reset ? 0 : after;
       const rows = this.db.prepare("SELECT note_id,MAX(cursor) AS cursor FROM note_changes WHERE cursor>? GROUP BY note_id ORDER BY cursor LIMIT ?")
         .all(since, Math.min(200, Math.max(1, limit))) as { note_id: string; cursor: number }[];
-      const notes = rows.map(row => ({ ...this.latest(row.note_id)!, replica: this.replica(row.note_id)! }));
+      const notes = rows.map(row => { const doc = open(this.replica(row.note_id)); try { return project(doc, this.latest(row.note_id)!); } finally { doc.destroy(); } });
       const cursor = rows.at(-1)?.cursor ?? since;
       const more = !!this.db.prepare("SELECT 1 FROM note_changes WHERE cursor>? LIMIT 1").get(cursor);
       return { notes, cursor, more, ...(reset ? { reset: true } : {}) };
@@ -201,6 +238,8 @@ export class VersionStore {
     } finally { doc.destroy(); }
   }
   authoredVersion(id: string, revision: number): Note | null {
+    const legacy = this.db.prepare("SELECT legacy_hash FROM note_versions WHERE note_id=? AND revision=?").get(id, revision) as { legacy_hash: string | null } | undefined;
+    if (legacy?.legacy_hash) return JSON.parse(Buffer.from(this.readBlob(legacy.legacy_hash)).toString("utf8")) as Note;
     const target = this.db.prepare("SELECT snapshot_hash,base_revision,created_at FROM note_versions WHERE note_id=? AND revision=?")
       .get(id, revision) as { snapshot_hash: string | null; base_revision: number | null; created_at: string } | undefined;
     if (!target) return null;

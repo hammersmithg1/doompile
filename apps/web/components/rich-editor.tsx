@@ -3,6 +3,7 @@ import { track } from "@/lib/client/telemetry";
 import { useState, useRef, useEffect, useLayoutEffect } from "react";
 import type { JSONContent } from "@tiptap/core";
 import type { Note, Attachment } from "@doompile/core";
+import type { NoteChange } from "../../../packages/sync/changes";
 import { createBlockEditor } from "../../../packages/editor/src/block-editor";
 import "../../../packages/editor/src/blocks.css";
 import Drawing from "./drawing";
@@ -25,6 +26,8 @@ export type RichEditorAPI = {
   completeRecording: (id: string, attachment: Attachment) => void;
 };
 export default function RichEditor(props: {
+  note?: Note;
+  onReplica?: (note: Note, change: NoteChange) => void;
   value: unknown;
   noteId: string;
   recordingTarget: string;
@@ -53,6 +56,9 @@ export default function RichEditor(props: {
   useEffect(() => {
     mounted.current = true;
     const instance = createBlockEditor(host.current!, {
+      note: current.current.note,
+      onReplica: (note, change) => current.current.onReplica?.(note, change),
+      onSyncError: setError,
       onTelemetry: track,
       content: current.current.value as JSONContent,
       noteURL: new URL(`/notes/${current.current.noteId}`, location.href).href,
@@ -187,6 +193,9 @@ export default function RichEditor(props: {
       controller.current = null;
     };
   }, []);
+  useLayoutEffect(() => {
+    if (props.note) controller.current?.setNote(props.note);
+  }, [props.note]);
   useEffect(() => {
     controller.current?.setNotes(props.notes);
   }, [props.notes]);

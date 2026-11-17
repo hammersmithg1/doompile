@@ -3,7 +3,7 @@
 <plist version="1.0">
 <dict>
 	<key>DoompileBuildCommit</key>
-	<string>development</string>
+	<string>fb34d50f48bc</string>
 	<key>CFBundleDevelopmentRegion</key>
 	<string>ru</string>
 	<key>CFBundleExecutable</key>

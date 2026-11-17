@@ -3,6 +3,7 @@ import type { User, Principal } from "./identity";
 import { API_VERSION, NOTE_LIMITS } from "@doompile/core";
 import { observeRequest, observedUser, serverEvent } from "./telemetry";
 import { errorProperties } from "../../../../packages/telemetry/core";
+import { SyncWriteError } from "./versions";
 
 export class RequestError extends Error {
   constructor(
@@ -77,7 +78,7 @@ export async function api(
           401,
         );
       const version = request.headers.get("X-Doompile-API-Version") ?? "1";
-      if (!/^\d+$/.test(version) || Number(version) !== API_VERSION) {
+      if (!/^\d+$/.test(version) || ![1, API_VERSION].includes(Number(version))) {
         throw new RequestError(
           "This client uses an unsupported API version. Update the server or client.",
           426,
@@ -85,7 +86,7 @@ export async function api(
       }
       response = await handler(auth.user, auth);
     } catch (error) {
-      if (error instanceof RequestError)
+      if (error instanceof RequestError || error instanceof SyncWriteError)
         response = Response.json(
           { error: error.message },
           { status: error.status },

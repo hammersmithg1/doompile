@@ -6,7 +6,7 @@ let package = Package(
     platforms: [.macOS(.v13), .iOS(.v17)],
     products: [.library(name: "DoompileCore", targets: ["DoompileCore"])],
     targets: [
-        .target(name: "DoompileCore", path: "Shared", linkerSettings: [.linkedLibrary("sqlite3")]),
+        .target(name: "DoompileCore", path: "Shared", resources: [.copy("Resources")], linkerSettings: [.linkedLibrary("sqlite3")]),
         .testTarget(name: "DoompileCoreTests", dependencies: ["DoompileCore"], path: "Tests")
     ]
 )

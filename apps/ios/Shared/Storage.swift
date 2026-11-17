@@ -153,21 +153,33 @@ final class Storage: @unchecked Sendable {
     }
     var decodedSnapshotNotes: Int { (try? access { $0.decodedSnapshotNotes }) ?? 0 }
     func snapshot() throws -> DiskState { try access { try $0.snapshot() } }
-    func pendingNotes() throws -> [Note] { try access { try $0.pendingNotes() } }
-    @discardableResult func save(_ original: Note) throws -> Note {
+    func pendingNotes() throws -> [Note] { try access { db in try db.transaction {
+        let notes = try db.pendingNotes()
+        for note in notes where try !db.hasJournal(note.id) {
+            if note.replica != nil { try db.append(note.id, NoteJournalEntry(change: NoteEngine.shared.recovery(note, server: db.syncState(note.id).server))) }
+            else { try db.append(note.id, NoteJournalEntry(legacy: LegacyNoteChange(id: UUID().uuidString.lowercased(), note: note, baseRevision: note.revision, origin: NoteEngine.origin))) }
+        }
+        return notes
+    } } }
+    func journal(_ id: String) throws -> [NoteJournalEntry] { try access { try $0.journal(id) } }
+    func cursor() throws -> Int { try access { try $0.cursor() } }
+    @discardableResult func save(_ original: Note, changes: [NoteChange] = []) throws -> Note {
         let started = Date()
         var actions: [String] = []
         let result: (note: Note, operation: String?) = try access { db in try db.transaction {
-            var note = original
-            let previous = try db.note(note.id)
-            // An editor can still hold the revision from before its own preceding
-            // save was acknowledged. A remote merge or another writer must not
-            // grant that older editor permission to overwrite unrelated changes.
-            if let previous, previous.dirty || previous.writer == writer {
-                note.revision = max(note.revision, previous.note.revision)
+            let previous = try db.note(original.id)
+            let state = try db.syncState(original.id)
+            let record = previous.map { NoteClientRecord(note: $0.note, dirty: $0.dirty, baseRevision: state.server?.revision ?? $0.note.revision, server: state.server, legacyBaseline: state.legacyBaseline) }
+            if let previous, previous.dirty, previous.note.replica == nil, try !db.hasJournal(original.id) {
+                try db.append(original.id, NoteJournalEntry(legacy: LegacyNoteChange(id: UUID().uuidString.lowercased(), note: previous.note, baseRevision: previous.note.revision, origin: NoteEngine.origin)))
             }
-            guard previous?.note != note else { return (note,nil) }
-            try db.put(note,dirty:true,writer:writer)
+            let staged = try NoteEngine.shared.stage(original, current: record, changes: changes)
+            let note = staged.note
+            for change in staged.changes { try db.append(note.id, NoteJournalEntry(change: change)) }
+            for change in staged.legacy { try db.append(note.id, NoteJournalEntry(legacy: change)) }
+            let dirty = try db.hasJournal(note.id)
+            guard previous?.note != note || previous?.dirty != dirty else { return (note,nil) }
+            try db.put(note,dirty:dirty,writer:writer)
             if (previous?.note.pinned ?? false) != note.pinned { actions.append("pin") }
             if (previous?.note.urgent ?? false) != note.urgent { actions.append("urgent") }
             if Set(previous?.note.tags ?? []) != Set(note.tags) { actions.append("tag") }
@@ -177,22 +189,21 @@ final class Storage: @unchecked Sendable {
         if observes { for action in actions { Telemetry.shared.record(.editorAction, ["action": action]) } }
         return result.note
     }
-    func accept(_ server: Note, matching local: Note) throws {
+    func accept(_ server: Note, matching local: Note, acknowledged: [String] = []) throws {
         try access { db in try db.transaction {
             guard let record = try db.note(local.id) else { return }
-            if record.note == local { try db.put(server,dirty:false,writer:record.writer) }
-            else if record.note.revision <= server.revision {
-                var newer = record.note
-                newer.revision = server.revision
-                for attachment in server.attachments {
-                    if let index = newer.attachments.firstIndex(where: { $0.id == attachment.id }) {
-                        let previousURL = newer.attachments[index].url
-                        newer.attachments[index] = attachment
-                        newer.body = newer.body.replacingString(previousURL, with: attachment.url)
-                    }
-                }
-                try db.put(newer,dirty:true,writer:record.writer)
+            let sent = try db.journal(local.id)
+            try db.acknowledge(local.id, acknowledged)
+            let remaining = try db.journal(local.id)
+            var state = try db.syncState(local.id)
+            if let last = sent.last(where: { acknowledged.contains($0.id) })?.legacy { state.legacyBaseline = last.note }
+            state.server = server
+            let note = remaining.contains(where: { $0.legacy != nil }) ? record.note : try NoteEngine.shared.receive(record.note.replica != nil ? record.note : nil, server: server)
+            if remaining.isEmpty, let left = note.replica, let right = server.replica, try !NoteEngine.shared.same(left, right) {
+                try db.append(note.id, NoteJournalEntry(change: NoteEngine.shared.recovery(note, server: server)))
             }
+            try db.putSyncState(note.id, state)
+            try db.put(note,dirty: db.hasJournal(note.id),writer:record.writer)
         } }
     }
     /// Checkpoint uploaded URLs before PUT so a lost response retries the same note payload.
@@ -206,33 +217,35 @@ final class Storage: @unchecked Sendable {
                 current.attachments[index] = file
                 current.body = current.body.replacingString(previous.url, with: file.url)
             }
-            try db.put(current,dirty:true,writer:record.writer)
-            return current
+            // Record the upload mapping as a causal change too. Raw journal
+            // inputs retain their original local: URLs for stable retry hashes.
+            let state = try db.syncState(current.id)
+            let staged = try NoteEngine.shared.stage(current, current: NoteClientRecord(note: record.note, dirty: record.dirty, baseRevision: state.server?.revision ?? record.note.revision, server: state.server, legacyBaseline: state.legacyBaseline))
+            for change in staged.changes { try db.append(current.id, NoteJournalEntry(change: change)) }
+            for change in staged.legacy { try db.append(current.id, NoteJournalEntry(legacy: change)) }
+            try db.put(staged.note,dirty:true,writer:record.writer)
+            return staged.note
         } }
     }
-    func merge(_ notes: [Note]) throws {
+    func merge(_ notes: [Note], cursor: Int? = nil) throws {
         try access { db in try db.transaction {
-            for note in notes {
-                let current = try db.note(note.id)
-                if current?.dirty == true || (current?.note.revision ?? -1) > note.revision { continue }
-                if current?.note != note { try db.put(note,dirty:false) }
+            for remote in notes {
+                let current = try db.note(remote.id)
+                var state = try db.syncState(remote.id)
+                if (state.server?.revision ?? -1) > remote.revision { continue }
+                state.server = remote
+                if current?.dirty == true && current?.note.replica == nil {
+                    try db.putSyncState(remote.id, state); continue
+                }
+                let note = try NoteEngine.shared.receive(current?.note, server: remote)
+                if try !db.hasJournal(note.id), let left = note.replica, let right = remote.replica, try !NoteEngine.shared.same(left, right) {
+                    try db.append(note.id, NoteJournalEntry(change: NoteEngine.shared.recovery(note, server: remote)))
+                }
+                try db.putSyncState(note.id, state)
+                if current?.note != note { try db.put(note,dirty: db.hasJournal(note.id)) }
             }
+            if let cursor { try db.putCursor(cursor) }
         } }
-    }
-    @discardableResult func conflict(local: Note, server: Note) throws -> NoteConflict? {
-        let conflict: NoteConflict? = try access { db in try db.transaction {
-            guard let current = try db.note(local.id), current.dirty,
-                  current.note.revision <= local.revision else { return nil }
-            var copy = current.note
-            copy.id = UUID().uuidString.lowercased()
-            copy.title = String(copy.displayTitle.prefix(NoteLimits.generatedTitle)) + " (конфликтная копия)"
-            copy.revision = 0; copy.createdAt = Note.now(); copy.updatedAt = Note.now()
-            try db.put(copy,dirty:true,writer:current.writer)
-            try db.put(server,dirty:false)
-            return NoteConflict(original: current.note, copy: copy)
-        } }
-        if observes && conflict != nil { Telemetry.shared.record(.syncConflict, ["note_id": local.id]) }
-        return conflict
     }
     func addFile(_ data: Data, name: String, mimeType: String) throws -> Attachment {
         let id = UUID().uuidString.lowercased()
@@ -307,10 +320,10 @@ actor SyncService {
     private var syncTrace: TelemetryTrace?
     private var syncLease: (storage: Storage, owner: String)?
     private let session = URLSession(configuration: .ephemeral, delegate: NoRedirects(), delegateQueue: nil)
-    private struct List: Decodable { let notes: [Note] }
+    private struct List: Decodable { let notes: [Note]; let cursor: Int; let more: Bool }
     private struct One: Codable { let note: Note }
-    private struct Put: Encodable { let note: Note; let baseRevision: Int }
-    private struct Conflict: Decodable { let current: Note }
+    private struct Batch: Encodable { var changes: [NoteChange]?; var legacy: [LegacyNoteChange]? }
+    private struct Acknowledgement: Decodable { let note: Note; let acknowledged: [String] }
     private struct Upload: Decodable { let attachment: Attachment }
 
     private func request(_ path: String, method: String = "GET", body: Data? = nil, contentType: String = "application/json") throws -> URLRequest {
@@ -366,7 +379,7 @@ actor SyncService {
         return uploaded
     }
 
-    func sync(pull: Bool = true, onProgress: (@Sendable () async -> Void)? = nil, onUpload: UploadObserver? = nil, onConflict: (@Sendable (NoteConflict) async -> Void)? = nil) async throws {
+    func sync(pull: Bool = true, onProgress: (@Sendable () async -> Void)? = nil, onUpload: UploadObserver? = nil) async throws {
         guard !running else { return }
         guard let account = Connection.account, Connection.signedIn else { return }
         let storage = Storage.shared
@@ -425,17 +438,17 @@ actor SyncService {
                         throw error
                     }
                 }
-                let checkpoint = note
-                let (data, status) = try await response(request("/api/notes/\(note.id)", method: "PUT", body: JSONEncoder().encode(Put(note: note, baseRevision: note.revision))))
-                if status == 409 {
-                    let server = try JSONDecoder().decode(Conflict.self, from: data).current
-                    if let conflict = try storage.conflict(local: checkpoint, server: server) {
-                        await onConflict?(conflict)
-                    }
-                } else {
-                    guard status == 200 || status == 201 else { throw DoompileError.message("Не удалось синхронизировать заметку (\(status)). Она сохранена на устройстве.") }
-                    let server = try JSONDecoder().decode(One.self, from: data).note
-                    try storage.accept(server, matching: checkpoint)
+                for _ in 0..<100 {
+                    let journal = try storage.journal(note.id)
+                    if journal.isEmpty { break }
+                    let legacy = journal.prefix { $0.legacy != nil }.compactMap(\.legacy)
+                    let changes = journal.prefix { $0.change != nil }.compactMap(\.change)
+                    let batch = legacy.isEmpty ? Batch(changes: changes) : Batch(legacy: Array(legacy.prefix(32)))
+                    let (data, status) = try await response(request("/api/notes/\(note.id)/sync", method: "POST", body: JSONEncoder().encode(batch)))
+                    guard status == 200 else { throw DoompileError.message("Не удалось синхронизировать заметку (\(status)). Изменения сохранены на устройстве.") }
+                    let saved = try JSONDecoder().decode(Acknowledgement.self, from: data)
+                    try storage.accept(saved.note, matching: note, acknowledged: saved.acknowledged)
+                    await onProgress?()
                 }
                 await onProgress?()
             } catch DoompileError.authentication {
@@ -450,9 +463,15 @@ actor SyncService {
             }
         }
         if pull {
-            let (data, status) = try await response(request("/api/notes"))
-            guard status == 200 else { throw DoompileError.message("Не удалось получить заметки (\(status)).") }
-            try storage.merge(JSONDecoder().decode(List.self, from: data).notes)
+            for _ in 0..<100 {
+                let cursor = try storage.cursor()
+                let (data, status) = try await response(request("/api/notes?cursor=\(cursor)"))
+                guard status == 200 else { throw DoompileError.message("Не удалось получить заметки (\(status)).") }
+                let page = try JSONDecoder().decode(List.self, from: data)
+                try storage.merge(page.notes, cursor: page.cursor)
+                await onProgress?()
+                if !page.more { break }
+            }
         }
         if !noteErrors.isEmpty {
             throw DoompileError.message("Не удалось синхронизировать \(noteErrors.count) заметок. Они сохранены на устройстве. " + noteErrors.prefix(3).joined(separator: "\n"))

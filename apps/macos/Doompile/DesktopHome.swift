@@ -84,6 +84,12 @@ struct DesktopHome: View {
             try? await Task.sleep(for: .milliseconds(800))
             if !Task.isCancelled { Telemetry.shared.record(.searchPerformed, ["query_length": query.utf16.count, "results": filtered.count]) }
         }
+        .task {
+            while !Task.isCancelled {
+                if phase == .active { await library.sync() }
+                try? await Task.sleep(for: .seconds(3))
+            }
+        }
         .onAppear { NoteLinkEditors.register(composerToken) { do { try quick.persist(); return true } catch { quick.error = error.localizedDescription; return false } } }
         .onDisappear { NoteLinkEditors.unregister(composerToken); quick.finishAndPersist() }
         .onReceive(NotificationCenter.default.publisher(for: NSApplication.willTerminateNotification)) { _ in quick.finishAndPersist() }

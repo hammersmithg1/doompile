@@ -84,7 +84,8 @@ struct DoompileSymbol: View {
         "pencil.line": "dp-highlighter",
         "text.alignleft": "dp-type",
         "list.bullet.indent": "dp-list-tree",
-        "doc.zipper": "dp-file-archive"
+        "doc.zipper": "dp-file-archive",
+        "clock.arrow.circlepath": "dp-history"
     ]
     private static let labels: [String: String] = [
         "dp-arrow-down-to-line": "Скачать",
@@ -142,7 +143,8 @@ struct DoompileSymbol: View {
         "dp-minus": "Разделитель",
         "dp-settings2": "Параметры",
         "dp-grip-vertical": "Переместить",
-        "dp-lock-keyhole": "Доступ"
+        "dp-lock-keyhole": "Доступ",
+        "dp-history": "История версий"
     ]
     var body: some View {
         Group {

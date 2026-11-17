@@ -10,7 +10,7 @@ final class TouchUXTests: XCTestCase {
         if name.contains("testCompactComposerAttachmentAndVoiceStates") {
             app.launchEnvironment["DOOMPILE_UI_COMPOSER_FIXTURE"] = "1"
         }
-        syncReview = name.contains("testAutosavesContinueOnOneConflictBranch")
+        syncReview = name.contains("testOfflineEditsMergeAndHistoryRestoresSameNote")
         if syncReview {
             _ = try syncFixture("POST", path: "/api/review/sync")
             app.launchEnvironment["DOOMPILE_UI_COMPOSER_FIXTURE"] = "1"
@@ -54,7 +54,7 @@ final class TouchUXTests: XCTestCase {
         XCTFail("The isolated sync fixture did not reach the expected state")
         throw URLError(.timedOut)
     }
-    func testAutosavesContinueOnOneConflictBranch() throws {
+    func testOfflineEditsMergeAndHistoryRestoresSameNote() throws {
         let originalID = try XCTUnwrap(try syncFixture()["originalID"] as? String)
         let row = noteRow("Sync review")
         XCTAssertTrue(row.waitForExistence(timeout: 10))
@@ -73,39 +73,38 @@ final class TouchUXTests: XCTestCase {
             }
         }
         screenshot("sync-own-autosaves-editor")
-        XCTAssertEqual(try syncFixture()["conflicts"] as? Int, 0)
-        _ = try syncFixture("POST", path: "/api/review/remote")
+        _ = try syncFixture("POST", path: "/api/review/offline")
         editor.typeText(" local"); expected += " local"
-        _ = try waitForSync { $0["conflicts"] as? Int == 1 }
+        screenshot("sync-offline-editor")
+        _ = try syncFixture("POST", path: "/api/review/remote")
+        _ = try syncFixture("POST", path: "/api/review/online")
         editor.typeText(" newer"); expected += " newer"
-        screenshot("sync-typing-during-conflict")
-        let state = try waitForSync { state in
-            let notes = state["notes"] as? [[String: Any]] ?? []
-            return notes.count == 2 && notes.contains { $0["id"] as? String != originalID && $0["plainText"] as? String == expected }
-        }
-        let notes = try XCTUnwrap(state["notes"] as? [[String: Any]])
-        let copyID = try XCTUnwrap(notes.first { $0["id"] as? String != originalID }?["id"] as? String)
-        XCTAssertEqual(notes.first { $0["id"] as? String == originalID }?["plainText"] as? String, "Remote branch preserved")
-        screenshot("sync-one-local-branch-editor")
-        editor.typeText(" final"); expected += " final"
+        let merged = "Remote " + expected
         _ = try waitForSync { state in
             let notes = state["notes"] as? [[String: Any]] ?? []
-            return notes.count == 2 && notes.contains { $0["id"] as? String == copyID && $0["plainText"] as? String == expected }
+            return notes.count == 1 && notes.first?["id"] as? String == originalID && notes.first?["plainText"] as? String == merged
         }
-        XCTAssertEqual(try syncFixture()["conflicts"] as? Int, 1)
-        app.buttons["Скопировать ссылку на заметку"].tap()
-        app.buttons["close-editor"].tap()
-        XCTAssertTrue(noteRow(expected).waitForExistence(timeout: 5))
-        XCTAssertTrue(noteRow("Remote branch preserved").exists)
-        XCTAssertEqual(app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH 'note-'")).count, 2)
-        screenshot("sync-two-preserved-versions-feed")
-        noteRow("Remote branch preserved").tap()
-        XCTAssertTrue(app.buttons["close-editor"].waitForExistence(timeout: 5))
-        screenshot("sync-remote-branch-reopened")
-        app.buttons["close-editor"].tap()
-        noteRow(expected).tap()
-        XCTAssertTrue(app.buttons["close-editor"].waitForExistence(timeout: 5))
-        screenshot("sync-local-branch-reopened")
+        screenshot("sync-merged-one-note")
+        let marker = try syncFixture("POST", path: "/api/review/marker")
+        let markerRevision = try XCTUnwrap(marker["revision"] as? Int)
+        editor.typeText(" final")
+        _ = try waitForSync { state in
+            let notes = state["notes"] as? [[String: Any]] ?? []
+            return notes.count == 1 && (notes.first?["plainText"] as? String)?.contains(" final") == true
+        }
+        app.buttons["История версий"].tap()
+        let version = app.buttons["history-version-\(markerRevision)"]
+        XCTAssertTrue(version.waitForExistence(timeout: 10))
+        if !version.isHittable { app.scrollViews["Сохранённые версии"].swipeLeft() }
+        version.tap()
+        screenshot("sync-history-preview")
+        app.buttons["Восстановить версию"].tap()
+        _ = try waitForSync { state in
+            let notes = state["notes"] as? [[String: Any]] ?? []
+            return notes.count == 1 && notes.first?["id"] as? String == originalID && notes.first?["plainText"] as? String == merged
+        }
+        XCTAssertEqual(try syncFixture()["conflicts"] as? Int, 0)
+        screenshot("sync-history-restored-one-note")
     }
     private func screenshot(_ name: String) {
         let image = XCTAttachment(screenshot: app.screenshot())

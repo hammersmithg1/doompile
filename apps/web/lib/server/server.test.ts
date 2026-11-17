@@ -229,7 +229,7 @@ test("API handlers enforce auth, revisions, validation, bounded file storage and
       }),
       context,
     );
-    assert.equal(stale.status, 409);
+    assert.equal(stale.status, 426);
     assert.equal((await stale.json()).current.plainText, "Captured quote");
     const invalid = await putNote(
       new Request(url, {

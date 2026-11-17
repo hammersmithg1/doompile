@@ -2,7 +2,7 @@ import { defineConfig } from "@playwright/test";
 export default defineConfig({
   testDir: "./test",
   outputDir: "../../test-results/editor",
-  testMatch: ["editor.spec.ts", "review.spec.ts"],
+  testMatch: ["editor.spec.ts", "review.spec.ts", "replica.spec.ts"],
   fullyParallel: true,
   forbidOnly: !!process.env.CI,
   retries: process.env.CI ? 1 : 0,

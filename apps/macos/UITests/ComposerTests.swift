@@ -29,7 +29,7 @@ import XCTest
         XCTFail("The isolated sync fixture did not reach the expected state")
         throw URLError(.timedOut)
     }
-    func testAutosavesContinueOnOneConflictBranch() throws {
+    func testOfflineEditsMergeAndHistoryRestoresSameNote() throws {
         _ = try syncFixture("POST", path: "/api/review/sync")
         defer { _ = try? syncFixture("POST", path: "/api/review/reset") }
         let originalID = try XCTUnwrap(try syncFixture()["originalID"] as? String)
@@ -52,38 +52,38 @@ import XCTest
             }
         }
         capture("mac-sync-own-autosaves-editor", in: window)
-        XCTAssertEqual(try syncFixture()["conflicts"] as? Int, 0)
-        _ = try syncFixture("POST", path: "/api/review/remote")
+        _ = try syncFixture("POST", path: "/api/review/offline")
         editor.typeText(" local"); expected += " local"
-        _ = try waitForSync { $0["conflicts"] as? Int == 1 }
+        capture("mac-sync-offline-editor", in: window)
+        _ = try syncFixture("POST", path: "/api/review/remote")
+        _ = try syncFixture("POST", path: "/api/review/online")
         editor.typeText(" newer"); expected += " newer"
-        for frame in 0..<4 { capture("mac-sync-conflict-frame-\(frame)", in: window) }
-        let state = try waitForSync { state in
-            let notes = state["notes"] as? [[String: Any]] ?? []
-            return notes.count == 2 && notes.contains { $0["id"] as? String != originalID && $0["plainText"] as? String == expected }
-        }
-        let notes = try XCTUnwrap(state["notes"] as? [[String: Any]])
-        let copyID = try XCTUnwrap(notes.first { $0["id"] as? String != originalID }?["id"] as? String)
-        XCTAssertEqual(notes.first { $0["id"] as? String == originalID }?["plainText"] as? String, "Remote branch preserved")
-        capture("mac-sync-one-local-branch-editor", in: window)
-        editor.typeText(" final"); expected += " final"
+        let merged = "Remote " + expected
         _ = try waitForSync { state in
             let notes = state["notes"] as? [[String: Any]] ?? []
-            return notes.count == 2 && notes.contains { $0["id"] as? String == copyID && $0["plainText"] as? String == expected }
+            return notes.count == 1 && notes.first?["id"] as? String == originalID && notes.first?["plainText"] as? String == merged
         }
-        XCTAssertEqual(try syncFixture()["conflicts"] as? Int, 1)
-        app.buttons["Скопировать ссылку на заметку"].click()
-        let copied = XCTNSPredicateExpectation(predicate: NSPredicate { _, _ in
-            NSPasteboard.general.string(forType: .string)?.hasSuffix("/notes/" + copyID) == true
-        }, object: nil)
-        XCTAssertEqual(XCTWaiter.wait(for: [copied], timeout: 5), .completed)
-        capture("mac-sync-local-link-and-feed", in: window)
-        feed.staticTexts["Remote branch preserved"].click()
-        XCTAssertTrue(app.webViews["Редактор заметки"].textViews.firstMatch.waitForExistence(timeout: 5))
-        capture("mac-sync-remote-branch-reopened", in: window)
-        feed.staticTexts[expected].click()
-        XCTAssertTrue(app.webViews["Редактор заметки"].textViews.firstMatch.waitForExistence(timeout: 5))
-        capture("mac-sync-local-branch-reopened", in: window)
+        capture("mac-sync-merged-one-note", in: window)
+        let marker = try syncFixture("POST", path: "/api/review/marker")
+        let markerRevision = try XCTUnwrap(marker["revision"] as? Int)
+        editor.typeText(" final")
+        _ = try waitForSync { state in
+            let notes = state["notes"] as? [[String: Any]] ?? []
+            return notes.count == 1 && (notes.first?["plainText"] as? String)?.contains(" final") == true
+        }
+        app.buttons["История версий"].click()
+        let version = app.buttons["history-version-\(markerRevision)"]
+        XCTAssertTrue(version.waitForExistence(timeout: 10))
+        if !version.isHittable { app.scrollViews["Сохранённые версии"].scroll(byDeltaX: 0, deltaY: -300) }
+        version.click()
+        capture("mac-sync-history-preview", in: window)
+        app.buttons["Восстановить версию"].click()
+        _ = try waitForSync { state in
+            let notes = state["notes"] as? [[String: Any]] ?? []
+            return notes.count == 1 && notes.first?["id"] as? String == originalID && notes.first?["plainText"] as? String == merged
+        }
+        XCTAssertEqual(try syncFixture()["conflicts"] as? Int, 0)
+        capture("mac-sync-history-restored-one-note", in: window)
     }
     private func launch(dark: Bool = false, global: Bool = false, attachment: Bool = false) -> XCUIApplication {
         continueAfterFailure = false

@@ -20,13 +20,13 @@ final class SQLiteMigrationTests: XCTestCase {
         XCTAssertEqual(try store.snapshot().notes[note.id], note)
         var edited = note
         edited.plainText = "New app edit"
-        try store.save(edited)
+        let saved = try store.save(edited)
         XCTAssertFalse(try XCTUnwrap(database.note(note.id)).writer.isEmpty)
         // Older extensions still use four-column positional writes and do not know
         // about provenance. Their new row version must invalidate the old writer.
         XCTAssertEqual(sqlite3_exec(legacy, "BEGIN IMMEDIATE; UPDATE metadata SET value=value+1 WHERE key='version'; INSERT OR REPLACE INTO notes SELECT id,payload,0,(SELECT value FROM metadata WHERE key='version') FROM notes; COMMIT", nil, nil, nil), SQLITE_OK)
         let record = try XCTUnwrap(database.note(note.id))
-        XCTAssertEqual(record.note, edited)
+        XCTAssertEqual(record.note, saved)
         XCTAssertFalse(record.dirty)
         XCTAssertEqual(record.writer, "")
     }
@@ -93,7 +93,7 @@ final class SQLiteMigrationTests: XCTestCase {
         XCTAssertEqual(reopened.notes[note.id],checkpoint)
         XCTAssertTrue(reopened.dirty.contains(note.id))
         var server=checkpoint; server.revision=1
-        try store.accept(server,matching:checkpoint)
+        try store.accept(server,matching:checkpoint, acknowledged: store.journal(checkpoint.id).map(\.id))
         XCTAssertFalse(try store.snapshot().dirty.contains(note.id))
     }
     func testLocalMediaReadsStoredMIMEBeforeAttachmentIsAddedToNote() throws {

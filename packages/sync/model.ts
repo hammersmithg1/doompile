@@ -32,7 +32,8 @@ export function encode(bytes: Uint8Array): string {
   return btoa(binary);
 }
 export function decode(value: string): Uint8Array {
-  if (value.length > 16 * 1024 * 1024 || !/^(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$/.test(value))
+  const padding = value.indexOf("=");
+  if (value.length > 16 * 1024 * 1024 || value.length % 4 !== 0 || /[^A-Za-z0-9+/=]/.test(value) || padding >= 0 && (padding < value.length - 2 || !/^={1,2}$/.test(value.slice(padding))))
     throw new Error("Invalid replica encoding");
   return Uint8Array.from(atob(value), char => char.charCodeAt(0));
 }
@@ -132,7 +133,8 @@ export function documentPlainText(node: DocumentNode): string {
 }
 export function documentTitle(value: DocumentNode, fallback = ""): string {
   const text = (node: DocumentNode): string => node.type === "sourceSnippet" ? "" : node.type === "noteReference" ? String(node.attrs?.title || "") : node.text ?? node.content?.map(text).join("") ?? "";
-  return (value.content?.map(text).find(item => item.trim()) ?? fallback).slice(0, 160);
+  const result = (value.content?.map(text).find(item => item.trim()) ?? fallback).slice(0, 160);
+  return /[\uD800-\uDBFF]$/.test(result) ? result.slice(0, -1) : result;
 }
 
 /** Apply only the edits made against this exact replica, then merge elsewhere. */

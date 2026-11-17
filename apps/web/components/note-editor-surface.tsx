@@ -24,9 +24,12 @@ import {
   Mic,
   Keyboard,
   Undo2,
+  History,
 } from "../../../packages/design/ui-icons";
 import { type Note, type Attachment, type DocumentNode } from "@doompile/core";
 import NoteTags from "./note-tags";
+import NoteHistory from "./note-history";
+import type { NoteChange } from "../../../packages/sync/changes";
 const RichEditor = dynamic(() => import("./rich-editor"), {
   ssr: false,
   loading: () => <div className="editor-loading">Открываем редактор…</div>,
@@ -50,6 +53,8 @@ export default function NoteEditorSurface({
   onExpand,
   onDelete,
   onChange,
+  onReplica,
+  beforeHistory,
   onTags,
   onBusy,
   onAttachment,
@@ -75,6 +80,8 @@ export default function NoteEditorSurface({
   onExpand: () => void;
   onDelete: () => void;
   onChange: (patch: Partial<Note>) => void;
+  onReplica?: (note: Note, change: NoteChange) => void;
+  beforeHistory?: () => Promise<void>;
   onTags: (tags: string[]) => void;
   onBusy: (busy: boolean) => void;
   onAttachment: (file: File) => Promise<Attachment>;
@@ -85,6 +92,8 @@ export default function NoteEditorSurface({
   const ownAPI = useRef<RichEditorAPI | null>(null);
   const editorAPI = apiRef || ownAPI;
   const [dragging, setDragging] = useState(false);
+  const [history, setHistory] = useState(false);
+  const [historyError, setHistoryError] = useState("");
   const dragDepth = useRef(0);
   const recording = useRecording();
   const recordingTarget = existing ? note.id : "quick";
@@ -195,6 +204,7 @@ export default function NoteEditorSurface({
             )}
             {existing && (
               <>
+                <button type="button" className="editor-action" aria-label="История версий" title="История версий" disabled={busy} onClick={() => { void (async () => { try { await beforeHistory?.(); setHistory(true); } catch { setHistoryError("Не удалось сохранить изменения. Попробуй ещё раз."); } })(); }}><History size={mobile ? 20 : 17}/></button>
                 <button
                   type="button"
                   className="editor-action"
@@ -286,6 +296,7 @@ export default function NoteEditorSurface({
         </div>
       </header>
       <div className="note-editor-scroll">
+        {historyError && <p role="alert">{historyError}</p>}
         <div className="note-editor-document">
           {!mobile && (
             <NoteTags
@@ -296,6 +307,8 @@ export default function NoteEditorSurface({
           )}
           {captureAttachments}
           <RichEditor
+            note={note}
+            onReplica={onReplica}
             autoFocus={!existing}
             onMediaPaste={(attachments) =>
               onChange({
@@ -333,6 +346,7 @@ export default function NoteEditorSurface({
           )}
         </div>
       </div>
+      {history && <NoteHistory noteID={note.id} onClose={() => setHistory(false)} onRestored={restored => onChange(restored)}/>}
       <div
         className="mobile-editor-tools"
         role="toolbar"

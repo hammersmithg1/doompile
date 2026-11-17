@@ -8,6 +8,7 @@ import {
 } from "@doompile/core";
 import { LocalNotes, type StoredRecord } from "./local-notes";
 import { syncOutbox } from "./sync-outbox";
+import type { NoteChange } from "../../../../packages/sync/changes";
 import {
   forgetUpload,
   markUploadFailed,
@@ -46,6 +47,10 @@ let records: Record<string, StoredRecord> = {};
 let database: LocalNotes | undefined;
 let initializing: Promise<void> | undefined;
 let syncing = false;
+let syncFinished = Promise.resolve();
+let finishSync: (() => void) | undefined;
+let writing = Promise.resolve();
+const retainedRaw: { note: Note; changes: NoteChange[] }[] = [];
 let syncRequested = false;
 let channel: BroadcastChannel | undefined;
 const transferring = new Set<string>();
@@ -166,7 +171,7 @@ export function initStore(): Promise<void> {
               retryUploads(id);
           void sync();
         }
-      }, 20_000);
+      }, 3_000);
     } catch (error) {
       track("storage.failed", { operation: "read", ...errorProperties(error) });
       initializing = undefined;
@@ -180,7 +185,23 @@ export function initStore(): Promise<void> {
   })();
   return initializing;
 }
-export async function saveNote(input: Note, uploads: QuickUpload[] = []) {
+export function saveNote(input: Note, uploads: QuickUpload[] = [], changes: NoteChange[] = []) {
+  const task = writing.then(async () => {
+    await initStore();
+    while (retainedRaw.length) {
+      const raw = retainedRaw[0];
+      await changed(await database!.save(raw.note, [], raw.changes));
+      retainedRaw.shift();
+    }
+    await persistNote(input, uploads, changes);
+  }).catch(error => {
+    if (changes.length && !retainedRaw.some(raw => raw.changes.some(change => changes.some(item => item.id === change.id)))) retainedRaw.push({ note: input, changes });
+    throw error;
+  });
+  writing = task.catch(() => {});
+  return task;
+}
+async function persistNote(input: Note, uploads: QuickUpload[] = [], changes: NoteChange[] = []) {
   const started = performance.now();
   try {
     await initStore();
@@ -197,7 +218,7 @@ export async function saveNote(input: Note, uploads: QuickUpload[] = []) {
       : previous
         ? "update"
         : "create";
-    await changed(await database.save(parsed.data, uploads));
+    await changed(await database.save(parsed.data, uploads, changes));
     track("note.saved", {
       note_id: parsed.data.id,
       operation,
@@ -277,13 +298,14 @@ export async function sync(pull = true) {
   if (!snapshot.ready || !database) return;
   if (syncing) {
     if (!pull) syncRequested = true;
-    return;
+    return syncFinished;
   }
   if (!navigator.onLine) {
     emit({ status: "offline" });
     return;
   }
   syncing = true;
+  syncFinished = new Promise(resolve => { finishSync = resolve; });
   const started = performance.now(),
     trace = newTrace();
   try {
@@ -362,6 +384,7 @@ export async function sync(pull = true) {
     });
   } finally {
     syncing = false;
+    finishSync?.(); finishSync = undefined;
     void flushTelemetry();
     if (syncRequested) {
       syncRequested = false;
@@ -386,4 +409,12 @@ export async function clearLocalData() {
       clear,
     );
   else await clear();
+}
+
+export async function prepareHistory(id: string) {
+  await initStore(); await writing; await sync(false);
+  if ((await database!.read([id]))[0]?.dirty) throw new Error("Сначала нужно отправить изменения этой заметки. Они сохранены на устройстве.");
+}
+export async function receiveNotes(notes: Note[]) {
+  await initStore(); await changed(await database!.merge(notes));
 }

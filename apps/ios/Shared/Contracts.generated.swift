@@ -2,7 +2,7 @@
 import Foundation
 
 enum Contracts {
-    static let apiVersion = 1
+    static let apiVersion = 2
     static let documentVersion = 1
     static let autosaveMilliseconds = 600
 }

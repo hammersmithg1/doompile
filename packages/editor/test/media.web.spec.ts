@@ -1,4 +1,4 @@
-import { test, expect, mockMicrophone, type Page } from "./web-test";
+import { test, expect, mockNotes, mockMicrophone, type Page } from "./web-test";
 const firstID = "a6ad6431-ad38-4533-92a0-c337487ef00b";
 const file = (
   name: string,
@@ -42,21 +42,7 @@ async function setup(
   const writes: any[] = [],
     uploads: any[] = [];
   let failUpload = false;
-  await page.route("**/api/notes", (route) =>
-    route.fulfill({ json: { notes: notes.filter((note) => !note.deletedAt) } }),
-  );
-  await page.route("**/api/notes/*", async (route) => {
-    const { note } = route.request().postDataJSON();
-    const saved = {
-      ...note,
-      revision: (notes.find((item) => item.id === note.id)?.revision || 0) + 1,
-    };
-    const index = notes.findIndex((item) => item.id === saved.id);
-    if (index < 0) notes.push(saved);
-    else notes[index] = saved;
-    writes.push(saved);
-    await route.fulfill({ json: { note: saved } });
-  });
+  const server = await mockNotes(page, notes, writes);
   await page.route("**/api/attachments", async (route) => {
     uploads.push(route.request().postDataBuffer());
     if (failUpload)
@@ -120,9 +106,9 @@ test("opening a cached note follows the newer server copy without autosaving the
   const remote = new Promise<void>((resolve) => {
     release = resolve;
   });
-  await page.route("**/api/notes", async (route) => {
+  await page.route("**/api/notes?**", async (route) => {
     await remote;
-    await route.fulfill({ json: { notes: app.notes } });
+    await route.fallback();
   });
   const editor = page.getByRole("textbox", { name: "Текст заметки" });
   try {

@@ -8,7 +8,7 @@ import { join } from "node:path";
 import { createNote, noteURL, noteIDFromURL } from "@doompile/core";
 import { store } from "./store";
 import { GET, PUT } from "../../app/api/notes/[id]/route";
-test("an authenticated agent can resolve a note link, check a task and preserve revision checks", async () => {
+test("an authenticated agent can resolve a note link, check a task and merge stale writes into the same note", async () => {
   const directory = mkdtempSync(join(tmpdir(), "doompile-note-link-"));
   const oldDirectory = process.env.DOOMPILE_DATA_DIR,
     oldToken = process.env.DOOMPILE_API_TOKEN;
@@ -47,13 +47,14 @@ test("an authenticated agent can resolve a note link, check a task and preserve 
       headers = {
         Authorization: `Bearer ${account.token}`,
         "Content-Type": "application/json",
+        "X-Doompile-API-Version": "2",
       };
     assert.equal((await GET(new Request(endpoint), context)).status, 401);
     const response = await GET(new Request(endpoint, { headers }), context);
     assert.equal(response.status, 200);
     assert.match(response.headers.get("cache-control") || "", /no-store/);
     const fetched = (await response.json()).note;
-    fetched.body.content[0].content[0].attrs.checked = true;
+    fetched.body.content.find((node: { type: string }) => node.type === "taskList").content[0].attrs.checked = true;
     const body = JSON.stringify({
       note: fetched,
       baseRevision: fetched.revision,
@@ -64,7 +65,7 @@ test("an authenticated agent can resolve a note link, check a task and preserve 
     );
     assert.equal(saved.status, 200);
     assert.equal(
-      (await saved.json()).note.body.content[0].content[0].attrs.checked,
+      (await saved.json()).note.body.content.find((node: { type: string }) => node.type === "taskList").content[0].attrs.checked,
       true,
     );
     fetched.plainText = "Stale change";
@@ -82,13 +83,12 @@ test("an authenticated agent can resolve a note link, check a task and preserve 
           context,
         )
       ).status,
-      409,
+      200,
     );
-    const current = repository.get(id)!;
-    repository.save(
-      { ...current, deletedAt: new Date().toISOString() },
-      current.revision,
-    );
+    const current = repository.versions.get(id)!;
+    const { capture } = await import("../../../../packages/sync/changes");
+    const deletion = capture({ ...current, deletedAt: new Date().toISOString() }, "web");
+    repository.versions.sync(id, [deletion.change!]);
     assert.equal(
       (await GET(new Request(endpoint, { headers }), context)).status,
       404,

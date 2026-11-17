@@ -8,6 +8,7 @@ import {
 } from "../../../../lib/server/http";
 import { store } from "../../../../lib/server/store";
 import { serverEvent } from "../../../../lib/server/telemetry";
+import { capture } from "../../../../../../packages/sync/changes";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -24,7 +25,7 @@ export async function GET(
   return api(request, async (user) => {
     const { id } = await context.params;
     if (!noteIDPattern.test(id)) throw new RequestError("Invalid note ID.");
-    const note = store(user.id).get(id.toLowerCase());
+    const note = store(user.id).versions.get(id.toLowerCase());
     if (!note || note.deletedAt) throw new RequestError("Note not found.", 404);
     return Response.json(
       { note },
@@ -49,6 +50,11 @@ export async function PUT(
       );
     if (id !== parsed.data.note.id)
       throw new RequestError("Note ID does not match URL.");
+    if (request.headers.get("X-Doompile-API-Version") === "2" && parsed.data.note.replica) {
+      const captured = capture(parsed.data.note, "web");
+      return Response.json(store(user.id).versions.sync(id, captured.change ? [captured.change] : []));
+    }
+    store(user.id).versions.get(id);
     const saved = store(user.id).save(parsed.data.note, parsed.data.baseRevision);
     if (saved.ok) serverEvent("note.committed", {
       note_id: saved.note.id,
@@ -63,7 +69,7 @@ export async function PUT(
             error: "This note has changed on another device.",
             current: saved.current,
           },
-          { status: 409 },
+          { status: saved.upgrade ? 426 : 409 },
         );
   });
 }

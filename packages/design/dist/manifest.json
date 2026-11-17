@@ -225,16 +225,19 @@
     "packages/design/dist/icons/lock-keyhole.svg": "c22aed81a9ebc37e27a4f7e3602ae786ac4c329aa3bb9ab88cce5238b5389c4c",
     "packages/design/BrandAssets.xcassets/dp-lock-keyhole.imageset/lock-keyhole.svg": "c22aed81a9ebc37e27a4f7e3602ae786ac4c329aa3bb9ab88cce5238b5389c4c",
     "packages/design/BrandAssets.xcassets/dp-lock-keyhole.imageset/Contents.json": "d97638f65b324ddd3f2239cd19b0edb28adece7a9e34bc7161de0c632e647234",
+    "packages/design/dist/icons/history.svg": "a90703927c177f94b4684f552df7bda874ff25c377f88f6825de382a6418c20c",
+    "packages/design/BrandAssets.xcassets/dp-history.imageset/history.svg": "a90703927c177f94b4684f552df7bda874ff25c377f88f6825de382a6418c20c",
+    "packages/design/BrandAssets.xcassets/dp-history.imageset/Contents.json": "4424a123503826ca3757c5619f059b257da442a8e0f442765408c4c19f4b1477",
     "apps/web/public/brand/void.png": "9a0677a57bd29a8de8d90da5d214fd0eb44a9f2190880a6b61c7f73cdc66439a",
     "packages/design/BrandAssets.xcassets/dp-void.imageset/void.png": "9a0677a57bd29a8de8d90da5d214fd0eb44a9f2190880a6b61c7f73cdc66439a",
     "packages/design/BrandAssets.xcassets/dp-void.imageset/Contents.json": "886c31f6eb42ce8e0e58437f85ed62893a7ab509ed546993e6ad43c8e3084794",
     "apps/web/public/brand/cat.png": "4c4f726a2aab548e680c2cc26f02bf46cee09f8e042131b9affbe054c6edaca8",
     "packages/design/BrandAssets.xcassets/dp-cat.imageset/cat.png": "4c4f726a2aab548e680c2cc26f02bf46cee09f8e042131b9affbe054c6edaca8",
     "packages/design/BrandAssets.xcassets/dp-cat.imageset/Contents.json": "ed5a4ab6b1d568723c7e813ab2c961f0162b4f3e2b1197d7c94c1f1a84e4c067",
-    "packages/design/ui-icons.tsx": "e770feb9bb2b0927eaa2c561b4c4a4ba4d29099d5c0f7895d0100da01b7cea7e",
+    "packages/design/ui-icons.tsx": "df55c3084a5374771f95607086ae36d2cdf80173220ab84e4df1d91e529f2783",
     "packages/design/copy.ts": "370cdc8edde0622a188aca540207fbe722a39b5d1a9063fb1decf47e3a574503",
-    "extensions/clipper/src/design.generated.js": "8770241735e18f3a6a1ea68d3923af00d8fa994d48a122f528ce8a68a2cffa8f",
-    "apps/ios/Shared/Brand.generated.swift": "d0c419a93817b8d21066a2c064429d3633d095bed1844f0064b23081da851041",
-    "docs/design/preview.html": "1717ea93cdf19eb507f01753ce39ae122c3992a5349c5c0cf97eab2a34465ac7"
+    "extensions/clipper/src/design.generated.js": "d1a0cbc6200f1fdc9993f145376a35d4b252b5a3e968e530347a6873b3fd68c3",
+    "apps/ios/Shared/Brand.generated.swift": "c777f9f154643c557ce83452fee8ccc12ce36cd93bb685034563cd91d012b95d",
+    "docs/design/preview.html": "ae7fdd9485d76ea79e71297f0eb05ea724977c019a3c306a70f12349c9de57fb"
   }
 }
