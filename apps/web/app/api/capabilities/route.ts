@@ -16,7 +16,7 @@ export function GET(request: Request) {
       limits: NOTE_LIMITS,
       editorActions: EDITOR_ACTIONS,
       unknownBlocks: "preserve",
-      conflicts: "keep-both",
+      conflicts: "merge",
     }),
   );
 }
