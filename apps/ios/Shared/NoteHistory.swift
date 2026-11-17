@@ -12,7 +12,9 @@ struct NoteVersion: Decodable, Identifiable {
     var id: Int { revision }
     var dateLabel: String {
         let format = ISO8601DateFormatter(); format.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
-        guard let date = format.date(from: createdAt) else { return createdAt }
+        var date = format.date(from: authoredAt)
+        if date == nil { format.formatOptions = [.withInternetDateTime]; date = format.date(from: authoredAt) }
+        guard let date else { return authoredAt }
         let display = DateFormatter(); display.locale = Locale(identifier: "ru_RU"); display.dateFormat = "d MMM, HH:mm:ss"
         return display.string(from: date)
     }

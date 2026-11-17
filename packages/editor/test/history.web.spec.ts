@@ -74,5 +74,11 @@ test("two browser devices keep offline edits across restart and restore history 
     expect(server.versions.get(note.id)!.revision).toBeGreaterThan(mergedRevision);
     expect(server.versions.version(note.id, mergedRevision)?.plainText).toBe("Первое Общий текст второе");
     await page.screenshot({ path: `${captures}/restored-${info.project.name}.png` });
+    await page.emulateMedia({ reducedMotion: "reduce" });
+    await page.getByRole("button", { name: "История версий", exact: true }).click();
+    await expect(dialog.getByRole("textbox", { name: "Текст заметки" })).toHaveText("Общий текст");
+    expect(await dialog.evaluate(element => parseFloat(getComputedStyle(element).animationDuration))).toBeLessThanOrEqual(0.001);
+    await page.screenshot({ path: `${captures}/history-reduced-motion-${info.project.name}.png` });
+    await dialog.getByRole("button", { name: "Закрыть историю" }).click();
   } finally { await context.close(); }
 });
