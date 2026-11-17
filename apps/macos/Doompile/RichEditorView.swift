@@ -199,8 +199,8 @@ struct MacRichEditorView: NSViewRepresentable {
             if ProcessInfo.processInfo.environment["DOOMPILE_MAC_UI_TRACE"] == "1", ["reviewInput", "replica"].contains(type),
                let root = ProcessInfo.processInfo.environment["DOOMPILE_MAC_UI_ROOT"],
                var data = try? JSONSerialization.data(withJSONObject: payload) {
-                let folder = URL(fileURLWithPath: root); try? FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
-                let file = folder.appendingPathComponent("input-trace.jsonl"); data.append(10)
+                let folder = URL(fileURLWithPath: "/tmp/doompile-native-input-traces"); try? FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true, attributes: [.posixPermissions: 0o700])
+                let file = folder.appendingPathComponent(URL(fileURLWithPath: root).lastPathComponent + ".jsonl"); data.append(10)
                 if !FileManager.default.fileExists(atPath: file.path) { try? data.write(to: file) }
                 else if let handle = try? FileHandle(forWritingTo: file) { _ = try? handle.seekToEnd(); try? handle.write(contentsOf: data); try? handle.close() }
             }

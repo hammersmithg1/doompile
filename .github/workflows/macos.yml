@@ -150,6 +150,7 @@ jobs:
             ${{ runner.temp }}/MacComposer-attachments
             ${{ runner.temp }}/MacComposer.xcresult
             ${{ runner.temp }}/mac-composer-fixture.log
+            /tmp/doompile-native-input-traces
           if-no-files-found: warn
           retention-days: 14
       - name: Verify signed update delivery with an ephemeral test key
