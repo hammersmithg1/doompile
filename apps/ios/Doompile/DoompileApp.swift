@@ -178,6 +178,12 @@ private enum FeedItem: Identifiable {
                     if index == 2 {
                         note.source = NoteSource(url: "https://example.com/?doompile=source", title: "Сохранённая статья", quote: "Цитата отделена от комментария, как в вебе.")
                     }
+                    // A relaunch deliberately rebuilds these fixed fixture IDs.
+                    // Restore them against their current deletion context.
+                    if let state = try? Storage.shared.snapshot(), let current = state.notes[note.id] {
+                        note.body = note.editorDocument
+                        note.replica = current.replica; note.revision = current.revision
+                    }
                     try? Storage.shared.save(note)
                 }
             }
