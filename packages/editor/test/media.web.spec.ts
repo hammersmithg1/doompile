@@ -113,7 +113,9 @@ test("opening a cached note follows the newer server copy without autosaving the
   const editor = page.getByRole("textbox", { name: "Текст заметки" });
   try {
     await page.reload({ waitUntil: "domcontentloaded" });
-    await expect(editor).toContainText("Локальная копия");
+    // A cold reload also fetches the editor bundle. Keep the remote response
+    // blocked while allowing that local editor to finish loading on CI.
+    await expect(editor).toContainText("Локальная копия", { timeout: 15_000 });
   } finally {
     release();
   }

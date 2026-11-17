@@ -39,8 +39,8 @@ import XCTest
         let row = feed.staticTexts["Sync review"]
         XCTAssertTrue(row.waitForExistence(timeout: 10))
         row.click()
-        let editor = app.webViews["Редактор заметки"].textViews.firstMatch
-        XCTAssertTrue(editor.waitForExistence(timeout: 8))
+        let editor = app.webViews.textViews["Текст заметки"].firstMatch
+        XCTAssertTrue(editor.waitForExistence(timeout: 8), app.debugDescription)
         editor.click()
         app.typeKey(.downArrow, modifierFlags: .command)
         var expected = "Sync review"
