@@ -3,7 +3,7 @@ import XCTest
 
 @MainActor final class ComposerTests: XCTestCase {
     private final class SyncResponse: @unchecked Sendable {
-        let ready = DispatchSemaphore(value: 0)
+        let ready = XCTestExpectation(description: "Local sync fixture response")
         var data: Data?
         var status: Int?
     }
@@ -13,9 +13,9 @@ import XCTest
         let result = SyncResponse()
         URLSession.shared.dataTask(with: request) { data, response, _ in
             result.data = data; result.status = (response as? HTTPURLResponse)?.statusCode
-            result.ready.signal()
+            result.ready.fulfill()
         }.resume()
-        guard result.ready.wait(timeout: .now() + 6) == .success,
+        guard XCTWaiter.wait(for: [result.ready], timeout: 6) == .completed,
               result.status == 200, let data = result.data else { throw URLError(.badServerResponse) }
         return try XCTUnwrap(JSONSerialization.jsonObject(with: data) as? [String: Any])
     }
