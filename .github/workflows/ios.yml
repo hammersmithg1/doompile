@@ -171,7 +171,7 @@ jobs:
             "${filter_args[@]}" -destination "platform=iOS Simulator,id=$simulator_id" \
             -derivedDataPath "$RUNNER_TEMP/DerivedData" \
             -resultBundlePath "$RUNNER_TEMP/iOS-Touch.xcresult" \
-            -parallel-testing-enabled NO -retry-tests-on-failure -test-iterations 2 \
+            -parallel-testing-enabled NO -test-iterations 3 \
             CODE_SIGNING_ALLOWED=YES CODE_SIGN_IDENTITY=- test
       - name: Export touch test attachments
         if: >-
