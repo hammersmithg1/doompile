@@ -172,10 +172,26 @@ private final class HistoryPreviewCoordinator: NSObject, WKScriptMessageHandler,
     }
     func makeView() -> WKWebView {
         let config = WKWebViewConfiguration(); config.userContentController.add(self, name: "doompile")
+        let startup = """
+        (() => {
+          const apply = () => {
+            if (!document.documentElement) return false;
+            document.documentElement.dataset.theme = '\(theme)';
+            return true;
+          };
+          if (!apply()) {
+            const observer = new MutationObserver(() => { if (apply()) observer.disconnect(); });
+            observer.observe(document, { childList: true });
+          }
+        })();
+        """
+        config.userContentController.addUserScript(WKUserScript(source: startup, injectionTime: .atDocumentStart, forMainFrameOnly: true))
         media.note = note
         config.setURLSchemeHandler(media, forURLScheme: "doompile-media")
         let view = WKWebView(frame: .zero, configuration: config); webView = view; view.navigationDelegate = self
+        view.underPageBackgroundColor = .clear
         #if os(iOS)
+        view.isOpaque = false; view.backgroundColor = .clear; view.scrollView.backgroundColor = .clear
         view.accessibilityIdentifier = "history-preview"
         view.accessibilityLabel = "Версия заметки"
         #else
