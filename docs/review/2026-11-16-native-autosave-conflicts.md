@@ -1,5 +1,9 @@
 # Native autosave conflict regression
 
+Superseded by [replicated synchronization and note history](2026-11-17-sync-and-history.md).
+The copy-based candidate below was not released. The new protocol merges changes
+under the same note ID and preserves authored variants in version history.
+
 Candidate branch: `fix/native-autosave-conflicts`, based on `bd68887`.
 
 The shared native store wrote the editor's old revision back to SQLite even after

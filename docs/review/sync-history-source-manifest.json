@@ -1,0 +1,21 @@
+{
+  "commit": "2cd40a5",
+  "sources": {
+    "apps/ios/Shared/NoteHistory.swift": "2cd170116564a600f43ae4efed59061c39fadbc4b21e6d885b44b7b66d695369",
+    "apps/ios/Doompile/RichEditorView.swift": "4ea7286470e2d02f258683aede4dbe0ddfd0d94f730f61dfa940547d2de0d7d5",
+    "apps/ios/Doompile/DoompileApp.swift": "b9c7bdc0bc4d002b0806c6eacb256ce4e362ec51a4eb4493a2166afc208f86ec",
+    "apps/macos/Doompile/DesktopHome.swift": "5063c53f3ca09ef9261dce75079578c846ff71e9be09c86149191f20d371c273",
+    "apps/macos/Doompile/RichEditorView.swift": "dbb9a262f038f525f7f03a618b1f552a6a3f046a3cf718c06a269b69d6509d50",
+    "apps/macos/Doompile/DoompileApp.swift": "f49b10455a1181456630710f1b9b18043b0f28c8c5e339fe9e73286b57bf13b5",
+    "apps/web/components/note-history.tsx": "f2f8f2fa54e89dca7d7034b666707eeb7aa6e845a83963cac4c80913fee77e13",
+    "apps/web/components/rich-editor.tsx": "25284593915402db9f09d9a660a979663cd345022e99bb28c083e4e8e4d7a066",
+    "apps/web/app/globals.css": "8cc75fa64fccf0c1e0afce79aa7e4b95c5d866d0498c2ed348fbd4c49a27bb54",
+    "packages/editor/src/editor.ts": "3a9e0154d520094db3a5c775dae1516998c1f2a8b310b85bfec8c57ab4d31ad1",
+    "packages/editor/src/block-editor.ts": "34405b094381c588560f07557c0f6bb1d3d3429158b8d89516afd1dc6ef35ce1"
+  },
+  "review_sources": {
+    "web": "e13e423",
+    "iphone": "7b3f3a7",
+    "macos": "5735980"
+  }
+}
