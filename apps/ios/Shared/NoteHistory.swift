@@ -123,6 +123,7 @@ struct NoteHistoryView: View {
                         }.frame(maxWidth: .infinity, alignment: .leading).padding(12)
                             .background(selected == version.revision ? DesignTokens.limeSoft : .clear, in: RoundedRectangle(cornerRadius: 10))
                     }.buttonStyle(.plain).disabled(restoring).accessibilityIdentifier("history-version-\(version.revision)")
+                        .accessibilityAddTraits(selected == version.revision ? .isSelected : [])
                 }
                 if loading { ProgressView().padding() }
                 if !loading && versions.isEmpty { Text("История появится после синхронизации заметки.").font(.system(size: 13)).foregroundStyle(DesignTokens.muted).padding() }

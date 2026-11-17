@@ -87,15 +87,16 @@ import XCTest
         let versions = app.scrollViews["Сохранённые версии"]
         for _ in 0..<12 {
             let center = CGPoint(x: version.frame.midX, y: version.frame.midY)
-            if versions.frame.contains(center) { break }
+            if versions.frame.insetBy(dx: 0, dy: 60).contains(center) { break }
             versions.scroll(byDeltaX: 0, deltaY: center.y < versions.frame.minY ? 180 : -180)
         }
         version.click()
+        XCTAssertTrue(version.isSelected, app.debugDescription)
         let preview = app.descendants(matching: .any)["history-preview"].firstMatch
         let previewReady = XCTNSPredicateExpectation(predicate: NSPredicate { _, _ in
             preview.descendants(matching: .textView).allElementsBoundByIndex.contains { ($0.value as? String)?.trimmingCharacters(in: .whitespacesAndNewlines) == merged }
         }, object: nil)
-        XCTAssertEqual(XCTWaiter.wait(for: [previewReady], timeout: 10), .completed)
+        XCTAssertEqual(XCTWaiter.wait(for: [previewReady], timeout: 10), .completed, app.debugDescription)
         capture("mac-sync-history-preview", in: window)
         app.buttons["Восстановить версию"].click()
         _ = try waitForSync { state in

@@ -116,15 +116,16 @@ final class TouchUXTests: XCTestCase {
         let versions = app.scrollViews["Сохранённые версии"]
         for _ in 0..<12 {
             let center = CGPoint(x: version.frame.midX, y: version.frame.midY)
-            if versions.frame.insetBy(dx: 10, dy: 0).contains(center) { break }
+            if versions.frame.insetBy(dx: 60, dy: 0).contains(center) { break }
             if center.x < versions.frame.minX { versions.swipeRight() } else { versions.swipeLeft() }
         }
         version.tap()
+        XCTAssertTrue(version.isSelected, app.debugDescription)
         let preview = app.descendants(matching: .any)["history-preview"].firstMatch
         let previewReady = XCTNSPredicateExpectation(predicate: NSPredicate { _, _ in
             preview.descendants(matching: .textView).allElementsBoundByIndex.contains { ($0.value as? String)?.trimmingCharacters(in: .whitespacesAndNewlines) == merged }
         }, object: nil)
-        XCTAssertEqual(XCTWaiter.wait(for: [previewReady], timeout: 10), .completed)
+        XCTAssertEqual(XCTWaiter.wait(for: [previewReady], timeout: 10), .completed, app.debugDescription)
         screenshot("sync-history-preview")
         app.buttons["Восстановить версию"].tap()
         _ = try waitForSync { state in
