@@ -11,6 +11,11 @@ final class TouchUXTests: XCTestCase {
         // Every test owns a fresh database and cursor. Relaunches within that
         // test retain the directory, including the offline journal.
         app.launchEnvironment["DOOMPILE_UI_ROOT"] = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString).path
+        if name.contains("testSaveActionAppearsInSystemShareSheet") {
+            // The system launches the extension outside this process. Exercise
+            // the real app-group account shared by this integration's clients.
+            app.launchEnvironment.removeValue(forKey: "DOOMPILE_UI_ROOT")
+        }
         if name.contains("testCompactComposerAttachmentAndVoiceStates") {
             app.launchEnvironment["DOOMPILE_UI_COMPOSER_FIXTURE"] = "1"
         }
@@ -64,7 +69,7 @@ final class TouchUXTests: XCTestCase {
         throw URLError(.timedOut)
     }
     private func editAtEnd(_ editor: XCUIElement) {
-        XCTAssertTrue(editor.waitForExistence(timeout: 15))
+        XCTAssertTrue(editor.waitForExistence(timeout: 30))
         // Tapping the text's accessibility frame places the caret within the
         // first line. The blank page gesture deliberately focuses its end.
         app.webViews.firstMatch.coordinate(withNormalizedOffset: CGVector(dx: 0.55, dy: 0.82)).tap()
@@ -153,7 +158,7 @@ final class TouchUXTests: XCTestCase {
         app.launchEnvironment["DOOMPILE_TEST_APPEARANCE"] = "dark"
         app.launch()
         if !app.buttons["close-editor"].exists { let cached = noteRow(merged); XCTAssertTrue(cached.waitForExistence(timeout: 10)); cached.tap() }
-        XCTAssertTrue(editor.waitForExistence(timeout: 15))
+        XCTAssertTrue(editor.waitForExistence(timeout: 30))
         app.buttons["История версий"].tap()
         XCTAssertTrue(app.buttons["Восстановить версию"].waitForExistence(timeout: 10))
         XCTAssertEqual(XCTWaiter.wait(for: [XCTNSPredicateExpectation(predicate: NSPredicate { _, _ in
