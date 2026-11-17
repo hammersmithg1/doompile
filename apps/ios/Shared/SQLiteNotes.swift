@@ -114,10 +114,10 @@ final class SQLiteNotes {
         try write("DELETE FROM sync_lease WHERE id=1 AND owner=?", [owner])
     }
     func pendingNotes() throws -> [Note] {
-        try rows("SELECT payload FROM notes WHERE dirty=1").map { try decoder.decode(Note.self, from: Data($0[0].utf8)) }
+        try rows("SELECT payload FROM notes WHERE dirty=1 OR EXISTS (SELECT 1 FROM note_journal j WHERE j.note_id=notes.id)").map { try decoder.decode(Note.self, from: Data($0[0].utf8)) }
     }
     func note(_ id: String) throws -> (note: Note, dirty: Bool, writer: String)? {
-        guard let row = try rows("SELECT n.payload,n.dirty,COALESCE(w.writer,'') FROM notes n LEFT JOIN note_writers w ON n.id=w.id AND n.version=w.version WHERE n.id=?",[id]).first else { return nil }
+        guard let row = try rows("SELECT n.payload,CASE WHEN n.dirty=1 OR EXISTS(SELECT 1 FROM note_journal j WHERE j.note_id=n.id) THEN 1 ELSE 0 END,COALESCE(w.writer,'') FROM notes n LEFT JOIN note_writers w ON n.id=w.id AND n.version=w.version WHERE n.id=?",[id]).first else { return nil }
         return (try decoder.decode(Note.self, from:Data(row[0].utf8)),row[1] == "1",row[2])
     }
     func put(_ note: Note, dirty: Bool, writer: String = "") throws {
@@ -127,10 +127,16 @@ final class SQLiteNotes {
         try write("INSERT INTO note_writers VALUES (?,?,?) ON CONFLICT(id) DO UPDATE SET version=excluded.version,writer=excluded.writer",[note.id,version,writer])
     }
     func journal(_ id: String, limit: Int = 64) throws -> [NoteJournalEntry] {
-        try rows("SELECT payload FROM note_journal WHERE note_id=? ORDER BY seq LIMIT ?", [id, String(limit)]).map { try decoder.decode(NoteJournalEntry.self, from: Data($0[0].utf8)) }
+        try rows("SELECT payload FROM note_journal WHERE note_id=? ORDER BY seq LIMIT ?", [id, String(limit)]).map {
+            let row = try decoder.decode(NoteJournalEntry.self, from: Data($0[0].utf8))
+            guard UUID(uuidString: row.id) != nil, (row.change == nil) != (row.legacy == nil) else { throw DoompileError.message("Не удалось прочитать сохранённое изменение заметки. Журнал сохранён на устройстве.") }
+            return row
+        }
     }
+    func allNotes() throws -> [Note] { try rows("SELECT payload FROM notes").map { try decoder.decode(Note.self, from: Data($0[0].utf8)) } }
     func hasJournal(_ id: String) throws -> Bool { try !rows("SELECT 1 FROM note_journal WHERE note_id=? LIMIT 1", [id]).isEmpty }
     func append(_ id: String, _ entry: NoteJournalEntry) throws {
+        guard UUID(uuidString: entry.id) != nil else { throw DoompileError.message("Некорректный идентификатор сохранённого изменения.") }
         let payload = String(decoding: try encoder.encode(entry), as: UTF8.self)
         // The identifier and payload are immutable across upload retries.
         if let existing = try rows("SELECT payload FROM note_journal WHERE note_id=? AND change_id=?", [id, entry.id]).first {
@@ -165,7 +171,7 @@ final class SQLiteNotes {
             let current = try version()
             var next = current < cachedVersion ? DiskState() : cached
             let since = current < cachedVersion ? 0 : cachedVersion
-            for row in try rows("SELECT id,payload,dirty FROM notes WHERE version>?",[String(since)]) {
+            for row in try rows("SELECT id,payload,CASE WHEN dirty=1 OR EXISTS(SELECT 1 FROM note_journal j WHERE j.note_id=notes.id) THEN 1 ELSE 0 END FROM notes WHERE version>?",[String(since)]) {
                 next.notes[row[0]] = try decoder.decode(Note.self,from:Data(row[1].utf8))
                 decodedSnapshotNotes += 1
                 if row[2] == "1" { next.dirty.insert(row[0]) } else { next.dirty.remove(row[0]) }

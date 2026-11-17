@@ -1,6 +1,11 @@
 import Foundation
 import SwiftUI
 import WebKit
+#if os(iOS)
+import UIKit
+#else
+import AppKit
+#endif
 
 struct NoteVersion: Decodable, Identifiable {
     var revision: Int; var parentRevision: Int?; var createdAt: String; var authoredAt: String; var origin: String; var kind: String
@@ -138,10 +143,13 @@ struct NoteHistoryView: View {
     }
 }
 
-private final class HistoryPreviewCoordinator: NSObject, WKScriptMessageHandler {
+private final class HistoryPreviewCoordinator: NSObject, WKScriptMessageHandler, WKNavigationDelegate {
     var note: Note; var theme: String; weak var webView: WKWebView?; var ready = false
-    init(note: Note, theme: String) { self.note = note; self.theme = theme }
+    private let media = HistoryMediaHandler()
+    private let openLink: (URL) -> Void
+    init(note: Note, theme: String, openLink: @escaping (URL) -> Void) { self.note = note; self.theme = theme; self.openLink = openLink }
     func render() {
+        media.note = note
         guard ready, let data = try? JSONEncoder().encode(note.body), let json = String(data: data, encoding: .utf8) else { return }
         webView?.evaluateJavaScript("window.doompileEditor.setDocument(\(json)); window.doompileEditor.setEditable(false); window.doompileEditor.setTheme('\(theme)')")
     }
@@ -150,13 +158,23 @@ private final class HistoryPreviewCoordinator: NSObject, WKScriptMessageHandler 
     }
     func makeView() -> WKWebView {
         let config = WKWebViewConfiguration(); config.userContentController.add(self, name: "doompile")
-        config.setURLSchemeHandler(HistoryMediaHandler(), forURLScheme: "doompile-media")
-        let view = WKWebView(frame: .zero, configuration: config); webView = view
+        media.note = note
+        config.setURLSchemeHandler(media, forURLScheme: "doompile-media")
+        let view = WKWebView(frame: .zero, configuration: config); webView = view; view.navigationDelegate = self
         if let folder = Bundle.main.resourceURL?.appendingPathComponent("EditorResources") { view.loadFileURL(folder.appendingPathComponent("editor.html"), allowingReadAccessTo: folder) }
         return view
     }
+    func webView(_ webView: WKWebView, decidePolicyFor navigationAction: WKNavigationAction, decisionHandler: @escaping (WKNavigationActionPolicy) -> Void) {
+        guard let url = navigationAction.request.url else { decisionHandler(.cancel); return }
+        if url.isFileURL { decisionHandler(.allow); return }
+        decisionHandler(.cancel)
+        if navigationAction.navigationType == .linkActivated, ["http", "https"].contains(url.scheme ?? "") {
+            openLink(url)
+        }
+    }
 }
 private final class HistoryMediaHandler: NSObject, WKURLSchemeHandler {
+    var note: Note?
     private var tasks: [ObjectIdentifier: Task<Void, Never>] = [:]
     func webView(_ webView: WKWebView, start urlSchemeTask: WKURLSchemeTask) {
         let key = ObjectIdentifier(urlSchemeTask as AnyObject)
@@ -166,7 +184,19 @@ private final class HistoryMediaHandler: NSObject, WKURLSchemeHandler {
                 guard let url = urlSchemeTask.request.url, let id = url.pathComponents.last, UUID(uuidString: id) != nil, ["attachment", "local"].contains(url.host ?? "") else { throw URLError(.badURL) }
                 let file: URL; let mime: String
                 if let local = Storage.shared.localFile(id: id) { file = local.url; mime = local.mimeType }
-                else { file = try await AttachmentFiles.resolve(Attachment(id: id, name: id, mimeType: "application/octet-stream", url: "/api/attachments/" + id, size: 0)); mime = "application/octet-stream" }
+                else {
+                    func metadata(_ value: JSONValue) -> Attachment? {
+                        guard case .object(let node) = value else { return nil }
+                        if case .object(let attrs) = node["attrs"], attrs["id"] == .string(id), case .string(let type) = attrs["mimeType"] {
+                            let name: String; if case .string(let value) = attrs["name"] { name = value } else { name = id }
+                            return Attachment(id: id, name: name, mimeType: type, url: "/api/attachments/" + id, size: 0)
+                        }
+                        if case .array(let children) = node["content"] { return children.compactMap(metadata).first }
+                        return nil
+                    }
+                    let attachment = self?.note?.attachments.first(where: { $0.id == id }) ?? self?.note.flatMap { metadata($0.body) } ?? Attachment(id: id, name: id, mimeType: "application/octet-stream", url: "/api/attachments/" + id, size: 0)
+                    file = try await AttachmentFiles.resolve(attachment); mime = attachment.mimeType
+                }
                 let data = try Data(contentsOf: file); try Task.checkCancellation()
                 urlSchemeTask.didReceive(URLResponse(url: url, mimeType: mime, expectedContentLength: data.count, textEncodingName: nil)); urlSchemeTask.didReceive(data); urlSchemeTask.didFinish()
             } catch { if !Task.isCancelled { urlSchemeTask.didFailWithError(error) } }
@@ -177,8 +207,9 @@ private final class HistoryMediaHandler: NSObject, WKURLSchemeHandler {
 #if os(iOS)
 private struct NoteVersionPreview: UIViewRepresentable {
     @Environment(\.colorScheme) private var colorScheme
+    @Environment(\.openURL) private var openURL
     let note: Note
-    func makeCoordinator() -> HistoryPreviewCoordinator { HistoryPreviewCoordinator(note: note, theme: colorScheme == .dark ? "dark" : "light") }
+    func makeCoordinator() -> HistoryPreviewCoordinator { HistoryPreviewCoordinator(note: note, theme: colorScheme == .dark ? "dark" : "light", openLink: { openURL($0) }) }
     func makeUIView(context: Context) -> WKWebView { context.coordinator.makeView() }
     func updateUIView(_ view: WKWebView, context: Context) { context.coordinator.note = note; context.coordinator.theme = colorScheme == .dark ? "dark" : "light"; context.coordinator.render() }
     static func dismantleUIView(_ view: WKWebView, coordinator: HistoryPreviewCoordinator) { view.configuration.userContentController.removeScriptMessageHandler(forName: "doompile") }
@@ -186,8 +217,9 @@ private struct NoteVersionPreview: UIViewRepresentable {
 #else
 private struct NoteVersionPreview: NSViewRepresentable {
     @Environment(\.colorScheme) private var colorScheme
+    @Environment(\.openURL) private var openURL
     let note: Note
-    func makeCoordinator() -> HistoryPreviewCoordinator { HistoryPreviewCoordinator(note: note, theme: colorScheme == .dark ? "dark" : "light") }
+    func makeCoordinator() -> HistoryPreviewCoordinator { HistoryPreviewCoordinator(note: note, theme: colorScheme == .dark ? "dark" : "light", openLink: { openURL($0) }) }
     func makeNSView(context: Context) -> WKWebView { context.coordinator.makeView() }
     func updateNSView(_ view: WKWebView, context: Context) { context.coordinator.note = note; context.coordinator.theme = colorScheme == .dark ? "dark" : "light"; context.coordinator.render() }
     static func dismantleNSView(_ view: WKWebView, coordinator: HistoryPreviewCoordinator) { view.configuration.userContentController.removeScriptMessageHandler(forName: "doompile") }

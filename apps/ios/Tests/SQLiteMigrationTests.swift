@@ -27,7 +27,7 @@ final class SQLiteMigrationTests: XCTestCase {
         XCTAssertEqual(sqlite3_exec(legacy, "BEGIN IMMEDIATE; UPDATE metadata SET value=value+1 WHERE key='version'; INSERT OR REPLACE INTO notes SELECT id,payload,0,(SELECT value FROM metadata WHERE key='version') FROM notes; COMMIT", nil, nil, nil), SQLITE_OK)
         let record = try XCTUnwrap(database.note(note.id))
         XCTAssertEqual(record.note, saved)
-        XCTAssertFalse(record.dirty)
+        XCTAssertTrue(record.dirty, "An older writer cannot clear the new durable mutation journal")
         XCTAssertEqual(record.writer, "")
     }
     func testLegacyMigrationPreservesQueueFilesAndOriginalBackup() throws {

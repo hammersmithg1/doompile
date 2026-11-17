@@ -153,7 +153,7 @@ const api = {
       theme === "light" ? "light" : "dark";
   },
   setEditable(editable: boolean) {
-    editor.setEditable(editable === true);
+    controller.setEditable(editable === true);
     height();
   },
   setDocument(
@@ -319,8 +319,9 @@ const api = {
     return editor.getJSON();
   },
   getState() {
+    controller.assertSupported();
     const note = controller.getNote();
-    return note ? { body: note.body, plainText: note.plainText } : { body: editor.getJSON(), plainText: documentPlainText(editor) };
+    return note ? { body: note.body, plainText: note.plainText, note } : { body: editor.getJSON(), plainText: documentPlainText(editor) };
   },
 };
 function formats() {

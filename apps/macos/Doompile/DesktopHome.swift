@@ -59,7 +59,7 @@ struct DesktopHome: View {
                 .frame(width: showFullNote ? 0 : geometry.size.width - (selected == nil || quickExpanded ? 0 : inspectorWidth), height: geometry.size.height)
                 .clipped().opacity(showFullNote ? 0 : 1).allowsHitTesting(!showFullNote).accessibilityHidden(showFullNote)
                 if let selected {
-                    NoteWorkspace(initial: selected, existing: library.notes.contains { $0.id == selected.id }, expanded: noteExpanded, onExpand: { withAnimation(motion) { noteExpanded.toggle() } }, onSelect: { open($0) }, onClose: close, onConflict: { self.selected = $0 })
+                    NoteWorkspace(initial: selected, existing: library.notes.contains { $0.id == selected.id }, expanded: noteExpanded, onExpand: { withAnimation(motion) { noteExpanded.toggle() } }, onSelect: { open($0) }, onClose: close)
                         .id(workspaceID)
                         .frame(width: quickExpanded ? 0 : inspectorWidth, height: geometry.size.height)
                         .overlay(alignment: .leading) { if !noteExpanded { resizeHandle(total: geometry.size.width) } }

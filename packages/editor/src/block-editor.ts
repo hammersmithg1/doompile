@@ -237,6 +237,7 @@ export function createBlockEditor(
   let selectingWithPointer = false;
   let renderedItems = "";
   let replicaDoc: Y.Doc | undefined;
+  let unsupportedSchema = false;
   let remoteDepth = 0;
   let baselineNote = options.note;
   let baseRevision = options.note?.revision ?? 0;
@@ -899,8 +900,8 @@ export function createBlockEditor(
           if (remoteDepth || origin === REMOTE_ORIGIN) return;
           const note = project(doc, { revision: baseRevision, updatedAt: new Date().toISOString() });
           baselineNote = note;
-          options.onReplica?.(note, { id: crypto.randomUUID(), update: encode(update), snapshot: encode(Y.encodeSnapshot(Y.snapshot(doc))), baseRevision, authoredAt: note.updatedAt, origin: options.origin ?? "web" });
-          options.onChange?.(note.body, note.plainText);
+          if (options.onReplica) options.onReplica(note, { id: crypto.randomUUID(), update: encode(update), snapshot: encode(Y.encodeSnapshot(Y.snapshot(doc))), baseRevision, authoredAt: note.updatedAt, origin: options.origin ?? "web" });
+          else options.onChange?.(note.body, note.plainText);
         });
         if (!sameState(initial.replica!, incoming.replica)) queueMicrotask(() => {
           options.onReplica?.(initial, { id: crypto.randomUUID(), update: delta(initial.replica!, incoming.replica), snapshot: authoredSnapshot(initial.replica!), baseRevision: incoming.revision, authoredAt: initial.updatedAt, origin: options.origin ?? "web" });
@@ -914,6 +915,7 @@ export function createBlockEditor(
       }
       baselineNote = project(replicaDoc, { revision: baseRevision, updatedAt: incoming.updatedAt });
     } catch {
+      unsupportedSchema = true;
       editor.setEditable(false);
       options.onSyncError?.("Для этой версии заметки нужно обновить приложение. Содержимое сохранено.");
     } finally { remoteDepth--; }
@@ -921,6 +923,8 @@ export function createBlockEditor(
   if (options.note?.replica) setNote(options.note);
   return {
     editor,
+    setEditable(editable: boolean) { editor.setEditable(editable && !unsupportedSchema, false); },
+    assertSupported() { if (unsupportedSchema) throw new Error("Для этой версии заметки нужно обновить приложение. Содержимое сохранено."); },
     setNote,
     getNote() { return replicaDoc ? project(replicaDoc, { revision: baseRevision, updatedAt: baselineNote?.updatedAt }) : undefined; },
     setDocument(body: JSONContent, emitUpdate = true) {

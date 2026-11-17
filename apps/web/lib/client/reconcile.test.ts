@@ -38,3 +38,13 @@ test("a new replica can be saved after editing a private draft", () => {
   assert.ok(result.changes[0].update.length);
   assert.equal(result.note.id, privateDraft.id);
 });
+
+test("an older caller without replica context edits a caption without independently seeding duplicate blocks", () => {
+  const original = createNote({ plainText: "Before" });
+  const first = stage(undefined, original);
+  const edited = stage({ note: first.note, baseRevision: 0, dirty: true, legacyBaseline: first.legacyBaseline }, { ...original, plainText: "New caption" });
+  assert.equal(edited.note.plainText, "New caption");
+  assert.equal(edited.note.body.content?.length, 1);
+  assert.equal(edited.note.id, original.id);
+  assert.equal(edited.changes.length, 1);
+});

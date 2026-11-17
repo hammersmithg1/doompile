@@ -3,7 +3,7 @@ import type { Attachment, Note } from "@doompile/core";
 import type { QuickUpload } from "./quick-uploads";
 import type { LocalRecord } from "./reconcile";
 import { combine, type NoteChange } from "../../../../packages/sync/changes";
-import { stage, type LegacyChange } from "../../../../packages/sync/client";
+import { stage, recovery, type LegacyChange } from "../../../../packages/sync/client";
 import { delta, authoredSnapshot, sameState } from "../../../../packages/sync/model";
 
 export type StoredRecord = LocalRecord & {
@@ -121,11 +121,19 @@ export class LocalNotes {
     await tx.done; return [id];
   }
   async cursor() { return (await this.db.get("state", "collectionCursor")) as number || 0; }
-  async merge(notes: Note[], cursor?: number): Promise<string[]> {
+  async backfill(id: string) {
+    const tx = this.db.transaction("records", "readwrite"), row = await tx.store.get(id);
+    if (row?.note.replica) await tx.store.put(pending({ ...row, changes: [recovery(row.note), ...(row.changes ?? [])], dirty: true }), id);
+    await tx.done; return [id];
+  }
+  async merge(notes: Note[], cursor?: number, reset = false): Promise<string[]> {
     const tx = this.db.transaction(["records", "state"], "readwrite"), records = tx.objectStore("records"), changed: string[] = [];
+    if (reset) for (const row of await records.getAll()) if (row.note.replica) {
+      await records.put(pending({ ...row, server: undefined, changes: [recovery(row.note), ...(row.changes ?? [])], dirty: true }), row.note.id);
+      changed.push(row.note.id);
+    }
     for (const remote of notes) {
       const current = await records.get(remote.id);
-      if (current?.server && current.server.revision > remote.revision) continue;
       if (current?.legacy?.length || current?.dirty && !current.note.replica) {
         await records.put({ ...current, server: remote }, remote.id); continue;
       }
@@ -145,7 +153,7 @@ export class LocalNotes {
     const tx = this.db.transaction("state", "readwrite"), lease = await tx.store.get("syncLease");
     let accepted = false;
     if (!lease || lease.owner === this.writer || lease.until < Date.now()) {
-      if (acquire) await tx.store.put({ owner: this.writer, until: Date.now() + 45_000 }, "syncLease"); else await tx.store.delete("syncLease");
+      if (acquire) await tx.store.put({ owner: this.writer, until: Date.now() + 6_000 }, "syncLease"); else await tx.store.delete("syncLease");
       accepted = true;
     }
     await tx.done; return accepted;

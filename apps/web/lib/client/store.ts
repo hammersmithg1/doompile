@@ -52,6 +52,7 @@ let finishSync: (() => void) | undefined;
 let writing = Promise.resolve();
 const retainedRaw: { note: Note; changes: NoteChange[] }[] = [];
 let syncRequested = false;
+let pullRequested = false;
 let channel: BroadcastChannel | undefined;
 const transferring = new Set<string>();
 const requestedRetries = new Set<string>();
@@ -297,7 +298,8 @@ export async function discardUploads(noteID: string) {
 export async function sync(pull = true) {
   if (!snapshot.ready || !database) return;
   if (syncing) {
-    if (!pull) syncRequested = true;
+    syncRequested = true;
+    pullRequested = pullRequested || pull;
     return syncFinished;
   }
   if (!navigator.onLine) {
@@ -313,7 +315,7 @@ export async function sync(pull = true) {
       if (!(await database!.lease(true))) return;
       const heartbeat = window.setInterval(() => {
         void database!.lease(true);
-      }, 15_000);
+      }, 1_000);
       try {
         emit({ status: "syncing" });
         track("sync.started", { pending: snapshot.pending, pull }, trace);
@@ -387,8 +389,10 @@ export async function sync(pull = true) {
     finishSync?.(); finishSync = undefined;
     void flushTelemetry();
     if (syncRequested) {
+      const pull = pullRequested;
       syncRequested = false;
-      void sync(false);
+      pullRequested = false;
+      void sync(pull);
     }
   }
 }

@@ -1,3 +1,5 @@
+import gzip
+import hashlib
 import json
 from pathlib import Path
 import sqlite3
@@ -49,3 +51,23 @@ class BackupVerificationTests(unittest.TestCase):
             directory = Path(temporary)
             (directory / 'doompile.sqlite').write_bytes(b'not a database')
             self.assertNotEqual(self.verify(directory).returncode, 0)
+
+    def test_history_hashes_and_referenced_blobs_are_verified(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            directory = Path(temporary)
+            self.fixture(directory)
+            database = sqlite3.connect(directory / 'doompile.sqlite')
+            database.executescript('CREATE TABLE note_history_blobs(hash TEXT PRIMARY KEY,payload BLOB); CREATE TABLE note_versions(note_id TEXT,revision INTEGER,parent_revision INTEGER,delta_hash TEXT,checkpoint_hash TEXT,input_hash TEXT,snapshot_hash TEXT,legacy_hash TEXT); CREATE TABLE note_replicas(note_id TEXT,state BLOB);')
+            data = b'synthetic saved version'
+            key = hashlib.sha256(data).hexdigest()
+            database.execute('INSERT INTO note_history_blobs VALUES (?,?)', (key, gzip.compress(data)))
+            database.execute('INSERT INTO note_versions VALUES (?,?,NULL,?,NULL,NULL,NULL,NULL)', ('note', 1, key))
+            database.commit()
+            self.assertEqual(self.verify(directory).returncode, 0)
+            database.execute('UPDATE note_history_blobs SET payload=?', (gzip.compress(b'damaged version'),))
+            database.commit()
+            self.assertNotEqual(self.verify(directory).returncode, 0)
+            database.execute('DELETE FROM note_history_blobs')
+            database.commit()
+            self.assertNotEqual(self.verify(directory).returncode, 0)
+            database.close()

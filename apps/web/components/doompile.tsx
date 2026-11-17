@@ -1543,8 +1543,10 @@ export default function Doompile({
         })
       }
       onReplica={(note, change) => {
-        setEditor(current => current?.id === note.id ? { ...current, body: note.body, plainText: note.plainText, replica: note.replica, revision: note.revision, updatedAt: note.updatedAt } : current);
-        if (editorMode === "note") void store.saveNote(note, [], [change]).catch(() => setSaveStatus("Не удалось сохранить"));
+        const current = latestEditor.current;
+        const combined = current?.id === note.id && current.replica ? mergeReplicas(current, note) : note;
+        setEditor(value => value?.id === note.id ? value.replica ? mergeReplicas(value, combined) : combined : value);
+        if (editorMode === "note") void store.saveNote(combined, [], [change]).catch(() => setSaveStatus("Не удалось сохранить"));
       }}
       onTags={(tags) => {
         setEditTags(tags.join(", "));

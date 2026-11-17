@@ -1361,7 +1361,10 @@ struct NoteEditor: View {
         guard editorBridge.ready else { return }
         let before = note.body
         let snapshot = try await editorBridge.snapshot()
-        if note.body == before { note.body = snapshot.body; text = snapshot.plainText }
+        if let snapshotNote = snapshot.note {
+            let combined = try NoteEngine.shared.receive(EditorLifecycle.prepared(note, plainText: text), server: snapshotNote)
+            note = combined; text = combined.plainText
+        } else if note.body == before { note.body = snapshot.body; text = snapshot.plainText }
     }
     private func preserveCapture() async -> Bool {
         guard let capture, library.isCurrentAccount, !saving else { return false }
@@ -1405,11 +1408,11 @@ struct NoteEditor: View {
     }
     private func receiveReplica(_ incoming: Note, _ change: NoteChange) {
         guard capture == nil, incoming.id == note.id else { return }
-        var value = note
-        value.body = incoming.body; value.plainText = incoming.plainText
-        value.replica = incoming.replica; value.revision = incoming.revision; value.updatedAt = incoming.updatedAt
-        note = value; text = value.plainText
-        library.saveReplica(value, change: change)
+        do {
+            let value = try NoteEngine.shared.receive(EditorLifecycle.prepared(note, plainText: text), server: incoming)
+            note = value; text = value.plainText
+            library.saveReplica(value, change: change)
+        } catch { self.error = error.localizedDescription }
     }
     private func recordSaved(_ value: Note) {
         let stored = library.notes.first(where: { $0.id == value.id }) ?? value

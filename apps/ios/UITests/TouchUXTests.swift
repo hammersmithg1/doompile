@@ -76,6 +76,17 @@ final class TouchUXTests: XCTestCase {
         _ = try syncFixture("POST", path: "/api/review/offline")
         editor.typeText(" local"); expected += " local"
         screenshot("sync-offline-editor")
+        XCUIDevice.shared.press(.home)
+        app.terminate()
+        app.launchEnvironment["DOOMPILE_UI_KEEP_NOTES"] = "1"
+        app.launch()
+        if !app.buttons["close-editor"].exists {
+            let cached = noteRow(expected)
+            XCTAssertTrue(cached.waitForExistence(timeout: 10)); cached.tap()
+        }
+        XCTAssertTrue(app.buttons["close-editor"].waitForExistence(timeout: 5))
+        app.webViews.firstMatch.coordinate(withNormalizedOffset: CGVector(dx: 0.55, dy: 0.82)).tap()
+        screenshot("sync-offline-after-restart")
         _ = try syncFixture("POST", path: "/api/review/remote")
         _ = try syncFixture("POST", path: "/api/review/online")
         editor.typeText(" newer"); expected += " newer"

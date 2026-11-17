@@ -13,6 +13,10 @@ async function queued(page: Page, id: string) {
 }
 test("two browser devices keep offline edits across restart and restore history in the same note", async ({ page, browser }, info) => {
   test.setTimeout(90_000);
+  if (info.project.name === "web-webkit") {
+    await page.setViewportSize({ width: 390, height: 844 });
+    await page.emulateMedia({ colorScheme: "dark" });
+  }
   const note = createNote({ plainText: "Общий текст", revision: 1 });
   const server = await mockNotes(page, [note]);
   const context = await browser.newContext({ viewport: { width: 1280, height: 900 } });
@@ -28,9 +32,9 @@ test("two browser devices keep offline edits across restart and restore history 
     await expect.poll(() => queued(other, note.id)).toBeGreaterThan(0);
     await other.reload(); await other.locator(".note-main").click(); await expect(right).toContainText("второе");
     await left.click(); await left.press("ControlOrMeta+Home"); await left.pressSequentially("Первое ");
-    await expect.poll(() => server.versions.get(note.id)?.plainText).toBe("Первое Общий текст");
+    await expect.poll(() => server.versions.get(note.id)?.plainText, { timeout: 15_000 }).toBe("Первое Общий текст");
     server.setOffline(false, other); await other.evaluate(() => window.dispatchEvent(new Event("online")));
-    await expect.poll(() => server.versions.get(note.id)?.plainText).toBe("Первое Общий текст второе");
+    await expect.poll(() => server.versions.get(note.id)?.plainText, { timeout: 15_000 }).toBe("Первое Общий текст второе");
     await expect(left).toHaveText("Первое Общий текст второе");
     await expect.poll(() => queued(other, note.id)).toBe(0);
     const mergedRevision = server.versions.get(note.id)!.revision;

@@ -124,6 +124,7 @@ def file(path, filetype):
 shared = [file(str(path.relative_to(ROOT)), 'sourcecode.swift') for path in sorted((ROOT / 'Shared').glob('*.swift'))]
 app_sources = [file(str(path.relative_to(ROOT)), 'sourcecode.swift') for path in sorted((ROOT / 'Doompile').glob('*.swift'))]
 editor_resources = file('Doompile/EditorResources', 'folder')
+sync_resource = file('Shared/Resources/sync.js', 'sourcecode.javascript')
 share = file('Share/ShareViewController.swift', 'sourcecode.swift')
 safari = file('Safari/SafariWebExtensionHandler.swift', 'sourcecode.swift')
 icon = file('Doompile/Assets.xcassets', 'folder.assetcatalog')
@@ -170,6 +171,7 @@ for target, folder, product, bundle in [
     sources = shared + (app_sources if target == 'Doompile' else [share] if target in ['DoompileShare', 'DoompileAction'] else [safari])
     sources_phase = obj('sources:' + target, 'PBXSourcesBuildPhase', buildActionMask='2147483647', files=arr([obj('compile:' + target + resource, 'PBXBuildFile', fileRef=resource) for resource in sources]), runOnlyForDeploymentPostprocessing='0')
     resources = [icon, brand_assets, editor_resources] if target == 'Doompile' else [preprocess, brand_assets] if target == 'DoompileShare' else [preprocess, brand_assets] + action_icons if target == 'DoompileAction' else safari_resources
+    if target != 'Doompile': resources = resources + [sync_resource]
     resources_phase = obj('resources:' + target, 'PBXResourcesBuildPhase', buildActionMask='2147483647', files=arr([obj('resource:' + target + resource, 'PBXBuildFile', fileRef=resource) for resource in resources]), runOnlyForDeploymentPostprocessing='0')
     frameworks_phase = obj('frameworks:' + target, 'PBXFrameworksBuildPhase', buildActionMask='2147483647', files='()', runOnlyForDeploymentPostprocessing='0')
     dependencies = []

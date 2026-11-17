@@ -66,7 +66,8 @@ final class NoteEngine: @unchecked Sendable {
         #if SWIFT_PACKAGE
         let url = Bundle.module.url(forResource: "sync", withExtension: "js", subdirectory: "Resources")
         #else
-        let url = Bundle.main.resourceURL?.appendingPathComponent("EditorResources/sync.js")
+        let bundled = Bundle.main.resourceURL?.appendingPathComponent("EditorResources/sync.js")
+        let url = bundled.flatMap { FileManager.default.fileExists(atPath: $0.path) ? $0 : nil } ?? Bundle.main.url(forResource: "sync", withExtension: "js")
         #endif
         guard let url, let source = try? String(contentsOf: url, encoding: .utf8) else { throw DoompileError.message("В приложении отсутствует модуль синхронизации. Обнови приложение.") }
         js.evaluateScript(source)

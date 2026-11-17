@@ -326,7 +326,6 @@ struct NoteWorkspace: View {
     @State private var openedExisting: Bool
     var onSelect: (Note) -> Void
     var onClose: () -> Void
-    var onConflict: (Note) -> Void
     let initialAction: String?
     @State private var note: Note
     @State private var tags: [String]
@@ -344,9 +343,8 @@ struct NoteWorkspace: View {
     @State private var linkEditorToken = UUID()
     @StateObject private var bridge = MacRichEditorBridge()
     @StateObject private var voice = MacVoiceRecorder()
-    init(initial: Note, existing: Bool, expanded: Bool, onExpand: @escaping () -> Void, onSelect: @escaping (Note) -> Void, onClose: @escaping () -> Void, onConflict: @escaping (Note) -> Void, initialAction: String? = nil) {
+    init(initial: Note, existing: Bool, expanded: Bool, onExpand: @escaping () -> Void, onSelect: @escaping (Note) -> Void, onClose: @escaping () -> Void, initialAction: String? = nil) {
         self.initial = initial; self.expanded = expanded; self.onExpand = onExpand; self.onSelect = onSelect; self.onClose = onClose
-        self.onConflict = onConflict
         self.initialAction = initialAction
         _openedExisting = State(initialValue: existing)
         _lastSaved = State(initialValue: existing ? initial : nil)
@@ -419,7 +417,10 @@ struct NoteWorkspace: View {
             do {
                 let state = try await bridge.snapshot()
                 // An input arriving while the snapshot crosses the bridge wins.
-                if note.body == before { note.body = state.body; note.plainText = state.plainText }
+                if let snapshotNote = state.note {
+                    var current = note; current.tags = uniqueTags
+                    note = try NoteEngine.shared.receive(current, server: snapshotNote); tags = note.tags
+                } else if note.body == before { note.body = state.body; note.plainText = state.plainText }
             } catch { self.error = error.localizedDescription; return }
         }
         save()
@@ -427,11 +428,12 @@ struct NoteWorkspace: View {
     }
     private func receiveReplica(_ incoming: Note, _ change: NoteChange) {
         guard incoming.id == note.id else { return }
-        var value = note
-        value.body = incoming.body; value.plainText = incoming.plainText
-        value.replica = incoming.replica; value.revision = incoming.revision; value.updatedAt = incoming.updatedAt
-        value.tags = uniqueTags; note = value
-        library.saveReplica(value, change: change)
+        do {
+            var current = note; current.tags = uniqueTags
+            let value = try NoteEngine.shared.receive(current, server: incoming)
+            note = value; tags = value.tags
+            library.saveReplica(value, change: change)
+        } catch { self.error = error.localizedDescription }
     }
     private func changed() {
         var compare = note

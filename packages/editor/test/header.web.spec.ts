@@ -65,7 +65,7 @@ test("an opened note is immediately editable; expand and collapse keep the edito
   const { writes } = await setup(page);
   await openNote(page);
   const editor = page.getByRole("region", { name: "Редактор заметки" });
-  await expect(editor.locator("header button:visible")).toHaveCount(6);
+  await expect(editor.locator("header button:visible")).toHaveCount(7);
   await expect(page.locator(".detail-footer")).toHaveCount(0);
   await expect(
     editor.getByRole("button", { name: "Редактировать", exact: true }),

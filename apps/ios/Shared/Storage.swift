@@ -155,9 +155,16 @@ final class Storage: @unchecked Sendable {
     func snapshot() throws -> DiskState { try access { try $0.snapshot() } }
     func pendingNotes() throws -> [Note] { try access { db in try db.transaction {
         let notes = try db.pendingNotes()
-        for note in notes where try !db.hasJournal(note.id) {
-            if note.replica != nil { try db.append(note.id, NoteJournalEntry(change: NoteEngine.shared.recovery(note, server: db.syncState(note.id).server))) }
-            else { try db.append(note.id, NoteJournalEntry(legacy: LegacyNoteChange(id: UUID().uuidString.lowercased(), note: note, baseRevision: note.revision, origin: NoteEngine.origin))) }
+        for note in notes {
+            if note.replica == nil {
+                let existing = try db.journal(note.id, limit: Int.max)
+                if existing.last(where: { $0.legacy != nil })?.legacy?.note != note {
+                    try db.append(note.id, NoteJournalEntry(legacy: LegacyNoteChange(id: UUID().uuidString.lowercased(), note: note, baseRevision: note.revision, origin: NoteEngine.origin)))
+                    try db.put(note, dirty: true)
+                }
+            } else if try !db.hasJournal(note.id) {
+                try db.append(note.id, NoteJournalEntry(change: NoteEngine.shared.recovery(note, server: db.syncState(note.id).server)))
+            }
         }
         return notes
     } } }
@@ -228,12 +235,31 @@ final class Storage: @unchecked Sendable {
             return staged.note
         } }
     }
-    func merge(_ notes: [Note], cursor: Int? = nil) throws {
+    func backfill(_ id: String) throws {
         try access { db in try db.transaction {
+            guard let record = try db.note(id), record.note.replica != nil else { return }
+            let journal = try db.journal(id, limit: Int.max)
+            try db.acknowledge(id, journal.map(\.id))
+            try db.append(id, NoteJournalEntry(change: NoteEngine.shared.recovery(record.note, server: nil)))
+            for entry in journal { try db.append(id, entry) }
+            try db.put(record.note, dirty: true, writer: record.writer)
+        } }
+    }
+    func merge(_ notes: [Note], cursor: Int? = nil, reset: Bool = false) throws {
+        try access { db in try db.transaction {
+            if reset {
+                for note in try db.allNotes() where note.replica != nil {
+                    let journal = try db.journal(note.id, limit: Int.max)
+                    try db.acknowledge(note.id, journal.map(\.id))
+                    try db.append(note.id, NoteJournalEntry(change: NoteEngine.shared.recovery(note, server: nil)))
+                    for entry in journal { try db.append(note.id, entry) }
+                    try db.putSyncState(note.id, NoteSyncState())
+                    try db.put(note, dirty: true)
+                }
+            }
             for remote in notes {
                 let current = try db.note(remote.id)
                 var state = try db.syncState(remote.id)
-                if (state.server?.revision ?? -1) > remote.revision { continue }
                 state.server = remote
                 if current?.dirty == true && current?.note.replica == nil {
                     try db.putSyncState(remote.id, state); continue
@@ -321,7 +347,7 @@ actor SyncService {
     private var syncTrace: TelemetryTrace?
     private var syncLease: (storage: Storage, owner: String)?
     private let session = URLSession(configuration: .ephemeral, delegate: NoRedirects(), delegateQueue: nil)
-    private struct List: Decodable { let notes: [Note]; let cursor: Int; let more: Bool }
+    private struct List: Decodable { let notes: [Note]; let cursor: Int; let more: Bool; let reset: Bool? }
     private struct One: Codable { let note: Note }
     private struct Batch: Encodable { var changes: [NoteChange]?; var legacy: [LegacyNoteChange]? }
     private struct Acknowledgement: Decodable { let note: Note; let acknowledged: [String] }
@@ -439,6 +465,7 @@ actor SyncService {
                         throw error
                     }
                 }
+                var recovered = false
                 for _ in 0..<100 {
                     let journal = try storage.journal(note.id)
                     if journal.isEmpty { break }
@@ -446,6 +473,7 @@ actor SyncService {
                     let changes = journal.prefix { $0.change != nil }.compactMap(\.change)
                     let batch = legacy.isEmpty ? Batch(changes: changes) : Batch(legacy: Array(legacy.prefix(32)))
                     let (data, status) = try await response(request("/api/notes/\(note.id)/sync", method: "POST", body: JSONEncoder().encode(batch)))
+                    if status == 409 && !recovered { recovered = true; try storage.backfill(note.id); continue }
                     guard status == 200 else { throw DoompileError.message("Не удалось синхронизировать заметку (\(status)). Изменения сохранены на устройстве.") }
                     let saved = try JSONDecoder().decode(Acknowledgement.self, from: data)
                     try storage.accept(saved.note, matching: note, acknowledged: saved.acknowledged)
@@ -469,7 +497,7 @@ actor SyncService {
                 let (data, status) = try await response(request("/api/notes?cursor=\(cursor)"))
                 guard status == 200 else { throw DoompileError.message("Не удалось получить заметки (\(status)).") }
                 let page = try JSONDecoder().decode(List.self, from: data)
-                try storage.merge(page.notes, cursor: page.cursor)
+                try storage.merge(page.notes, cursor: page.cursor, reset: page.reset == true)
                 await onProgress?()
                 if !page.more { break }
             }

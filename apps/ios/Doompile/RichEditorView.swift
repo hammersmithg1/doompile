@@ -75,12 +75,14 @@ import WebKit
         guard let data = try? JSONEncoder().encode(updates), let json = String(data: data, encoding: .utf8) else { return }
         webView?.evaluateJavaScript("window.doompileEditor.reconcileAttachments?.(\(json))")
     }
-    func snapshot() async throws -> (body: JSONValue, plainText: String) {
+    func snapshot() async throws -> (body: JSONValue, plainText: String, note: Note?) {
         guard ready, let webView else { throw DoompileError.message("Редактор ещё открывается. Попробуй сохранить через мгновение.") }
         let value = try await webView.evaluateJavaScript("window.doompileEditor.getState()")
         guard let state = value as? [String: Any], let body = state["body"], let text = state["plainText"] as? String,
               let data = try? JSONSerialization.data(withJSONObject: body), let document = try? JSONDecoder().decode(JSONValue.self, from: data) else { throw DoompileError.message("Не удалось прочитать текущий документ из редактора.") }
-        return (document, text)
+        let note = state["note"].flatMap { try? JSONSerialization.data(withJSONObject: $0) }.flatMap { try? JSONDecoder().decode(Note.self, from: $0) }
+        try await NoteWriter.shared.drain()
+        return (document, text, note)
     }
 }
 
@@ -266,9 +268,8 @@ struct RichEditorView: UIViewRepresentable {
                       note.id == parent.noteID else { return }
                 change.origin = NoteEngine.origin
                 appliedReplica = note.replica?.data
-                parent.onReplica?(note, change)
-                parent.document = note.body
-                parent.plainText = note.plainText
+                if let onReplica = parent.onReplica { onReplica(note, change) }
+                else { parent.document = note.body; parent.plainText = note.plainText }
             case "change":
                 guard let body = payload["body"], JSONSerialization.isValidJSONObject(body),
                       let data = try? JSONSerialization.data(withJSONObject: body),

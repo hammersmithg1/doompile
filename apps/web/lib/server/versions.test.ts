@@ -2,11 +2,13 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { DatabaseSync } from "node:sqlite";
 import { randomUUID } from "node:crypto";
-import { mkdtempSync, rmSync } from "node:fs";
+import { mkdtempSync, rmSync, statSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { createNote, textToDocument, type Note } from "@doompile/core";
-import { delta } from "../../../../packages/sync/model";
+import * as Y from "yjs";
+import { gzipSync } from "node:zlib";
+import { delta, open, project, setBody, encode } from "../../../../packages/sync/model";
 import { prepare, stateVector, sameState, authoredSnapshot } from "../../../../packages/sync/model";
 import { VersionStore, type NoteChange } from "./versions";
 
@@ -148,4 +150,80 @@ test("historical media is resolved to an immutable uploaded object and remains a
     assert.ok(JSON.stringify(saved.body).includes(remote.url));
     assert.equal(f.versions.version(note.id, 1)!.attachments[0].url, remote.url);
   } finally { f.close(); }
+});
+
+test("a thousand text saves use deltas and survive a database backup with complete history", t => {
+  const f = fixture();
+  try {
+    let entropy = 0x13579bdf;
+    const text = Array.from({ length: 20000 }, () => { entropy ^= entropy << 13; entropy ^= entropy >>> 17; entropy ^= entropy << 5; return String.fromCharCode(33 + ((entropy >>> 0) % 90)); }).join("");
+    const seed = prepare(createNote({ plainText: text }));
+    const initial = f.versions.sync(seed.id, [change(seed)]).note;
+    const doc = open(initial.replica);
+    let authored = initial;
+    let pending: NoteChange[] = [], compressedSnapshots = 0;
+    const save = (update: Uint8Array) => {
+      authored = project(doc, { revision: 1, updatedAt: initial.updatedAt });
+      pending.push({ id: randomUUID(), update: encode(update), snapshot: encode(Y.encodeSnapshot(Y.snapshot(doc))), baseRevision: 1, authoredAt: initial.updatedAt, origin: "ios" });
+    };
+    doc.on("update", save);
+    for (let index = 0; index < 1000; index++) {
+      const value = text + ".".repeat(index + 1);
+      setBody(doc, textToDocument(value));
+      compressedSnapshots += gzipSync(Buffer.from(JSON.stringify({ ...authored, replica: undefined }))).length;
+      if (pending.length >= 64) { f.versions.sync(seed.id, pending); pending = []; }
+    }
+    if (pending.length) f.versions.sync(seed.id, pending);
+    doc.destroy();
+    const bytes = Number(f.db.prepare("SELECT SUM(length(payload)) AS bytes FROM note_history_blobs").get()!.bytes);
+    assert.ok(bytes < compressedSnapshots / 4, `archive ${bytes} vs full compressed snapshots ${compressedSnapshots}`);
+    assert.equal(f.versions.get(seed.id)!.plainText, text + ".".repeat(1000));
+    const backup = join(f.directory, "backup.sqlite");
+    f.db.prepare("VACUUM INTO ?").run(backup);
+    const databaseBytes = statSync(backup).size;
+    assert.ok(databaseBytes < compressedSnapshots / 4);
+    t.diagnostic(JSON.stringify({ versions: 1001, compressedBlobBytes: bytes, databaseBytes, fullCompressedSnapshots: compressedSnapshots }));
+    const restoredDB = new DatabaseSync(backup), restored = new VersionStore(restoredDB);
+    try {
+      assert.equal(restored.versions(seed.id, Number.MAX_SAFE_INTEGER, 100).length, 100);
+      assert.equal(restored.version(seed.id, 501)!.plainText, text + ".".repeat(500));
+      assert.equal(restored.authoredVersion(seed.id, 501)!.plainText, text + ".".repeat(500));
+      assert.ok(sameState(restored.get(seed.id)!.replica!, f.versions.get(seed.id)!.replica!));
+    } finally { restoredDB.close(); }
+  } finally { f.close(); }
+});
+
+test("three offline writers converge with reordered duplicate delivery of text, formatting, tasks and tags", () => {
+  const paragraph = (text: string, bold = false) => ({ type: "paragraph", content: [{ type: "text", text, ...(bold ? { marks: [{ type: "bold" }] } : {}) }] });
+  const base = prepare(createNote({ plainText: "Core\nTask\nCell", body: { type: "doc", content: [
+    paragraph("Core"), { type: "taskList", content: [{ type: "taskItem", attrs: { checked: false }, content: [paragraph("Task")] }] },
+    { type: "table", content: [{ type: "tableRow", content: [{ type: "tableCell", content: [paragraph("Cell")] }] }] },
+  ] } }));
+  const initialChange = change(base);
+  const clone = () => structuredClone(base);
+  const a = clone(); a.body.content![0] = paragraph("Phone Core"); a.plainText = "Phone Core\nTask\nCell"; a.tags = ["Phone"];
+  const b = clone(); b.body.content![0] = paragraph("Core Mac"); b.plainText = "Core Mac\nTask\nCell"; b.pinned = true;
+  const c = clone(); c.body.content![0] = paragraph("Core", true); c.body.content![1].content![0].attrs!.checked = true; c.tags = ["Web"];
+  const branches = [a, b, c].map(note => prepare(note));
+  const updates = branches.map(note => change(note, base));
+  let finalReplica: Note["replica"];
+  for (const order of [[0, 1, 2], [2, 0, 1], [1, 2, 0], [2, 1, 0]]) {
+    const f = fixture();
+    try {
+      f.versions.sync(base.id, [initialChange]);
+      for (const index of [...order, ...order.toReversed()]) f.versions.sync(base.id, [updates[index]]);
+      const final = f.versions.get(base.id)!;
+      assert.equal(final.plainText, "Phone Core Mac\nTask\nCell");
+      assert.equal(final.pinned, true); assert.deepEqual(new Set(final.tags), new Set(["Phone", "Web"]));
+      assert.equal(final.body.content![1].content![0].attrs!.checked, true);
+      assert.ok(JSON.stringify(final.body).includes('"bold"'));
+      assert.equal(f.versions.versions(base.id).length, 4);
+      assert.equal(f.db.prepare("SELECT COUNT(*) AS n FROM notes").get()!.n, 1);
+      if (finalReplica) assert.ok(sameState(finalReplica, final.replica!)); else finalReplica = final.replica;
+      for (let index = 0; index < 3; index++) {
+        const receipt = f.db.prepare("SELECT revision FROM note_sync_receipts WHERE note_id=? AND change_id=?").get(base.id, updates[index].id)!;
+        assert.equal(f.versions.authoredVersion(base.id, Number(receipt.revision))!.plainText, branches[index].plainText);
+      }
+    } finally { f.close(); }
+  }
 });

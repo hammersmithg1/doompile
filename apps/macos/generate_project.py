@@ -118,6 +118,7 @@ def file(path, filetype):
 shared = [file('../ios/Shared/' + path.name, 'sourcecode.swift') for path in sorted((REPO / 'apps/ios/Shared').glob('*.swift'))]
 app_files = [file(str(path.relative_to(ROOT)), 'sourcecode.swift') for folder in ['Doompile', 'Support'] for path in sorted((ROOT / folder).glob('*.swift'))]
 editor_resources = file('Doompile/EditorResources', 'folder')
+sync_resource = file('../ios/Shared/Resources/sync.js', 'sourcecode.javascript')
 icon = file('Doompile/Assets.xcassets', 'folder.assetcatalog')
 brand_assets = file('../../packages/design/BrandAssets.xcassets', 'folder.assetcatalog')
 handler = file('Safari/SafariWebExtensionHandler.swift', 'sourcecode.swift')
@@ -155,7 +156,7 @@ for target, folder, product, bundle in [('Doompile', 'Doompile', 'application', 
     configuration_list = obj('configs:' + target, 'XCConfigurationList', buildConfigurations=arr(configs), defaultConfigurationIsVisible='0', defaultConfigurationName=q('Release'))
     sources = shared + (app_files if app_target else [handler])
     sources_phase = obj('sources:' + target, 'PBXSourcesBuildPhase', buildActionMask='2147483647', files=arr([obj('compile:' + target + resource, 'PBXBuildFile', fileRef=resource) for resource in sources]), runOnlyForDeploymentPostprocessing='0')
-    target_resources = [icon, brand_assets, editor_resources] if app_target else safari_resources
+    target_resources = [icon, brand_assets, editor_resources] if app_target else safari_resources + [sync_resource]
     resources_phase = obj('resources:' + target, 'PBXResourcesBuildPhase', buildActionMask='2147483647', files=arr([obj('resource:' + target + resource, 'PBXBuildFile', fileRef=resource) for resource in target_resources]), runOnlyForDeploymentPostprocessing='0')
     frameworks = [obj('link:Sparkle', 'PBXBuildFile', productRef=sparkle_product)] if app_target else []
     frameworks_phase = obj('frameworks:' + target, 'PBXFrameworksBuildPhase', buildActionMask='2147483647', files=arr(frameworks), runOnlyForDeploymentPostprocessing='0')

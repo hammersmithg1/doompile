@@ -116,6 +116,18 @@ export class VersionStore {
       replacements.set(file.url, remote.url); changed = true;
       return { ...file, url: remote.url, mimeType: remote.mimeType, size: remote.size };
     });
+    const findLocal = (node: DocumentNode) => {
+      for (const key of ["src", "url"]) {
+        const value = node.attrs?.[key];
+        if (typeof value !== "string" || !value.startsWith("local:") || replacements.has(value)) continue;
+        const id = value.slice(6);
+        const row = this.db.prepare("SELECT payload FROM attachments WHERE id=?").get(id) as { payload: string } | undefined;
+        if (!row) throw new SyncWriteError("An attachment must finish uploading before its note");
+        replacements.set(value, (JSON.parse(row.payload) as Attachment).url); changed = true;
+      }
+      node.content?.forEach(findLocal);
+    };
+    findLocal(note.body);
     if (!changed) return;
     const visit = (node: DocumentNode): DocumentNode => {
       const attrs = node.attrs ? { ...node.attrs } : undefined;
@@ -151,6 +163,7 @@ export class VersionStore {
           const updatedAt = new Date().toISOString();
           const next = project(doc, { revision: (current?.revision ?? 0) + 1, updatedAt });
           if (next.id !== id) throw new SyncWriteError("The update belongs to another note");
+          if (current && current.createdAt !== next.createdAt) throw new SyncWriteError("The note creation time is immutable");
           const valid = noteSchema.safeParse(next);
           if (!valid.success) throw new SyncWriteError("The updated note exceeds the document limits or has invalid fields");
           // A new received operation is journalled even if it is waiting on a causal

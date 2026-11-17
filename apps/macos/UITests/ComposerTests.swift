@@ -55,6 +55,12 @@ import XCTest
         _ = try syncFixture("POST", path: "/api/review/offline")
         editor.typeText(" local"); expected += " local"
         capture("mac-sync-offline-editor", in: window)
+        app.terminate(); app.launch()
+        let cached = app.scrollViews["Лента заметок"].staticTexts[expected]
+        XCTAssertTrue(cached.waitForExistence(timeout: 10)); cached.click()
+        XCTAssertTrue(editor.waitForExistence(timeout: 8)); editor.click()
+        app.typeKey(.downArrow, modifierFlags: .command)
+        capture("mac-sync-offline-after-restart", in: app.windows.firstMatch)
         _ = try syncFixture("POST", path: "/api/review/remote")
         _ = try syncFixture("POST", path: "/api/review/online")
         editor.typeText(" newer"); expected += " newer"

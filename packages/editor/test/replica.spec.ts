@@ -21,3 +21,18 @@ test("a live editor merges a remote prefix without moving local typing or undoin
   const state = await page.evaluate(() => ({ errors: (window as any).syncErrors, events: (window as any).replicaEvents.length, id: (window as any).controller.getNote().id }));
   expect(state.errors).toEqual([]); expect(state.events).toBeGreaterThan(1); expect(state.id).toBe(base.id);
 });
+
+test("an older editor pauses on an unknown shared node without deleting it or echoing an update", async ({ page }) => {
+  const base = prepare(createNote({ plainText: "Known" }));
+  await page.goto("/");
+  await page.evaluate(note => {
+    const w = window as any; w.controller.setNote(note);
+    const doc = w.sync.open(note.replica), node = new w.Y.XmlElement("futureVersionNode");
+    doc.getXmlFragment("body").insert(1, [node]);
+    w.controller.setNote({ ...note, replica: w.sync.state(doc) });
+    w.controller.setEditable(true);
+  }, base);
+  await expect(page.getByRole("textbox", { name: "Текст заметки" })).toHaveAttribute("contenteditable", "false");
+  const result = await page.evaluate(() => ({ errors: (window as any).syncErrors, events: (window as any).replicaEvents.length }));
+  expect(result.errors).toHaveLength(1); expect(result.events).toBe(0);
+});

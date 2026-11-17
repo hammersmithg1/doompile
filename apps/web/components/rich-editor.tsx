@@ -57,7 +57,7 @@ export default function RichEditor(props: {
     mounted.current = true;
     const instance = createBlockEditor(host.current!, {
       note: current.current.note,
-      onReplica: (note, change) => current.current.onReplica?.(note, change),
+      onReplica: (note, change) => { setError(""); current.current.onReplica?.(note, change); },
       onSyncError: setError,
       onTelemetry: track,
       content: current.current.value as JSONContent,
@@ -200,7 +200,7 @@ export default function RichEditor(props: {
     controller.current?.setNotes(props.notes);
   }, [props.notes]);
   useEffect(() => {
-    controller.current?.editor.setEditable(!props.readOnly, false);
+    controller.current?.setEditable(!props.readOnly);
   }, [props.readOnly]);
   useEffect(() => {
     if (!error) return;

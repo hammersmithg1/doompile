@@ -3,7 +3,14 @@ import { body, documentPlainText, equal, merge, open, prepare, project, setBody 
 import { prepareDocument } from "../editor/src/blocks";
 
 export function prepareLegacy(note: Note): Note {
-  const document = prepareDocument(note.body, note.title, note.source) as DocumentNode;
+  const withMetadata = (node: DocumentNode): DocumentNode => {
+    const url = node.attrs?.src || node.attrs?.url;
+    const file = note.attachments.find(item => item.url === url);
+    const attrs = file && (node.type === "image" || node.type === "attachment") && (node.attrs?.id !== file.id || node.attrs?.size !== file.size)
+      ? { ...node.attrs, id: file.id, name: file.name, mimeType: file.mimeType, size: file.size } : node.attrs;
+    return { ...node, ...(attrs ? { attrs } : {}), ...(node.content ? { content: node.content.map(withMetadata) } : {}) };
+  };
+  const document = withMetadata(prepareDocument(note.body, note.title, note.source) as DocumentNode);
   const urls = new Set<string>();
   const visit = (node: DocumentNode) => { for (const key of ["src", "url"]) if (typeof node.attrs?.[key] === "string") urls.add(node.attrs[key] as string); node.content?.forEach(visit); };
   visit(document);
