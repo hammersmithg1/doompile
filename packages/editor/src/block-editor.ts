@@ -1,7 +1,5 @@
+import { createEditorExtensions, safeMediaURL, type EditorNodeViews } from "./schema";
 import {
-  UnsupportedBlock,
-  UnsupportedInline,
-  preserveAttributes,
   prepareForEditor,
   restoreDocument,
 } from "./compatibility";
@@ -15,27 +13,11 @@ import AttachmentPreview, {
 } from "./media-preview";
 import {
   Editor,
-  Node,
   getSchema,
-  mergeAttributes,
   type JSONContent,
 } from "@tiptap/core";
-import StarterKit from "@tiptap/starter-kit";
-import Image from "@tiptap/extension-image";
-import TaskList from "@tiptap/extension-task-list";
-import TaskItem from "@tiptap/extension-task-item";
-import Placeholder from "@tiptap/extension-placeholder";
-import { TableKit } from "@tiptap/extension-table";
-import { sourceLink } from "../../core/src/source-link";
 import { createSourceDialog } from "./source-dialog";
 import { normalizeMedia, pastedMedia } from "./inline-media";
-import {
-  Formatting,
-  TextColor,
-  Highlight,
-  Subscript,
-  Superscript,
-} from "./formatting";
 import { createFormattingUI } from "./formatting-ui";
 import {
   commandAliases,
@@ -48,7 +30,6 @@ import { createBlockControls } from "./block-controls";
 import { Slice } from "@tiptap/pm/model";
 import { inlineImageView } from "./inline-image-view";
 import {
-  ListUX,
   parseListText,
   insertMedia,
   moveBlock,
@@ -112,10 +93,7 @@ export type EditorOptions = {
   onOpenAttachment?: (url: string) => void;
   onMediaPaste?: (media: ReturnType<typeof pastedMedia>) => void;
 };
-export function safeMediaURL(value: unknown) {
-  const url = String(value || "");
-  return /^(https?:\/\/|\/api\/attachments\/)/i.test(url) ? url : "";
-}
+export { safeMediaURL } from "./schema";
 export function createBlockEditor(
   root: HTMLElement,
   options: EditorOptions = {},
@@ -148,90 +126,11 @@ export function createBlockEditor(
   const url = options.mediaURL || safeMediaURL;
   const recordingStates = new Map<string, RecordingDisplay>();
   const recordingViews = new Set<() => void>();
-  const NativeImage = Image.extend({
-    draggable: true,
-    parseHTML() {
-      return [{
-        tag: "img[src], img[data-original-src]",
-        getAttrs: (element) => {
-          const src = element.getAttribute("data-original-src") || element.getAttribute("src");
-          return url(src) ? null : false;
-        },
-      }];
-    },
-    addNodeView() {
+  const nodeViews: EditorNodeViews = {
+    image() {
       return (props) => inlineImageView(props, url);
     },
-    addAttributes() {
-      return {
-        ...this.parent?.(),
-        id: { default: null },
-        name: { default: null },
-        mimeType: { default: "image/png" },
-        size: { default: 0 },
-        src: {
-          default: null,
-          renderHTML: (attrs) => ({
-            src: url(attrs.src),
-            "data-original-src": attrs.src,
-          }),
-          parseHTML: (element) =>
-            element.getAttribute("data-original-src") ||
-            element.getAttribute("src"),
-        },
-      };
-    },
-    renderHTML({ HTMLAttributes }) {
-      return [
-        "img",
-        mergeAttributes(HTMLAttributes, {
-          src: HTMLAttributes.src,
-        }),
-      ];
-    },
-  }).configure({
-    inline: true,
-    resize: {
-      enabled: true,
-      directions: ["bottom-left", "bottom-right"],
-      minWidth: 80,
-      minHeight: 40,
-      alwaysPreserveAspectRatio: true,
-    },
-  });
-  const Attachment = Node.create({
-    name: "attachment",
-    group: "inline",
-    inline: true,
-    atom: true,
-    draggable: true,
-    addAttributes: () => ({
-      id: {
-        default: null,
-        parseHTML: (el) => el.getAttribute("data-attachment-id"),
-      },
-      size: {
-        default: 0,
-        parseHTML: (element) => Number(element.getAttribute("data-size")) || 0,
-      },
-      recordingId: {
-        default: "",
-        parseHTML: (element) => element.getAttribute("data-recording-id") || "",
-      },
-      url: {
-        default: "",
-        parseHTML: (element) => element.getAttribute("data-url"),
-      },
-      name: {
-        default: "",
-        parseHTML: (element) => element.getAttribute("data-name"),
-      },
-      mimeType: {
-        default: "",
-        parseHTML: (element) => element.getAttribute("data-mime-type"),
-      },
-    }),
-    addNodeView() {
+    attachment() {
       return ({ node }) => {
         const dom = document.createElement("span");
         dom.dataset.attachment = "";
@@ -277,55 +176,7 @@ export function createBlockEditor(
         };
       };
     },
-    parseHTML: () => [{ tag: "[data-attachment]" }],
-    renderHTML({ HTMLAttributes: a }) {
-      const src = url(a.url);
-      return [
-        "span",
-        {
-          "data-attachment": "",
-          "data-attachment-id": a.id,
-          "data-size": a.size,
-          "data-recording-id": a.recordingId,
-          "data-url": a.url,
-          "data-name": a.name,
-          "data-mime-type": a.mimeType,
-          class: "attachment",
-        },
-        String(a.mimeType).startsWith("audio/")
-          ? ["audio", { src, controls: "", preload: "metadata" }]
-          : String(a.mimeType).startsWith("video/")
-            ? [
-                "video",
-                { src, controls: "", playsinline: "", preload: "metadata" },
-              ]
-            : [
-                "a",
-                {
-                  href: src,
-                  "data-open-attachment": a.url,
-                  target: "_blank",
-                  rel: "noreferrer",
-                },
-                `↗ ${a.name || "Вложение"}`,
-              ],
-      ];
-    },
-  });
-  const Recording = Node.create({
-    name: "recording",
-    group: "inline",
-    inline: true,
-    atom: true,
-    draggable: true,
-    addAttributes: () => ({ id: { default: "" } }),
-    parseHTML: () => [{ tag: "[data-recording]" }],
-    renderHTML: ({ node }) => [
-      "span",
-      { "data-recording": node.attrs.id },
-      "Голосовая запись",
-    ],
-    addNodeView() {
+    recording() {
       return ({ node }) => {
         const dom = document.createElement("span");
         dom.className = "attachment recording-block";
@@ -360,117 +211,7 @@ export function createBlockEditor(
         };
       };
     },
-  });
-  const Reference = Node.create({
-    name: "noteReference",
-    group: "inline",
-    inline: true,
-    atom: true,
-    addAttributes: () => ({
-      id: {
-        default: "",
-        parseHTML: (element) => element.getAttribute("data-note-reference"),
-      },
-      title: {
-        default: "",
-        parseHTML: (element) =>
-          element.getAttribute("data-title") ||
-          element.textContent?.replace(/^↗ /, ""),
-      },
-    }),
-    parseHTML: () => [{ tag: "span[data-note-reference]" }],
-    renderHTML: ({ HTMLAttributes: a }) => [
-      "span",
-      {
-        "data-note-reference": a.id,
-        "data-title": a.title,
-        class: "note-reference",
-        role: "link",
-        tabindex: "0",
-      },
-      `↗ ${a.title || "Заметка"}`,
-    ],
-    renderText: ({ node }) => node.attrs.title || "Заметка",
-  });
-  const Snippet = Node.create({
-    name: "sourceSnippet",
-    group: "inline",
-    inline: true,
-    atom: true,
-    draggable: true,
-    addAttributes: () => ({
-      url: {
-        default: "",
-        parseHTML: (element) => element.getAttribute("data-url"),
-      },
-      title: {
-        default: "",
-        parseHTML: (element) => element.getAttribute("data-title"),
-      },
-      quote: {
-        default: "",
-        parseHTML: (element) => element.getAttribute("data-quote"),
-      },
-      quotePrefix: {
-        default: "",
-        parseHTML: (element) => element.getAttribute("data-quote-prefix"),
-      },
-      quoteSuffix: {
-        default: "",
-        parseHTML: (element) => element.getAttribute("data-quote-suffix"),
-      },
-      timestampSeconds: {
-        default: null,
-        parseHTML: (element) => {
-          const value = element.getAttribute("data-seconds");
-          return value !== null && Number.isFinite(Number(value))
-            ? Number(value)
-            : null;
-        },
-      },
-    }),
-    parseHTML: () => [{ tag: "[data-source-snippet]" }],
-    renderHTML({ HTMLAttributes: a }) {
-      const href = sourceLink({
-        url: a.url,
-        quote: a.quote,
-        quotePrefix: a.quotePrefix,
-        quoteSuffix: a.quoteSuffix,
-        timestampSeconds: a.timestampSeconds,
-      });
-      let host = a.title || "Источник";
-      try {
-        host = new URL(href).hostname.replace(/^www\./, "");
-      } catch {}
-      return [
-        "span",
-        {
-          "data-source-snippet": "",
-          "data-url": a.url,
-          "data-title": a.title,
-          "data-quote": a.quote,
-          "data-quote-prefix": a.quotePrefix,
-          "data-quote-suffix": a.quoteSuffix,
-          "data-seconds": a.timestampSeconds,
-          class: "source-snippet",
-        },
-        ...(a.quote ? [["span", { class: "source-quote" }, a.quote]] : []),
-        [
-          "a",
-          {
-            href,
-            target: "_blank",
-            rel: "noopener noreferrer",
-            contenteditable: "false",
-            title: a.quote ? "Открыть источник у цитаты" : a.title || href,
-          },
-          `↗ ${host}`,
-        ],
-      ] as any;
-    },
-    renderText: ({ node }) =>
-      node.attrs.quote || node.attrs.title || node.attrs.url,
-  });
+  };
   let items: {
     label: string;
     hint?: string;
@@ -483,41 +224,7 @@ export function createBlockEditor(
   let destroyed = false;
   let selectingWithPointer = false;
   let renderedItems = "";
-  const extensions = [
-    StarterKit.configure({
-      link: { openOnClick: false },
-      trailingNode: {
-        notAfter: [
-          "bulletList",
-          "orderedList",
-          "taskList",
-          "heading",
-          "blockquote",
-          "codeBlock",
-          "table",
-        ],
-      },
-      heading: { levels: [1, 2, 3] },
-    }),
-    NativeImage,
-    Formatting,
-    TextColor,
-    Highlight,
-    Subscript,
-    Superscript,
-    TaskList,
-    TaskItem.configure({ nested: true }),
-    Placeholder.configure({ placeholder: "Пиши…  / команды · @ заметка" }),
-    TableKit,
-    Attachment,
-    Recording,
-    Reference,
-    Snippet,
-    ListUX,
-    UnsupportedBlock,
-    UnsupportedInline,
-  ];
-  extensions.push(preserveAttributes(getSchema(extensions)));
+  const extensions = createEditorExtensions(url, nodeViews);
   const schema = getSchema(extensions);
   let editor: Editor;
   try { editor = new Editor({

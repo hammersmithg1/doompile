@@ -1156,7 +1156,7 @@ struct NoteEditor: View {
             guard capture == nil, let continuation = conflict.continuing(EditorLifecycle.prepared(note, plainText: text)) else { return }
             autosaveTask?.cancel()
             do { try EditorDrafts.save(continuation.note); EditorDrafts.clear(conflict.original.id) }
-            catch { error = error.localizedDescription }
+            catch { self.error = error.localizedDescription }
             note = continuation.note
             lastSaved = conflict.copy
             if !continuation.replacements.isEmpty { editorBridge.reconcileAttachments(continuation.replacements) }

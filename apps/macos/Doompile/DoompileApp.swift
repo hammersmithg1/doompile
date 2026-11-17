@@ -381,7 +381,7 @@ struct NoteWorkspace: View {
             guard let continuation = conflict.continuing(note) else { return }
             draftTask?.cancel()
             do { try EditorDrafts.save(continuation.note); EditorDrafts.clear(conflict.original.id) }
-            catch { error = error.localizedDescription }
+            catch { self.error = error.localizedDescription }
             note = continuation.note
             lastSaved = conflict.copy
             if !continuation.replacements.isEmpty { bridge.reconcileAttachments(continuation.replacements.map { ($0.from, $0.to) }) }

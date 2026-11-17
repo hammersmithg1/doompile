@@ -140,8 +140,14 @@ export const noteSchema = z.object({
   updatedAt: isoDate,
   deletedAt: isoDate.nullish(),
   revision: z.number().int().min(0),
+  replica: z.object({
+    format: z.literal("yjs-1"),
+    data: z.string().max(16 * 1024 * 1024),
+    provisional: z.boolean().optional(),
+  }).optional(),
 });
 export type Note = z.infer<typeof noteSchema>;
+export type NoteReplica = NonNullable<Note["replica"]>;
 
 export function textToDocument(text: string): DocumentNode {
   return {
