@@ -14,6 +14,8 @@ export function prepareLegacy(note: Note): Note {
 /** One-time bridge for pre-replica caches. Never union independently seeded Y docs. */
 export function migrateSnapshot(local: Note, remote: Note, baseline?: Note): Note {
   if (!remote.replica) throw new Error("Canonical note state is required");
+  local = prepareLegacy(local);
+  if (baseline) baseline = prepareLegacy(baseline);
   const doc = open(remote.replica);
   try {
     if (baseline) {

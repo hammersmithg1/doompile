@@ -13,10 +13,10 @@ struct NoteSyncState: Codable { var server: Note?; var legacyBaseline: Note? }
 struct NoteClientRecord: Encodable {
     var note: Note; var dirty: Bool; var baseRevision: Int; var server: Note?; var legacyBaseline: Note?
 }
-struct StagedNote: Decodable { var note: Note; var changes: [NoteChange]; var legacy: [LegacyNoteChange] }
+struct StagedNote: Decodable { var note: Note; var changes: [NoteChange]; var legacy: [LegacyNoteChange]; var legacyBaseline: Note? }
 struct NoteJournalEntry: Codable, Equatable {
     var change: NoteChange?; var legacy: LegacyNoteChange?
-    var id: String { change?.id ?? legacy!.id }
+    var id: String { change?.id ?? legacy?.id ?? "" }
 }
 
 /// The same causal model runs in the server, browser and Apple clients.

@@ -2,7 +2,7 @@ import * as Y from "yjs";
 import type { Note } from "../core/src/index";
 import { capture, combine, type NoteChange, type ChangeOrigin } from "./changes";
 import { delta, authoredSnapshot, sameState, open, state, decode, equal } from "./model";
-import { migrateSnapshot } from "./legacy";
+import { migrateSnapshot, prepareLegacy } from "./legacy";
 export type LegacyChange = { id: string; note: Note; baseline?: Note; baseRevision: number; origin: ChangeOrigin };
 export type ClientRecord = { note: Note; dirty: boolean; baseRevision: number; server?: Note; legacyBaseline?: Note };
 export function recovery(note: Note, server?: Note): NoteChange {
@@ -17,7 +17,7 @@ function addsState(incoming: Note, previous: Note) {
 export function stage(current: ClientRecord | undefined, input: Note, raw: NoteChange[] = [], origin: ChangeOrigin = "web") {
   const changes: NoteChange[] = [], legacy: LegacyChange[] = [];
   let note: Note;
-  if (!input.replica && (input.revision > 0 || current && !current.note.replica)) {
+  if (!input.replica && (input.revision > 0 || current)) {
     if (current?.note.replica) {
       const bridged = migrateSnapshot(input, current.note, current.legacyBaseline);
       const captured = capture({ ...bridged, replica: current.note.replica }, origin);
@@ -27,7 +27,7 @@ export function stage(current: ClientRecord | undefined, input: Note, raw: NoteC
       if (!current || !equal(current.note, input)) legacy.push({ id: crypto.randomUUID(), note: input, ...(current ? { baseline: current.note } : {}), baseRevision: input.revision, origin });
     }
   } else {
-    const captured = capture(input, origin);
+    const captured = capture(!input.replica ? prepareLegacy(input) : input, origin);
     if (!current && !captured.change) changes.push(recovery(captured.note));
     const known = new Set(changes.map(item => item.id));
     for (const change of [...raw, ...(captured.change ? [captured.change] : [])]) if (!known.has(change.id)) { known.add(change.id); changes.push(change); }
@@ -41,6 +41,6 @@ export function stage(current: ClientRecord | undefined, input: Note, raw: NoteC
     }
     note = combine(current?.note.replica ? current.note : undefined, captured.note);
   }
-  return { note, changes, legacy };
+  return { note, changes, legacy, legacyBaseline: current?.legacyBaseline ?? (!input.replica ? input : undefined) };
 }
 export function receive(current: Note | undefined, server: Note) { return combine(current?.replica ? current : undefined, server); }

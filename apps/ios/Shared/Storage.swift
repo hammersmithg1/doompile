@@ -168,12 +168,13 @@ final class Storage: @unchecked Sendable {
         var actions: [String] = []
         let result: (note: Note, operation: String?) = try access { db in try db.transaction {
             let previous = try db.note(original.id)
-            let state = try db.syncState(original.id)
+            var state = try db.syncState(original.id)
             let record = previous.map { NoteClientRecord(note: $0.note, dirty: $0.dirty, baseRevision: state.server?.revision ?? $0.note.revision, server: state.server, legacyBaseline: state.legacyBaseline) }
             if let previous, previous.dirty, previous.note.replica == nil, try !db.hasJournal(original.id) {
                 try db.append(original.id, NoteJournalEntry(legacy: LegacyNoteChange(id: UUID().uuidString.lowercased(), note: previous.note, baseRevision: previous.note.revision, origin: NoteEngine.origin)))
             }
             let staged = try NoteEngine.shared.stage(original, current: record, changes: changes)
+            if let baseline = staged.legacyBaseline { state.legacyBaseline = baseline; try db.putSyncState(original.id, state) }
             let note = staged.note
             for change in staged.changes { try db.append(note.id, NoteJournalEntry(change: change)) }
             for change in staged.legacy { try db.append(note.id, NoteJournalEntry(legacy: change)) }

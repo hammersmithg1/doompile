@@ -27,7 +27,7 @@ enum NoteHistoryService {
         request.setValue("Bearer " + Connection.token, forHTTPHeaderField: "Authorization")
         request.setValue(account.id, forHTTPHeaderField: "X-Doompile-User-ID")
         request.setValue(String(Contracts.apiVersion), forHTTPHeaderField: "X-Doompile-API-Version")
-        let (data, response) = try await session.data(for: request)
+        let (data, response) = try await Telemetry.network(session, request: request)
         guard Connection.scope == scope else { throw URLError(.cancelled) }
         guard let response = response as? HTTPURLResponse, response.statusCode == 200 else { throw DoompileError.message("Не удалось загрузить историю. Проверь соединение и повтори.") }
         return try JSONDecoder().decode(T.self, from: data)

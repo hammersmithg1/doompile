@@ -1,5 +1,6 @@
 import type { Attachment, Note, DocumentNode } from "@doompile/core";
 import { documentText, NOTE_LIMITS, textToDocument } from "@doompile/core";
+import { canonical } from "../../../../packages/sync/model";
 import {
   prepareDocument,
   documentSource,
@@ -15,6 +16,7 @@ export function documentMediaURLs(body: DocumentNode) {
   return urls;
 }
 export function editableNote(note: Note): Note {
+  if (note.replica) return note;
   const body = prepareDocument(
     note.body,
     note.title,
@@ -147,7 +149,7 @@ export function noteForEditorSave(editor: Note, editTags: string): Note {
 }
 
 export function editorContentKey(note: Note, tags = note.tags) {
-  return JSON.stringify({
+  return canonical({
     body: note.body,
     plainText: note.plainText,
     attachments: note.attachments,

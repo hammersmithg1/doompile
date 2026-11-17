@@ -54,16 +54,16 @@ export default function NoteHistory({ noteID, onClose, onRestored }: { noteID: s
     {error && <div className="history-feedback" role="alert">{error}<button type="button" onClick={() => void load()}>Повторить</button></div>}
     <div className="history-content">
       <nav aria-label="Сохранённые версии" className="history-versions">
-        {versions.map(version => <button type="button" key={version.revision} aria-pressed={selected === version.revision} disabled={restoring} onClick={() => setSelected(version.revision)}><strong>{new Date(version.createdAt).toLocaleString("ru-RU", { day: "numeric", month: "short", hour: "2-digit", minute: "2-digit", second: "2-digit" })}</strong><span>{version.kind === "restore" ? "Восстановление" : platform[version.origin] ?? "Сохранение"} · {version.revision}</span></button>)}
+        {versions.map(version => <button type="button" key={version.revision} data-history-version={version.revision} aria-pressed={selected === version.revision} disabled={restoring} onClick={() => setSelected(version.revision)}><strong>{new Date(version.createdAt).toLocaleString("ru-RU", { day: "numeric", month: "short", hour: "2-digit", minute: "2-digit", second: "2-digit" })}</strong><span>{version.kind === "restore" ? "Восстановление" : platform[version.origin] ?? "Сохранение"} · {version.revision}</span></button>)}
         {loading && <p role="status">Загружаем…</p>}
         {!loading && !versions.length && !error && <p className="muted">История появится после синхронизации заметки.</p>}
         {more && <button type="button" disabled={loading || restoring} onClick={() => void load(versions.at(-1)?.revision)}>Более ранние версии</button>}
       </nav>
       <div className="history-preview">
-        {selected !== undefined && <label className="history-authored"><input type="checkbox" checked={authored} disabled={restoring} onChange={event => setAuthored(event.target.checked)}/>Сохранённый вариант устройства</label>}
+        {selected !== undefined && <label className="history-authored" title="Текст, сохранённый на устройстве до объединения с другими изменениями."><input type="checkbox" checked={authored} disabled={restoring} onChange={event => setAuthored(event.target.checked)}/>Сохранённый вариант устройства</label>}
         {preview ? <RichEditor key={`${selected}:${authored}`} noteId={noteID} recordingTarget="history" value={preview.body} attachments={preview.attachments} readOnly onChange={() => {}} notes={[]} onAttachment={async () => { throw new Error("Просмотр версии"); }}/> : selected !== undefined && !error ? <p role="status">Открываем версию…</p> : null}
       </div>
     </div>
-    <footer className="history-footer"><span className="muted">Одна заметка · все сохранённые изменения</span><button type="button" className="primary-button" disabled={!preview || restoring} onClick={() => void restore()}>{restoring ? "Восстанавливаем…" : "Восстановить версию"}</button></footer>
+    <footer className="history-footer"><span/><button type="button" className="lime-button" disabled={!preview || restoring} onClick={() => void restore()}>{restoring ? "Восстанавливаем…" : "Восстановить версию"}</button></footer>
   </Modal>;
 }

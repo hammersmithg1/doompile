@@ -141,8 +141,7 @@ final class CoreTests: XCTestCase {
         let start = Date(timeIntervalSince1970: 1000)
         let first = try XCTUnwrap(app.acquireSyncLock(now: start))
         // Holding the lease must not hold a SQLite write transaction while awaiting network.
-        let captured = Note.text("Captured by another process")
-        try share.save(captured)
+        let captured = try share.save(Note.text("Captured by another process"))
         XCTAssertEqual(try app.snapshot().notes[captured.id], captured)
         XCTAssertTrue(app.renewSyncLock(first, now: start.addingTimeInterval(2)))
         XCTAssertNil(share.acquireSyncLock(now: start.addingTimeInterval(7)))

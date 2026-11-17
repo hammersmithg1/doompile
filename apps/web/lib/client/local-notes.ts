@@ -59,7 +59,7 @@ export class LocalNotes {
     const known = new Set(changes.map(change => change.id));
     for (const change of staged.changes) if (!known.has(change.id)) { known.add(change.id); changes.push(change); }
     legacy.push(...staged.legacy);
-    return pending({ ...current, note: staged.note, changes, legacy, dirty: !!(changes.length || legacy.length), baseRevision: current?.server?.revision ?? input.revision, writer: this.writer, error: undefined, pending: 0 });
+    return pending({ ...current, note: staged.note, changes, legacy, legacyBaseline: staged.legacyBaseline, dirty: !!(changes.length || legacy.length), baseRevision: current?.server?.revision ?? input.revision, writer: this.writer, error: undefined, pending: 0 });
   }
   async save(note: Note, uploads: QuickUpload[] = [], changes: NoteChange[] = []): Promise<string[]> {
     const bytes = await Promise.all(uploads.map(file => file.data.arrayBuffer()));

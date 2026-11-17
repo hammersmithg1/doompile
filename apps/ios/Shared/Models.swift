@@ -216,6 +216,7 @@ struct Note: Codable, Identifiable, Equatable {
     }
     /// Lift legacy titles and captures into movable editor blocks once.
     var editorDocument: JSONValue {
+        if replica != nil { return body }
         guard case .object(var document) = body else { return body }
         if let source, case .array(let nodes) = document["content"] {
             let context = source.quoteContext

@@ -14,14 +14,15 @@ export async function mockNotes(page: Page, notes: any[] = [], writes: any[] = [
     db.prepare("INSERT INTO notes VALUES (?,?,?)").run(note.id, JSON.stringify(note), note.updatedAt);
   }
   let offline = false;
+  const offlinePages = new Set<Page>();
   const update = (note: Note) => { const index = notes.findIndex(item => item.id === note.id); if (index < 0) notes.push(note); else notes[index] = note; };
   function remote(id: string, patch: Partial<Note>) {
     const current = versions.get(id)!, edited = capture({ ...current, ...patch }, "macos");
     const response = versions.sync(id, edited.change ? [edited.change] : []); update(response.note); return response.note;
   }
-  await page.route("**/api/notes**", async route => {
+  const handler = async (route: import("@playwright/test").Route) => {
     const request = route.request(), url = new URL(request.url()), path = url.pathname;
-    if (offline) return route.fulfill({ status: 503, json: { error: "Offline fixture" } });
+    if (offline || offlinePages.has(route.request().frame().page())) return route.fulfill({ status: 503, json: { error: "Offline fixture" } });
     try {
       if (path === "/api/notes") {
         // Some older UI fixtures deliberately change their remote array directly.
@@ -47,7 +48,8 @@ export async function mockNotes(page: Page, notes: any[] = [], writes: any[] = [
       }
       return route.fallback();
     } catch (error) { return route.fulfill({ status: (error as { status?: number }).status ?? 500, json: { error: "Fixture rejected change" } }); }
-  });
+  };
+  await page.route("**/api/notes**", handler);
   page.once("close", () => db.close());
-  return { versions, notes, writes, remote, setOffline(value: boolean) { offline = value; }, putAttachment(attachment: unknown) { const file = attachment as { id: string }; db.prepare("INSERT OR REPLACE INTO attachments VALUES (?,?)").run(file.id, JSON.stringify(file)); } };
+  return { versions, notes, writes, remote, attach: (other: Page) => other.route("**/api/notes**", handler), setOffline(value: boolean, target?: Page) { if (target) { if (value) offlinePages.add(target); else offlinePages.delete(target); } else offline = value; }, putAttachment(attachment: unknown) { const file = attachment as { id: string }; db.prepare("INSERT OR REPLACE INTO attachments VALUES (?,?)").run(file.id, JSON.stringify(file)); } };
 }
