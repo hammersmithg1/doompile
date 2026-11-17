@@ -90,16 +90,21 @@ jobs:
           npm run editor:build
           python3 apps/macos/generate_project.py
       - name: Test shared native storage
+        if: ${{ !inputs.review_composer }}
         run: swift test --package-path apps/ios --scratch-path "$RUNNER_TEMP/macos-core-tests"
       - name: Test Mac capture, shortcut preferences and timeline
+        if: ${{ !inputs.review_composer }}
         run: bash apps/macos/scripts/test.sh
       - name: Test atomic Mac update publication
+        if: ${{ !inputs.review_composer }}
         run: python3 -m unittest discover -s infra -p 'publish_macos_update_test.py'
       - name: Test native editor capture behavior in WebKit
+        if: ${{ !inputs.review_composer }}
         run: |
           npx playwright install webkit
           npx playwright test -c packages/editor/playwright.macos.config.ts --project=webkit
       - name: Test real WebKit audio encoding and checkpoint recovery on macOS
+        if: ${{ !inputs.review_composer }}
         run: npx playwright test -c packages/editor/playwright.config.ts --project=web-webkit --grep "native MediaRecorder produces playable" --workers=1 --reporter=line
       - name: Preserve failed browser diagnostics
         if: failure()
@@ -127,7 +132,9 @@ jobs:
             -configuration Debug -destination 'platform=macOS' -parallel-testing-enabled NO \
             -derivedDataPath "$RUNNER_TEMP/MacDerivedData" -resultBundlePath "$RUNNER_TEMP/MacComposer.xcresult" \
             CODE_SIGN_IDENTITY=- CODE_SIGN_ENTITLEMENTS= \
-            'SWIFT_ACTIVE_COMPILATION_CONDITIONS=DEBUG DOOMPILE_MAC_UI_REVIEW' test
+            'SWIFT_ACTIVE_COMPILATION_CONDITIONS=DEBUG DOOMPILE_MAC_UI_REVIEW' \
+            -only-testing:DoompileUITests/ComposerTests/testOfflineEditsMergeAndHistoryRestoresSameNote \
+            -test-iterations 5 test
       - name: Export Mac composer review captures
         if: always() && inputs.review_composer
         run: |

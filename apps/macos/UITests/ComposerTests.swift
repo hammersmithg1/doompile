@@ -32,12 +32,22 @@ import XCTest
     func testOfflineEditsMergeAndHistoryRestoresSameNote() throws {
         XCUIApplication().terminate()
         _ = try syncFixture("POST", path: "/api/review/sync")
-        defer {
-            XCUIApplication().terminate()
-            _ = try? syncFixture("POST", path: "/api/review/reset")
-        }
         let originalID = try XCTUnwrap(try syncFixture()["originalID"] as? String)
         let app = launch()
+        defer {
+            app.terminate()
+            if let root = app.launchEnvironment["DOOMPILE_MAC_UI_ROOT"],
+               let files = FileManager.default.enumerator(at: URL(fileURLWithPath: root), includingPropertiesForKeys: nil) {
+                for case let file as URL in files {
+                    if file.lastPathComponent.contains("sqlite") || file.pathExtension == "jsonl" {
+                        let attachment = XCTAttachment(contentsOfFile: file)
+                        attachment.name = "synthetic-sync-" + file.lastPathComponent
+                        attachment.lifetime = .keepAlways; add(attachment)
+                    }
+                }
+            }
+            _ = try? syncFixture("POST", path: "/api/review/reset")
+        }
         let window = app.windows.firstMatch
         let feed = app.scrollViews["Лента заметок"]
         let row = feed.staticTexts["Sync review"]
@@ -126,6 +136,7 @@ import XCTest
         let app = XCUIApplication()
         app.launchEnvironment = [
             "DOOMPILE_MAC_UI_TESTING": "1",
+            "DOOMPILE_MAC_UI_TRACE": "1",
             "DOOMPILE_MAC_UI_ROOT": FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString).path,
             "DOOMPILE_MAC_UI_ENDPOINT": "http://127.0.0.1:18743",
             "DOOMPILE_TEST_APPEARANCE": dark ? "dark" : "light",

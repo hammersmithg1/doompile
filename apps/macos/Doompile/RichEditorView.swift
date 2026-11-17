@@ -108,6 +108,31 @@ struct MacRichEditorView: NSViewRepresentable {
         })();
         """
         configuration.userContentController.addUserScript(WKUserScript(source: startup, injectionTime: .atDocumentStart, forMainFrameOnly: true))
+        #if DEBUG
+        if ProcessInfo.processInfo.environment["DOOMPILE_MAC_UI_TRACE"] == "1" {
+            let trace = #"""
+            (() => {
+              let api;
+              const report = (kind, extra = {}) => {
+                const selection = window.getSelection();
+                let state; try { state = api?.getState?.(); } catch {}
+                window.webkit.messageHandlers.doompile.postMessage({type:'reviewInput', kind, time:performance.now(),
+                  dom: document.querySelector('.tiptap')?.textContent ?? '', model: state?.plainText ?? '', replica:state?.note?.replica,
+                  anchor:selection?.anchorOffset, focus:selection?.focusOffset, ...extra});
+              };
+              Object.defineProperty(window, 'doompileEditor', { configurable:true, get:() => api, set:value => {
+                api = value; const setNote = value.setNote;
+                value.setNote = note => { report('apply.before', {incoming:note}); const result = setNote.call(value, note); report('apply.after'); return result; };
+              }});
+              for (const kind of ['keydown', 'beforeinput', 'input', 'compositionstart', 'compositionend'])
+                document.addEventListener(kind, event => {
+                  if (event.target?.closest?.('.tiptap')) report(kind, {key:event.key ?? '', data:event.data ?? '', inputType:event.inputType ?? '', composing:event.isComposing ?? false});
+                }, true);
+            })();
+            """#
+            configuration.userContentController.addUserScript(WKUserScript(source: trace, injectionTime: .atDocumentStart, forMainFrameOnly: true))
+        }
+        #endif
         configuration.userContentController.add(context.coordinator, name: "doompile")
         if onPasteImage != nil {
             configuration.userContentController.addScriptMessageHandler(context.coordinator, contentWorld: .page, name: EditorImagePaste.messageName)
@@ -170,6 +195,16 @@ struct MacRichEditorView: NSViewRepresentable {
         }
         func userContentController(_ userContentController: WKUserContentController, didReceive message: WKScriptMessage) {
             guard message.name == "doompile", let payload = message.body as? [String: Any], let type = payload["type"] as? String else { return }
+            #if DEBUG
+            if ProcessInfo.processInfo.environment["DOOMPILE_MAC_UI_TRACE"] == "1", ["reviewInput", "replica"].contains(type),
+               let root = ProcessInfo.processInfo.environment["DOOMPILE_MAC_UI_ROOT"],
+               var data = try? JSONSerialization.data(withJSONObject: payload) {
+                let folder = URL(fileURLWithPath: root); try? FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+                let file = folder.appendingPathComponent("input-trace.jsonl"); data.append(10)
+                if !FileManager.default.fileExists(atPath: file.path) { try? data.write(to: file) }
+                else if let handle = try? FileHandle(forWritingTo: file) { _ = try? handle.seekToEnd(); try? handle.write(contentsOf: data); try? handle.close() }
+            }
+            #endif
             switch type {
             case "telemetry":
                 if let name = payload["name"] as? String, let event = TelemetryEventName(rawValue: name), [.editorReady, .editorAction, .editorFailed, .runtimeError].contains(event) {

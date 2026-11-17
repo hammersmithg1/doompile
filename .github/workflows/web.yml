@@ -1,6 +1,7 @@
 name: Web and clipper
 on:
   push:
+    branches-ignore: [review/native-sync-trace]
   pull_request:
   workflow_dispatch:
 permissions:
