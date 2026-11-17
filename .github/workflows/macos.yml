@@ -43,7 +43,7 @@ permissions:
   id-token: write
 
 concurrency:
-  group: macos-${{ github.ref }}-${{ inputs.review_composer && 'composer-review' || 'build' }}
+  group: macos-${{ github.ref }}-${{ inputs.review_composer && 'composer-review' || 'build' }}-intel-review
   cancel-in-progress: ${{ !inputs.publish_release && !inputs.signed_release }}
 
 jobs:
@@ -55,7 +55,7 @@ jobs:
       DOOMPILE_MACOS_UPDATE_PUBLIC_KEY: ${{ vars.DOOMPILE_MACOS_UPDATE_PUBLIC_KEY }}
       DOOMPILE_MACOS_BUILD_NUMBER: ${{ inputs.build_number }}
       DOOMPILE_MACOS_BUILD_SERIES: ${{ vars.DOOMPILE_MACOS_BUILD_SERIES }}
-    runs-on: macos-15
+    runs-on: macos-15-intel
     timeout-minutes: ${{ (inputs.publish_release || inputs.signed_release) && 60 || 25 }}
     steps:
       - name: Require a trusted release run
