@@ -112,7 +112,7 @@ final class TouchUXTests: XCTestCase {
         for _ in 0..<8 where !version.isHittable { app.scrollViews["Сохранённые версии"].swipeLeft() }
         version.tap()
         let previewReady = XCTNSPredicateExpectation(predicate: NSPredicate { _, _ in
-            app.webViews.textViews.allElementsBoundByIndex.contains { ($0.value as? String)?.trimmingCharacters(in: .whitespacesAndNewlines) == merged }
+            self.app.webViews.textViews.allElementsBoundByIndex.contains { ($0.value as? String)?.trimmingCharacters(in: .whitespacesAndNewlines) == merged }
         }, object: nil)
         XCTAssertEqual(XCTWaiter.wait(for: [previewReady], timeout: 10), .completed)
         screenshot("sync-history-preview")
