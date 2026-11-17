@@ -1,6 +1,49 @@
 import { test, expect } from "@playwright/test";
 import { createNote } from "../../core/src/index";
 import { prepare } from "../../sync/model";
+import { stage, receive, type ClientRecord } from "../../sync/client";
+import type { Note } from "../../core/src/index";
+import type { NoteChange } from "../../sync/changes";
+
+test("asynchronous native saves and acknowledgements cannot echo a typed character", async ({ page }) => {
+  test.setTimeout(90_000);
+  const base = prepare(createNote({ plainText: "Shared" }));
+  let native = base, record: ClientRecord = { note: base, dirty: false, baseRevision: 0 };
+  let writes = Promise.resolve(), count = 0;
+  await page.exposeFunction("nativeReplica", async (incoming: Note, change: NoteChange) => {
+    if (++count > 500) throw new Error("A remote update was echoed as native input");
+    const value = native = receive(native, incoming);
+    const echo = page.evaluate(note => (window as any).controller.setNote(note), native);
+    writes = writes.then(async () => {
+      await new Promise(resolve => setTimeout(resolve, 2));
+      const saved = stage(record, value, [change], "macos");
+      record = { note: saved.note, dirty: false, baseRevision: record.baseRevision + 1 };
+      // Native storage and a cloud response return canonical serialized state.
+      record.note = receive(record.note, { ...prepare(record.note), revision: record.baseRevision });
+      native = receive(native, record.note);
+      await page.evaluate(note => (window as any).controller.setNote(note), native);
+    });
+    await echo; await writes;
+  });
+  await page.goto("/");
+  await page.evaluate(note => {
+    const w = window as any, push = w.replicaEvents.push.bind(w.replicaEvents);
+    w.nativePending = [];
+    w.replicaEvents.push = (event: { note: Note; change: NoteChange }) => {
+      w.nativePending.push(w.nativeReplica(event.note, event.change)); return push(event);
+    };
+    w.controller.setNote(note);
+  }, base);
+  const editor = page.getByRole("textbox", { name: "Текст заметки" });
+  await editor.click(); await editor.press("ControlOrMeta+End");
+  let expected = "Shared";
+  for (const suffix of [" one", " two", " three", " local", " newer", " final"]) {
+    await editor.pressSequentially(suffix, { delay: 3 }); expected += suffix;
+    await page.evaluate(() => Promise.all((window as any).nativePending));
+    await expect(editor).toHaveText(expected);
+    expect(native.plainText).toBe(expected); expect(record.note.plainText).toBe(expected);
+  }
+});
 test("a live editor merges a remote prefix without moving local typing or undoing remote work", async ({ page }) => {
   const base = prepare(createNote({ plainText: "Shared" }));
   await page.goto("/");

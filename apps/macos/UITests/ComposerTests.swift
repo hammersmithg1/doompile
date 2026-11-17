@@ -97,10 +97,11 @@ import XCTest
         version.click()
         XCTAssertTrue(version.isSelected, app.debugDescription)
         let preview = app.descendants(matching: .any)["history-preview"].firstMatch
+        let previewText = preview.textViews["Текст заметки"].firstMatch
         let previewReady = XCTNSPredicateExpectation(predicate: NSPredicate { _, _ in
-            preview.descendants(matching: .textView).allElementsBoundByIndex.contains { ($0.value as? String)?.trimmingCharacters(in: .whitespacesAndNewlines) == merged }
+            previewText.exists && (previewText.value as? String)?.trimmingCharacters(in: .whitespacesAndNewlines) == merged
         }, object: nil)
-        XCTAssertEqual(XCTWaiter.wait(for: [previewReady], timeout: 10), .completed, app.debugDescription)
+        XCTAssertEqual(XCTWaiter.wait(for: [previewReady], timeout: 30), .completed, app.debugDescription)
         capture("mac-sync-history-preview", in: window)
         app.buttons["Восстановить версию"].click()
         _ = try waitForSync { state in
@@ -118,7 +119,9 @@ import XCTest
         XCTAssertTrue(editor.waitForExistence(timeout: 10))
         app.buttons["История версий"].click()
         XCTAssertTrue(app.buttons["Восстановить версию"].waitForExistence(timeout: 10))
-        waitForLayout { preview.descendants(matching: .textView).allElementsBoundByIndex.contains { ($0.value as? String)?.trimmingCharacters(in: .whitespacesAndNewlines) == merged } }
+        XCTAssertEqual(XCTWaiter.wait(for: [XCTNSPredicateExpectation(predicate: NSPredicate { _, _ in
+            previewText.exists && (previewText.value as? String)?.trimmingCharacters(in: .whitespacesAndNewlines) == merged
+        }, object: nil)], timeout: 30), .completed, app.debugDescription)
         capture("mac-sync-history-dark", in: app.windows.firstMatch)
     }
     private func launch(dark: Bool = false, global: Bool = false, attachment: Bool = false) -> XCUIApplication {

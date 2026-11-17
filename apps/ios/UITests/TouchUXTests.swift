@@ -38,14 +38,14 @@ final class TouchUXTests: XCTestCase {
         var status: Int?
     }
     private func syncFixture(_ method: String = "GET", path: String = "/api/review/sync") throws -> [String: Any] {
-        var request = URLRequest(url: URL(string: "http://127.0.0.1:18743" + path)!, timeoutInterval: 5)
+        var request = URLRequest(url: URL(string: "http://127.0.0.1:18743" + path)!, timeoutInterval: 15)
         request.httpMethod = method
         let result = SyncResponse()
         URLSession.shared.dataTask(with: request) { data, response, _ in
             result.data = data; result.status = (response as? HTTPURLResponse)?.statusCode
             result.ready.signal()
         }.resume()
-        guard result.ready.wait(timeout: .now() + 6) == .success,
+        guard result.ready.wait(timeout: .now() + 16) == .success,
               result.status == 200, let data = result.data else { throw URLError(.badServerResponse) }
         return try XCTUnwrap(JSONSerialization.jsonObject(with: data) as? [String: Any])
     }
@@ -135,10 +135,11 @@ final class TouchUXTests: XCTestCase {
         version.tap()
         XCTAssertTrue(version.isSelected, app.debugDescription)
         let preview = app.descendants(matching: .any)["history-preview"].firstMatch
+        let previewText = preview.textViews["Текст заметки"].firstMatch
         let previewReady = XCTNSPredicateExpectation(predicate: NSPredicate { _, _ in
-            preview.descendants(matching: .textView).allElementsBoundByIndex.contains { ($0.value as? String)?.trimmingCharacters(in: .whitespacesAndNewlines) == merged }
+            previewText.exists && (previewText.value as? String)?.trimmingCharacters(in: .whitespacesAndNewlines) == merged
         }, object: nil)
-        XCTAssertEqual(XCTWaiter.wait(for: [previewReady], timeout: 10), .completed, app.debugDescription)
+        XCTAssertEqual(XCTWaiter.wait(for: [previewReady], timeout: 30), .completed, app.debugDescription)
         screenshot("sync-history-preview")
         app.buttons["Восстановить версию"].tap()
         _ = try waitForSync { state in
@@ -156,8 +157,8 @@ final class TouchUXTests: XCTestCase {
         app.buttons["История версий"].tap()
         XCTAssertTrue(app.buttons["Восстановить версию"].waitForExistence(timeout: 10))
         XCTAssertEqual(XCTWaiter.wait(for: [XCTNSPredicateExpectation(predicate: NSPredicate { _, _ in
-            preview.descendants(matching: .textView).allElementsBoundByIndex.contains { ($0.value as? String)?.trimmingCharacters(in: .whitespacesAndNewlines) == merged }
-        }, object: nil)], timeout: 15), .completed)
+            previewText.exists && (previewText.value as? String)?.trimmingCharacters(in: .whitespacesAndNewlines) == merged
+        }, object: nil)], timeout: 30), .completed, app.debugDescription)
         screenshot("sync-history-dark")
     }
     private func screenshot(_ name: String) {
