@@ -358,7 +358,7 @@ struct QuickCaptureRoot: View {
     }
     private var header: some View {
         HStack(spacing: 5) {
-            DoompileWordmark(height: 16)
+            Text("Черновик").font(.system(size: 11))
             Spacer()
             Button { capture.note.pinned.toggle() } label: { DoompileSymbol(systemName: capture.note.pinned ? "pin.fill" : "pin").frame(width: 28, height: 28) }.help(capture.note.pinned ? "Открепить" : "Закрепить")
             Button { capture.note.urgent.toggle() } label: { DoompileSymbol(systemName: capture.note.urgent ? "flame.fill" : "flame").foregroundStyle(capture.note.urgent ? MacPalette.orange : MacPalette.muted).frame(width: 28, height: 28) }.help("Важное")

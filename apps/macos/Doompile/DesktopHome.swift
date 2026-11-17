@@ -205,31 +205,28 @@ struct DesktopHome: View {
         }.buttonStyle(.plain).accessibilityLabel("\(title), \(count)").accessibilityValue(collapsed.contains(id) ? "Свёрнуто" : "Развёрнуто")
     }
     private var composer: some View {
-        VStack(spacing: 7) {
+        VStack(spacing: quickExpanded ? 0 : 7) {
             if quickExpanded {
-                HStack {
-                    DoompileWordmark(height: 16)
+                HStack(spacing: 5) {
+                    Text("Черновик").font(.system(size: 11)).foregroundStyle(MacPalette.muted)
                     Spacer()
+                    attachButton
+                    MacComposerButton(icon: "mic", label: "Записать голосовую заметку", disabled: quick.startingVoice || quick.voice.recording || quick.busy) { Task { await quick.startRecording() } }
+                    MacComposerButton(icon: "arrow.up", label: "Отправить заметку", send: true, disabled: quickEditorLoading || quick.startingVoice || quick.busy || (!quick.voice.recording && !quick.hasContent), identifier: "quick-composer-send", action: saveQuick)
                     Button { setComposerExpanded(false) } label: { DoompileSymbol(systemName: "arrow.down.right.and.arrow.up.left").frame(width: 28, height: 28) }
-                        .buttonStyle(.plain).help("Свернуть редактор").accessibilityLabel("Свернуть редактор")
+                        .buttonStyle(.plain).foregroundStyle(MacPalette.muted).help("Свернуть редактор").accessibilityLabel("Свернуть редактор")
                         .accessibilityIdentifier("quick-composer-collapse")
-                }.padding(.horizontal, 12).frame(height: 42)
+                }.padding(.horizontal, 32).frame(maxWidth: 900).frame(maxWidth: .infinity).frame(height: 56)
+                    .overlay(alignment: .bottom) { Rectangle().fill(MacPalette.line).frame(height: 1) }
                 MacNoteTags(selected: $quick.note.tags, available: library.tags)
+                    .frame(maxWidth: 900).frame(maxWidth: .infinity)
             }
             if let error = quick.error { Text(error).font(.system(size: 11)).foregroundStyle(MacPalette.orange).textSelection(.enabled) }
             if quickExpanded && quick.startingVoice && !quickEditorLoading {
                 MacRecordingSnippet(starting: quick.startingVoice, seconds: quick.voice.seconds, onStop: quick.stopRecording)
             }
             composerInput
-            if quickExpanded {
-                HStack(spacing: 5) {
-                    Spacer()
-                    attachButton
-                    MacComposerButton(icon: "mic", label: "Записать голосовую заметку", disabled: quick.startingVoice || quick.voice.recording || quick.busy) { Task { await quick.startRecording() } }
-                    MacComposerButton(icon: "arrow.up", label: "Отправить заметку", send: true, disabled: quickEditorLoading || quick.startingVoice || quick.busy || (!quick.voice.recording && !quick.hasContent), identifier: "quick-composer-send", action: saveQuick)
-                }.padding(.vertical, 5)
-            }
-        }.padding(.horizontal, 14).padding(.top, 8).padding(.bottom, 12)
+        }.padding(.horizontal, quickExpanded ? 0 : 14).padding(.top, quickExpanded ? 0 : 8).padding(.bottom, quickExpanded ? 0 : 12)
         .onChange(of: quick.voice.seconds, updateRecordingTime)
     }
     private func updateRecordingTime(from _: Int, to seconds: Int) {
@@ -256,10 +253,12 @@ struct DesktopHome: View {
                 }
             }
         }
-        .padding(6)
-        .background(MacPalette.surface, in: RoundedRectangle(cornerRadius: 15))
-        .overlay(RoundedRectangle(cornerRadius: 15).stroke(quickFocused ? MacPalette.adaptive(0xC9C5C0, 0x69646F) : MacPalette.line))
-        .shadow(color: .black.opacity(0.025), radius: 6, y: 2)
+        .padding(quickExpanded ? 0 : 6)
+        .background(quickExpanded ? Color.clear : MacPalette.surface, in: RoundedRectangle(cornerRadius: 15))
+        .overlay(RoundedRectangle(cornerRadius: 15).stroke(quickExpanded ? Color.clear : quickFocused ? MacPalette.adaptive(0xC9C5C0, 0x69646F) : MacPalette.line))
+        .shadow(color: .black.opacity(quickExpanded ? 0 : 0.025), radius: 6, y: 2)
+        .frame(maxWidth: quickExpanded ? 900 : .infinity)
+        .frame(maxWidth: .infinity, maxHeight: quickExpanded ? .infinity : nil)
     }
     private func pasteQuickImage(_ data: Data) {
         do { try quick.addFile(data, name: "Изображение.png", mime: "image/png") }
