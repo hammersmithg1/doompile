@@ -324,6 +324,14 @@ export async function discardUploads(noteID: string) {
   if (discarded) await changed([noteID]);
   return discarded;
 }
+export async function restoreNote(note: Note, uploads: QuickUpload[] = []) {
+  await initStore();
+  while (writerRunning || localWrites.length) await writing;
+  const current = (await database!.read([note.id]))[0]?.note ?? note;
+  // Undo authors an explicit removal of the tombstone against the current
+  // context; replaying the pre-delete replica cannot undo a later deletion.
+  await saveNote({ ...current, deletedAt: null, updatedAt: new Date().toISOString() }, uploads);
+}
 export async function sync(pull = true) {
   if (!snapshot.ready || !database) return;
   if (syncing) {

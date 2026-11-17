@@ -1,5 +1,6 @@
 import { test, expect } from "@playwright/test";
-import { createNote, type Note } from "../../../packages/core/src/index";
+import { createNote } from "../../../packages/core/src/index";
+import { mockNotes } from "../../../packages/editor/test/note-server";
 const a = {
   id: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
   name: "Alice",
@@ -36,7 +37,8 @@ test("typing across a save acknowledgement keeps one note through repeated autos
       ],
     },
   });
-  const notes = new Map<string, Note>([[initial.id, initial]]);
+  const server = await mockNotes(page, [initial]);
+  const notes = server.notes;
   let release!: () => void;
   const held = new Promise<void>((resolve) => {
     release = resolve;
@@ -47,24 +49,10 @@ test("typing across a save acknowledgement keeps one note through repeated autos
   await page.route("**/api/session", (route) =>
     route.fulfill({ json: { ...configuration, authenticated: true, user: a } }),
   );
-  await page.route("**/api/notes", (route) =>
-    route.fulfill({ json: { notes: [...notes.values()] } }),
-  );
-  await page.route("**/api/notes/*", async (route) => {
-    const { note, baseRevision } = route.request().postDataJSON();
-    if (++requests === 1) {
-      started = true;
-      await held;
-    }
-    const current = notes.get(note.id);
-    if ((current?.revision ?? 0) !== baseRevision) {
-      conflicts++;
-      await route.fulfill({ status: 409, json: { current } });
-      return;
-    }
-    const saved = { ...note, revision: baseRevision + 1 };
-    notes.set(saved.id, saved);
-    await route.fulfill({ json: { note: saved } });
+  page.on("response", response => { if (response.url().endsWith("/sync") && response.status() === 409) conflicts++; });
+  await page.route("**/api/notes/*/sync", async route => {
+    if (++requests === 1) { started = true; await held; }
+    await route.fallback();
   });
   await page.goto("/");
   await page.locator(".note-row").first().click();
@@ -74,15 +62,15 @@ test("typing across a save acknowledgement keeps one note through repeated autos
   await editor.fill("Typing while the first save is in flight");
   release();
   await expect
-    .poll(() => notes.get(initial.id)?.plainText)
+    .poll(() => server.versions.get(initial.id)?.plainText)
     .toBe("Typing while the first save is in flight");
   for (const text of ["Third edit", "Fourth edit", "Final edit"]) {
     await editor.fill(text);
-    await expect.poll(() => notes.get(initial.id)?.plainText).toBe(text);
+    await expect.poll(() => server.versions.get(initial.id)?.plainText).toBe(text);
     await expect(page.locator(".note-row")).toHaveCount(1);
   }
   expect(conflicts).toBe(0);
-  expect(notes.size).toBe(1);
+  expect(notes).toHaveLength(1);
   await page.reload({ waitUntil: "domcontentloaded" });
   await expect(page.locator(".note-row")).toHaveCount(1);
   await expect(page.locator(".note-row")).toContainText("Final edit");
@@ -177,25 +165,13 @@ test("account switches isolate IndexedDB, drafts and old tabs before any queued 
   context,
 }) => {
   let current = a;
-  const sent: string[] = [];
+  const writesA: unknown[] = [], writesB: unknown[] = [];
+  await mockNotes(page, [], writesA, owner => owner === current.id && owner === a.id);
   await context.route("**/api/session", (route) =>
     route.fulfill({
       json: { ...configuration, authenticated: true, user: current },
     }),
   );
-  await context.route("**/api/notes", (route) =>
-    route.fulfill({ json: { notes: [] } }),
-  );
-  await context.route("**/api/notes/*", async (route) => {
-    const owner = route.request().headers()["x-doompile-user-id"];
-    if (owner !== current.id) {
-      await route.fulfill({ status: 401, json: { error: "Account changed" } });
-      return;
-    }
-    sent.push(owner);
-    const body = route.request().postDataJSON();
-    await route.fulfill({ json: { note: { ...body.note, revision: 1 } } });
-  });
   await page.goto("/");
   const quick = page.getByRole("textbox", { name: "Быстрая заметка" });
   await quick.fill("Личная мысль Алисы");
@@ -203,10 +179,11 @@ test("account switches isolate IndexedDB, drafts and old tabs before any queued 
     .getByRole("button", { name: "Сохранить заметку", exact: true })
     .click();
   await expect(page.locator(".note-row")).toContainText("Личная мысль Алисы");
-  await expect.poll(() => sent.length).toBe(1);
+  await expect.poll(() => writesA.length).toBe(1);
   await quick.fill("Черновик Алисы");
   const other = await context.newPage();
   current = b;
+  await mockNotes(other, [], writesB, owner => owner === current.id && owner === b.id);
   await other.goto("/");
   await expect(
     other.getByRole("textbox", { name: "Быстрая заметка" }),
@@ -216,7 +193,8 @@ test("account switches isolate IndexedDB, drafts and old tabs before any queued 
     page.getByRole("textbox", { name: "Быстрая заметка" }),
   ).toHaveValue("");
   await expect(page.locator(".note-row")).toHaveCount(0);
-  expect(sent).toEqual([a.id]);
+  expect(writesA).toHaveLength(1);
+  expect(writesB).toHaveLength(0);
   await other.close();
   current = a;
   await page.reload();

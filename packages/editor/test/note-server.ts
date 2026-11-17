@@ -2,10 +2,10 @@ import type { Page } from "@playwright/test";
 import { DatabaseSync } from "node:sqlite";
 import { VersionStore } from "../../../apps/web/lib/server/versions";
 import { capture } from "../../sync/changes";
-import type { Note } from "../../core/src/index";
+import type { Note, Attachment } from "../../core/src/index";
 
 /** Browser tests use the actual server archive and merge, including receipts. */
-export async function mockNotes(page: Page, notes: any[] = [], writes: any[] = []) {
+export async function mockNotes(page: Page, notes: any[] = [], writes: any[] = [], authorize?: (owner: string | undefined) => boolean) {
   const db = new DatabaseSync(":memory:");
   db.exec("CREATE TABLE notes(id TEXT PRIMARY KEY,payload TEXT NOT NULL,updated_at TEXT NOT NULL); CREATE TABLE attachments(id TEXT PRIMARY KEY,payload TEXT NOT NULL)");
   const versions = new VersionStore(db);
@@ -22,6 +22,7 @@ export async function mockNotes(page: Page, notes: any[] = [], writes: any[] = [
   }
   const handler = async (route: import("@playwright/test").Route) => {
     const request = route.request(), url = new URL(request.url()), path = url.pathname;
+    if (authorize && !authorize(request.headers()["x-doompile-user-id"])) return route.fulfill({ status: 401, json: { error: "Account changed" } });
     if (offline || offlinePages.has(route.request().frame().page())) return route.fulfill({ status: 503, json: { error: "Offline fixture" } });
     try {
       if (path === "/api/notes") {
@@ -51,5 +52,5 @@ export async function mockNotes(page: Page, notes: any[] = [], writes: any[] = [
   };
   await page.route("**/api/notes**", handler);
   page.once("close", () => db.close());
-  return { versions, notes, writes, remote, attach: (other: Page) => other.route("**/api/notes**", handler), setOffline(value: boolean, target?: Page) { if (target) { if (value) offlinePages.add(target); else offlinePages.delete(target); } else offline = value; }, putAttachment(attachment: unknown) { const file = attachment as { id: string }; db.prepare("INSERT OR REPLACE INTO attachments VALUES (?,?)").run(file.id, JSON.stringify(file)); } };
+  return { versions, notes, writes, remote, attach: (other: Page) => other.route("**/api/notes**", handler), setOffline(value: boolean, target?: Page) { if (target) { if (value) offlinePages.add(target); else offlinePages.delete(target); } else offline = value; }, putAttachment<T extends Attachment>(attachment: T): T { db.prepare("INSERT OR REPLACE INTO attachments VALUES (?,?)").run(attachment.id, JSON.stringify(attachment)); return attachment; } };
 }

@@ -49,8 +49,8 @@ async function setup(
       await route.fulfill({ status: 503, json: { error: "offline" } });
     else
       await route.fulfill({
-        json: { attachment: file("Голосовая заметка.wav", "audio/wav",
-          route.request().headers()["x-doompile-upload-id"]) },
+        json: { attachment: server.putAttachment(file("Голосовая заметка.wav", "audio/wav",
+          route.request().headers()["x-doompile-upload-id"])) },
       });
   });
   await page.goto("/");
@@ -67,6 +67,7 @@ async function setup(
     writes,
     notes,
     uploads,
+    putAttachment: server.putAttachment,
     fail(value: boolean) {
       failUpload = value;
     },
@@ -263,7 +264,7 @@ test("pasting an embedded image saves a readable attachment and feed preview", a
   const app = await setup(page);
   const png = "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+aV4sAAAAASUVORK5CYII=";
   const image = file("Изображение.png", "image/png");
-  await page.route("**/api/attachments", (route) => route.fulfill({ json: { attachment: image } }));
+  await page.route("**/api/attachments", (route) => route.fulfill({ json: { attachment: app.putAttachment(image) } }));
   await page.route(`**${image.url}`, (route) => route.fulfill({ contentType: "image/png", body: Buffer.from(png, "base64") }));
   await expand(page);
   const editor = page.getByRole("textbox", { name: "Текст заметки" });
@@ -667,7 +668,7 @@ test("editor padding/header drops go to the note; quick drops stay in the quick 
   await page.route("**/api/attachments", (route) => {
     const id = route.request().headers()["x-doompile-upload-id"];
     return route.fulfill({
-      json: { attachment: file(id ? "quick.txt" : "note.txt", "text/plain", id) },
+      json: { attachment: app.putAttachment(file(id ? "quick.txt" : "note.txt", "text/plain", id)) },
     });
   });
   await drop(page, ".note-editor-header", "note.txt");
@@ -716,8 +717,8 @@ test("a quick attachment finishing upload after expansion stays in the expanded 
     requested = true;
     await gate;
     await route.fulfill({
-      json: { attachment: file("pending.pdf", "application/pdf",
-        route.request().headers()["x-doompile-upload-id"]) },
+      json: { attachment: app.putAttachment(file("pending.pdf", "application/pdf",
+          route.request().headers()["x-doompile-upload-id"])) },
     });
   });
   await drop(page, ".quick-composer", "pending.pdf");
@@ -753,14 +754,14 @@ test("expanded send saves text, a pending file and active voice in one note", as
     }
     await route.fulfill({
       json: {
-        attachment: pendingFile
+        attachment: app.putAttachment(pendingFile
           ? file(
               "pending.pdf",
               "application/pdf",
               route.request().headers()["x-doompile-upload-id"],
             )
           : file("Голосовая заметка.wav", "audio/wav",
-              route.request().headers()["x-doompile-upload-id"]),
+              route.request().headers()["x-doompile-upload-id"])),
       },
     });
   });

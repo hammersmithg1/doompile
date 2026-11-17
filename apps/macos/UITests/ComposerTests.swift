@@ -69,6 +69,7 @@ import XCTest
             let notes = state["notes"] as? [[String: Any]] ?? []
             return notes.count == 1 && notes.first?["id"] as? String == originalID && notes.first?["plainText"] as? String == merged
         }
+        waitForLayout { (editor.value as? String)?.trimmingCharacters(in: .whitespacesAndNewlines) == merged }
         capture("mac-sync-merged-one-note", in: window)
         let marker = try syncFixture("POST", path: "/api/review/marker")
         let markerRevision = try XCTUnwrap(marker["revision"] as? Int)
@@ -80,7 +81,11 @@ import XCTest
         app.buttons["История версий"].click()
         let version = app.buttons["history-version-\(markerRevision)"]
         XCTAssertTrue(version.waitForExistence(timeout: 10))
-        for _ in 0..<8 where !version.isHittable { app.scrollViews["Сохранённые версии"].scroll(byDeltaX: 0, deltaY: -300) }
+        let versions = app.scrollViews["Сохранённые версии"]
+        for _ in 0..<12 {
+            if versions.frame.contains(version.frame) { break }
+            versions.scroll(byDeltaX: 0, deltaY: -300)
+        }
         version.click()
         let previewReady = XCTNSPredicateExpectation(predicate: NSPredicate { _, _ in
             app.webViews.textViews.allElementsBoundByIndex.contains { ($0.value as? String)?.trimmingCharacters(in: .whitespacesAndNewlines) == merged }

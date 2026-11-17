@@ -88,6 +88,7 @@ final class TouchUXTests: XCTestCase {
             XCTAssertTrue(cached.waitForExistence(timeout: 10)); cached.tap()
         }
         XCTAssertTrue(app.buttons["close-editor"].waitForExistence(timeout: 5))
+        XCTAssertTrue(editor.waitForExistence(timeout: 15))
         app.webViews.firstMatch.coordinate(withNormalizedOffset: CGVector(dx: 0.55, dy: 0.82)).tap()
         screenshot("sync-offline-after-restart")
         _ = try syncFixture("POST", path: "/api/review/remote")
@@ -98,6 +99,10 @@ final class TouchUXTests: XCTestCase {
             let notes = state["notes"] as? [[String: Any]] ?? []
             return notes.count == 1 && notes.first?["id"] as? String == originalID && notes.first?["plainText"] as? String == merged
         }
+        let mergedReady = XCTNSPredicateExpectation(predicate: NSPredicate { _, _ in
+            (editor.value as? String)?.trimmingCharacters(in: .whitespacesAndNewlines) == merged
+        }, object: nil)
+        XCTAssertEqual(XCTWaiter.wait(for: [mergedReady], timeout: 15), .completed)
         screenshot("sync-merged-one-note")
         let marker = try syncFixture("POST", path: "/api/review/marker")
         let markerRevision = try XCTUnwrap(marker["revision"] as? Int)
@@ -109,7 +114,11 @@ final class TouchUXTests: XCTestCase {
         app.buttons["История версий"].tap()
         let version = app.buttons["history-version-\(markerRevision)"]
         XCTAssertTrue(version.waitForExistence(timeout: 10))
-        for _ in 0..<8 where !version.isHittable { app.scrollViews["Сохранённые версии"].swipeLeft() }
+        let versions = app.scrollViews["Сохранённые версии"]
+        for _ in 0..<12 {
+            if versions.frame.insetBy(dx: 10, dy: 0).contains(version.frame) { break }
+            versions.swipeLeft()
+        }
         version.tap()
         let previewReady = XCTNSPredicateExpectation(predicate: NSPredicate { _, _ in
             self.app.webViews.textViews.allElementsBoundByIndex.contains { ($0.value as? String)?.trimmingCharacters(in: .whitespacesAndNewlines) == merged }

@@ -1113,8 +1113,7 @@ export default function Doompile({
     if (!undo || restoring.current) return;
     restoring.current = true;
     try {
-      if (undo.uploads) await store.saveNote(undo.note, undo.uploads);
-      else await update(undo.note, { deletedAt: null });
+      await store.restoreNote(undo.note, undo.uploads);
       notify("Заметка восстановлена");
     } catch {
       setToast("Не удалось восстановить заметку. Повтори попытку.");
