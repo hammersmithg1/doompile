@@ -16,13 +16,14 @@ async function json(url: string, init?: RequestInit) {
 export default function NoteHistory({ noteID, onClose, onRestored }: { noteID: string; onClose: () => void; onRestored: (note: Note) => void }) {
   const [versions, setVersions] = useState<VersionInfo[]>([]);
   const [selected, setSelected] = useState<number>();
-  const [preview, setPreview] = useState<Note>();
+  const [preview, setPreview] = useState<{ note: Note; revision: number; authored: boolean }>();
   const [authored, setAuthored] = useState(false);
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(true);
   const [restoring, setRestoring] = useState(false);
   const [more, setMore] = useState(false);
   const endpoint = `/api/notes/${noteID}/versions`;
+  const visiblePreview = preview?.revision === selected && preview?.authored === authored ? preview.note : undefined;
   async function load(before?: number) {
     setLoading(true); setError("");
     try {
@@ -36,7 +37,7 @@ export default function NoteHistory({ noteID, onClose, onRestored }: { noteID: s
   useEffect(() => {
     if (selected === undefined) return;
     let cancelled = false; setPreview(undefined); setError("");
-    void json(`${endpoint}/${selected}${authored ? "?view=authored" : ""}`).then(({ note }) => { if (!cancelled) setPreview(note); }).catch(e => { if (!cancelled) setError(e.message); });
+    void json(`${endpoint}/${selected}${authored ? "?view=authored" : ""}`).then(({ note }) => { if (!cancelled) setPreview({ note, revision: selected, authored }); }).catch(e => { if (!cancelled) setError(e.message); });
     return () => { cancelled = true; };
   }, [selected, authored, endpoint]);
   async function restore() {
@@ -61,9 +62,9 @@ export default function NoteHistory({ noteID, onClose, onRestored }: { noteID: s
       </nav>
       <div className="history-preview">
         {selected !== undefined && <label className="history-authored" title="Текст, сохранённый на устройстве до объединения с другими изменениями."><input type="checkbox" checked={authored} disabled={restoring} onChange={event => setAuthored(event.target.checked)}/>Сохранённый вариант устройства</label>}
-        {preview ? <RichEditor key={`${selected}:${authored}`} noteId={noteID} recordingTarget="history" value={preview.body} attachments={preview.attachments} readOnly onChange={() => {}} notes={[]} onAttachment={async () => { throw new Error("Просмотр версии"); }}/> : selected !== undefined && !error ? <p role="status">Открываем версию…</p> : null}
+        {visiblePreview ? <RichEditor key={`${selected}:${authored}`} noteId={noteID} recordingTarget="history" value={visiblePreview.body} attachments={visiblePreview.attachments} readOnly onChange={() => {}} notes={[]} onAttachment={async () => { throw new Error("Просмотр версии"); }}/> : selected !== undefined && !error ? <p role="status">Открываем версию…</p> : null}
       </div>
     </div>
-    <footer className="history-footer"><span/><button type="button" className="lime-button" disabled={!preview || restoring} onClick={() => void restore()}>{restoring ? "Восстанавливаем…" : "Восстановить версию"}</button></footer>
+    <footer className="history-footer"><span/><button type="button" className="lime-button" disabled={!visiblePreview || restoring} onClick={() => void restore()}>{restoring ? "Восстанавливаем…" : "Восстановить версию"}</button></footer>
   </Modal>;
 }

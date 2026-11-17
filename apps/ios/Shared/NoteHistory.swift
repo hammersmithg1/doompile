@@ -12,7 +12,9 @@ struct NoteVersion: Decodable, Identifiable {
     var id: Int { revision }
     var dateLabel: String {
         let format = ISO8601DateFormatter(); format.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
-        return format.date(from: createdAt)?.formatted(date: .abbreviated, time: .standard) ?? createdAt
+        guard let date = format.date(from: createdAt) else { return createdAt }
+        let display = DateFormatter(); display.locale = Locale(identifier: "ru_RU"); display.dateFormat = "d MMM, HH:mm:ss"
+        return display.string(from: date)
     }
     var label: String {
         if kind == "restore" { return "Восстановление" }
@@ -62,11 +64,14 @@ struct NoteHistoryView: View {
     @State private var selected: Int?
     @State private var authored = false
     @State private var preview: Note?
+    @State private var previewRevision: Int?
+    @State private var previewAuthored = false
     @State private var loading = true
     @State private var restoring = false
     @State private var more = false
     @State private var error: String?
-    private var selectionKey: String { "\(selected ?? 0):\(authored)" }
+    private var selectionKey: String { "\(selected.map(String.init) ?? "none"):\(authored)" }
+    private var visiblePreview: Note? { previewRevision == selected && previewAuthored == authored ? preview : nil }
     var body: some View {
         NavigationStack {
             VStack(spacing: 0) {
@@ -81,11 +86,15 @@ struct NoteHistoryView: View {
                 Divider()
                 VStack(alignment: .leading, spacing: 12) {
                     Text("Восстановление сохранит текущую версию в истории.").font(.system(size: 12)).foregroundStyle(DesignTokens.muted)
-                    HStack { Spacer(); Button(restoring ? "Восстанавливаем…" : "Восстановить версию") { Task { await restore() } }.disabled(preview == nil || restoring).buttonStyle(.borderedProminent) }
+                    HStack { Spacer(); Button { Task { await restore() } } label: {
+                        Text(restoring ? "Восстанавливаем…" : "Восстановить версию").font(.system(size: 13, weight: .semibold))
+                            .padding(.horizontal, 17).padding(.vertical, 11)
+                            .foregroundStyle(DesignTokens.onLime).background(DesignTokens.lime, in: RoundedRectangle(cornerRadius: 9))
+                    }.buttonStyle(.plain).disabled(visiblePreview == nil || restoring).opacity(visiblePreview == nil || restoring ? 0.5 : 1) }
                 }.padding(16)
             }
             .background(DesignTokens.background).navigationTitle("История версий")
-            .toolbar { ToolbarItem(placement: .confirmationAction) { Button("Готово") { dismiss() }.disabled(restoring) } }
+            .toolbar { ToolbarItem(placement: .confirmationAction) { Button("Готово") { dismiss() }.foregroundStyle(DesignTokens.text).disabled(restoring) } }
         }
         #if os(macOS)
         .frame(minWidth: 760, idealWidth: 900, minHeight: 560, idealHeight: 650)
@@ -93,8 +102,9 @@ struct NoteHistoryView: View {
         .task { await load() }
         .task(id: selectionKey) {
             guard let selected else { return }
+            let authoredView = authored
             preview = nil
-            do { let note = try await NoteHistoryService.preview(noteID, revision: selected, authored: authored); if !Task.isCancelled { preview = note } }
+            do { let note = try await NoteHistoryService.preview(noteID, revision: selected, authored: authoredView); if !Task.isCancelled { preview = note; previewRevision = selected; previewAuthored = authoredView } }
             catch { if !Task.isCancelled { self.error = error.localizedDescription } }
         }
         .interactiveDismissDisabled(restoring)
@@ -121,7 +131,7 @@ struct NoteHistoryView: View {
     private var versionPreview: some View {
         VStack(alignment: .leading, spacing: 12) {
             if selected != nil { Toggle("Сохранённый вариант устройства", isOn: $authored).font(.system(size: 12)).disabled(restoring).padding(.horizontal, 16).padding(.top, 16) }
-            if let preview { NoteVersionPreview(note: preview) }
+            if let preview = visiblePreview { NoteVersionPreview(note: preview) }
             else if selected != nil { ProgressView().frame(maxWidth: .infinity, maxHeight: .infinity) }
             else { Spacer() }
         }

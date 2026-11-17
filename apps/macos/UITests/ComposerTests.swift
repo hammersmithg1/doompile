@@ -80,8 +80,12 @@ import XCTest
         app.buttons["История версий"].click()
         let version = app.buttons["history-version-\(markerRevision)"]
         XCTAssertTrue(version.waitForExistence(timeout: 10))
-        if !version.isHittable { app.scrollViews["Сохранённые версии"].scroll(byDeltaX: 0, deltaY: -300) }
+        for _ in 0..<8 where !version.isHittable { app.scrollViews["Сохранённые версии"].scroll(byDeltaX: 0, deltaY: -300) }
         version.click()
+        let previewReady = XCTNSPredicateExpectation(predicate: NSPredicate { _, _ in
+            app.webViews.textViews.allElementsBoundByIndex.contains { ($0.value as? String)?.trimmingCharacters(in: .whitespacesAndNewlines) == merged }
+        }, object: nil)
+        XCTAssertEqual(XCTWaiter.wait(for: [previewReady], timeout: 10), .completed)
         capture("mac-sync-history-preview", in: window)
         app.buttons["Восстановить версию"].click()
         _ = try waitForSync { state in

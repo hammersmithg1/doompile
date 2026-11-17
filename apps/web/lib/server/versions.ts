@@ -35,6 +35,16 @@ export class VersionStore {
       );
       CREATE TABLE IF NOT EXISTS note_changes (cursor INTEGER PRIMARY KEY AUTOINCREMENT,note_id TEXT NOT NULL,revision INTEGER NOT NULL);
       CREATE INDEX IF NOT EXISTS note_changes_by_note ON note_changes(note_id,cursor);
+      CREATE TABLE IF NOT EXISTS note_legacy_writes (note_id TEXT PRIMARY KEY);
+      CREATE TRIGGER IF NOT EXISTS note_legacy_insert AFTER INSERT ON notes
+        WHEN NOT EXISTS(SELECT 1 FROM note_replicas WHERE note_id=NEW.id)
+        BEGIN INSERT OR IGNORE INTO note_legacy_writes VALUES (NEW.id); END;
+      CREATE TRIGGER IF NOT EXISTS note_legacy_update AFTER UPDATE ON notes
+        WHEN json_extract(NEW.payload,'$.revision') != COALESCE((SELECT MAX(revision) FROM note_versions WHERE note_id=NEW.id),-1)
+        BEGIN INSERT OR IGNORE INTO note_legacy_writes VALUES (NEW.id); END;
+      INSERT OR IGNORE INTO note_legacy_writes
+        SELECT n.id FROM notes n LEFT JOIN note_replicas r ON r.note_id=n.id
+        WHERE r.note_id IS NULL OR json_extract(n.payload,'$.revision') != (SELECT MAX(revision) FROM note_versions WHERE note_id=n.id);
     `);
     if (!(db.prepare("PRAGMA table_info(note_versions)").all() as { name: string }[]).some(row => row.name === "legacy_hash")) db.exec("ALTER TABLE note_versions ADD COLUMN legacy_hash TEXT");
   }
@@ -70,6 +80,7 @@ export class VersionStore {
   private putState(id: string, doc: Y.Doc) {
     this.db.prepare("INSERT INTO note_replicas(note_id,state) VALUES (?,?) ON CONFLICT(note_id) DO UPDATE SET state=excluded.state")
       .run(id, gzipSync(Y.encodeStateAsUpdate(doc)));
+    this.db.prepare("DELETE FROM note_legacy_writes WHERE note_id=?").run(id);
   }
   private append(note: Note, doc: Y.Doc, change: Uint8Array, parent: number | null, kind: string, authoredAt: string, origin: string, submitted?: NoteChange) {
     const checkpoint = parent === null || kind === "initial" || note.revision % 64 === 0;
@@ -80,7 +91,25 @@ export class VersionStore {
     this.putProjection(note);
   }
   private seed(note: Note) {
-    if (this.db.prepare("SELECT 1 FROM note_replicas WHERE note_id=?").get(note.id)) return;
+    const existing = this.replica(note.id);
+    if (existing) {
+      const tip = this.db.prepare("SELECT revision,created_at FROM note_versions WHERE note_id=? ORDER BY revision DESC LIMIT 1").get(note.id) as { revision: number; created_at: string };
+      if (tip.revision === note.revision) { this.db.prepare("DELETE FROM note_legacy_writes WHERE note_id=?").run(note.id); return; }
+      // An older application image can still write the public projection after
+      // rollback. Reconcile that snapshot before exposing a stale causal tip.
+      const before = open(existing);
+      let doc: Y.Doc | undefined;
+      try {
+        const current = project(before, { revision: tip.revision, updatedAt: tip.created_at });
+        const merged = migrateSnapshot(note, current, note.revision === tip.revision + 1 ? current : undefined);
+        doc = open(merged.replica); this.canonicalMedia(doc);
+        const next = noteSchema.parse(project(doc, { revision: Math.max(tip.revision, note.revision) + 1, updatedAt: new Date().toISOString() }));
+        this.append(next, doc, decode(delta(next.replica!, existing)), tip.revision, "migration", note.updatedAt, "migration");
+        this.db.prepare("UPDATE note_versions SET legacy_hash=? WHERE note_id=? AND revision=?").run(this.blob(Buffer.from(JSON.stringify(plain(note)))), note.id, next.revision);
+        this.putState(note.id, doc);
+      } finally { before.destroy(); doc?.destroy(); }
+      return;
+    }
     const initial = prepare(prepareLegacy(note)), doc = open(initial.replica);
     try {
       // Preserve existing revision numbers and identifiers at the migration boundary.
@@ -93,7 +122,7 @@ export class VersionStore {
     } finally { doc.destroy(); }
   }
   private ensureAll() {
-    const rows = this.db.prepare("SELECT n.payload FROM notes n LEFT JOIN note_replicas r ON r.note_id=n.id WHERE r.note_id IS NULL").all() as { payload: string }[];
+    const rows = this.db.prepare("SELECT n.payload FROM notes n JOIN note_legacy_writes w ON w.note_id=n.id").all() as { payload: string }[];
     for (const row of rows) this.seed(JSON.parse(row.payload));
   }
   get(id: string): Note | null {

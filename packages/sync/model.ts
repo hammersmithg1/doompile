@@ -4,6 +4,7 @@ import { prosemirrorJSONToYXmlFragment, yXmlFragmentToProsemirrorJSON } from "@t
 import type { Attachment, DocumentNode, Note, NoteReplica } from "../core/src/index";
 import { createEditorExtensions } from "../editor/src/schema";
 import { prepareForEditor, restoreDocument } from "../editor/src/compatibility";
+import { prepareLegacy } from "./normalize";
 import { digest } from "lib0/hash/sha256";
 import { encodeUtf8 } from "lib0/string";
 
@@ -114,10 +115,12 @@ export function body(doc: Y.Doc): DocumentNode {
 export function setBody(doc: Y.Doc, value: DocumentNode) {
   if (equal(body(doc), value)) return;
   const prepared = prepareForEditor(value as JSONContent, schema);
-  const attrs = doc.getMap("documentAttrs");
-  for (const key of [...attrs.keys()]) if (!(key in (prepared.attrs ?? {}))) attrs.delete(key);
-  for (const [key, item] of Object.entries(prepared.attrs ?? {})) setValue(attrs, key, item);
-  prosemirrorJSONToYXmlFragment(schema, prepared, doc.getXmlFragment(BODY_FIELD));
+  doc.transact(() => {
+    const attrs = doc.getMap("documentAttrs");
+    for (const key of [...attrs.keys()]) if (!(key in (prepared.attrs ?? {}))) attrs.delete(key);
+    for (const [key, item] of Object.entries(prepared.attrs ?? {})) setValue(attrs, key, item);
+    prosemirrorJSONToYXmlFragment(schema, prepared, doc.getXmlFragment(BODY_FIELD));
+  }, "doompile-body");
 }
 export function documentPlainText(node: DocumentNode): string {
   if (node.type === "text") return node.text ?? "";
@@ -183,11 +186,28 @@ export function project(doc: Y.Doc, previous?: Partial<Note>, provisional = fals
   const id = meta.get("id"), createdAt = meta.get("createdAt");
   if (typeof id !== "string" || typeof createdAt !== "string") throw new Error("Incomplete note replica");
   const records = doc.getMap<unknown>("attachments");
+  const media = new Map<string, Attachment>();
+  const visit = (node: DocumentNode) => {
+    if (node.type === "image" || node.type === "attachment") {
+      const attrs = node.attrs ?? {}, url = String(attrs.src || attrs.url || "");
+      const id = String(attrs.id || /(?:local:|\/api\/attachments\/)([a-f0-9-]{36})$/i.exec(url)?.[1] || "");
+      if (/^[a-f0-9-]{36}$/i.test(id) && url) media.set(url, {
+        id, url, name: String(attrs.name || attrs.alt || "Вложение"),
+        mimeType: String(attrs.mimeType || (node.type === "image" ? "image/png" : "application/octet-stream")),
+        size: Number(attrs.size) || 0,
+      });
+    }
+    node.content?.forEach(visit);
+  };
+  visit(document);
   const ordered = [...new Set([...doc.getArray<string>("attachmentOrder").toArray(), ...[...records.keys()].sort()])];
   const attachments = ordered.flatMap(key => {
     const item = records.get(key);
-    return item instanceof Y.Map ? [item.toJSON() as Attachment] : [];
+    if (!(item instanceof Y.Map)) return [];
+    const file = item.toJSON() as Attachment;
+    return media.has(file.url) ? [file] : [];
   });
+  for (const file of media.values()) if (!attachments.some(item => item.id === file.id)) attachments.push(file);
   const source = doc.getMap("source").toJSON();
   const cachedText = doc.getMap("legacyText");
   const plainText = cachedText.has("bodyHash") && cachedText.get("bodyHash") === bodyHash(document) && typeof cachedText.get("text") === "string"
@@ -207,7 +227,7 @@ export function project(doc: Y.Doc, previous?: Partial<Note>, provisional = fals
 }
 export function prepare(note: Note): Note {
   const doc = open(note.replica);
-  try { applySnapshot(doc, note); return project(doc, note, note.replica?.provisional); }
+  try { applySnapshot(doc, note.replica ? note : prepareLegacy(note)); return project(doc, note, note.replica?.provisional); }
   finally { doc.destroy(); }
 }
 export function merge(current: Note, remote: Note): Note {

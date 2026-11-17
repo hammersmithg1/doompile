@@ -104,3 +104,11 @@ test("repeated local preparation does not author identical changes", () => {
   assert.ok(sameState(initial.replica!, again.replica!));
   assert.equal(again.replica!.data, initial.replica!.data);
 });
+
+test("a generated title does not duplicate a long first paragraph during initial canonical import", () => {
+  const text = "А".repeat(159) + "😀" + " продолжение";
+  const note = prepare(createNote({ plainText: text }));
+  assert.equal(note.body.content?.length, 1);
+  assert.equal(note.plainText, text);
+  assert.equal(prepare(note).body.content?.length, 1);
+});

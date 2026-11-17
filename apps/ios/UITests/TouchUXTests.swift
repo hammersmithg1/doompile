@@ -7,6 +7,9 @@ final class TouchUXTests: XCTestCase {
         continueAfterFailure = false
         app = XCUIApplication()
         app.launchEnvironment["DOOMPILE_UI_TESTING"] = "1"
+        // Every test owns a fresh database and cursor. Relaunches within that
+        // test retain the directory, including the offline journal.
+        app.launchEnvironment["DOOMPILE_UI_ROOT"] = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString).path
         if name.contains("testCompactComposerAttachmentAndVoiceStates") {
             app.launchEnvironment["DOOMPILE_UI_COMPOSER_FIXTURE"] = "1"
         }
@@ -106,8 +109,12 @@ final class TouchUXTests: XCTestCase {
         app.buttons["История версий"].tap()
         let version = app.buttons["history-version-\(markerRevision)"]
         XCTAssertTrue(version.waitForExistence(timeout: 10))
-        if !version.isHittable { app.scrollViews["Сохранённые версии"].swipeLeft() }
+        for _ in 0..<8 where !version.isHittable { app.scrollViews["Сохранённые версии"].swipeLeft() }
         version.tap()
+        let previewReady = XCTNSPredicateExpectation(predicate: NSPredicate { _, _ in
+            app.webViews.textViews.allElementsBoundByIndex.contains { ($0.value as? String)?.trimmingCharacters(in: .whitespacesAndNewlines) == merged }
+        }, object: nil)
+        XCTAssertEqual(XCTWaiter.wait(for: [previewReady], timeout: 10), .completed)
         screenshot("sync-history-preview")
         app.buttons["Восстановить версию"].tap()
         _ = try waitForSync { state in

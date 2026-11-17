@@ -9,6 +9,7 @@ import {
 import { LocalNotes, type StoredRecord } from "./local-notes";
 import { syncOutbox } from "./sync-outbox";
 import type { NoteChange } from "../../../../packages/sync/changes";
+import { merge as mergeReplicas } from "../../../../packages/sync/model";
 import {
   forgetUpload,
   markUploadFailed,
@@ -50,6 +51,9 @@ let syncing = false;
 let syncFinished = Promise.resolve();
 let finishSync: (() => void) | undefined;
 let writing = Promise.resolve();
+let writerRunning = false;
+type LocalWrite = { note: Note; uploads: QuickUpload[]; changes: NoteChange[]; resolve: () => void; reject: (error: unknown) => void };
+const localWrites: LocalWrite[] = [];
 const retainedRaw: { note: Note; changes: NoteChange[] }[] = [];
 let syncRequested = false;
 let pullRequested = false;
@@ -187,20 +191,45 @@ export function initStore(): Promise<void> {
   return initializing;
 }
 export function saveNote(input: Note, uploads: QuickUpload[] = [], changes: NoteChange[] = []) {
-  const task = writing.then(async () => {
-    await initStore();
-    while (retainedRaw.length) {
-      const raw = retainedRaw[0];
-      await changed(await database!.save(raw.note, [], raw.changes));
-      retainedRaw.shift();
-    }
-    await persistNote(input, uploads, changes);
-  }).catch(error => {
-    if (changes.length && !retainedRaw.some(raw => raw.changes.some(change => changes.some(item => item.id === change.id)))) retainedRaw.push({ note: input, changes });
-    throw error;
+  const result = new Promise<void>((resolve, reject) => {
+    localWrites.push({ note: input, uploads, changes, resolve, reject });
   });
-  writing = task.catch(() => {});
-  return task;
+  startWriter();
+  return result;
+}
+function startWriter() {
+  if (writerRunning) return;
+  writerRunning = true;
+  writing = drainWrites().finally(() => {
+    writerRunning = false;
+    if (localWrites.length) startWriter();
+  });
+}
+async function drainWrites() {
+  while (localWrites.length) {
+    const first = localWrites.shift()!, batch = [first];
+    // Already queued keystrokes share the next disk transaction. Their original
+    // operation IDs and authored snapshots are retained individually.
+    if (first.changes.length && !first.uploads.length) {
+      while (localWrites[0]?.note.id === first.note.id && localWrites[0].changes.length && !localWrites[0].uploads.length) batch.push(localWrites.shift()!);
+    }
+    try {
+      await initStore();
+      while (retainedRaw.length) {
+        const raw = retainedRaw[0];
+        await changed(await database!.save(raw.note, [], raw.changes)); retainedRaw.shift();
+      }
+      let note = first.note;
+      for (const next of batch.slice(1)) note = mergeReplicas(note, next.note);
+      await persistNote(note, first.uploads, batch.flatMap(item => item.changes));
+      for (const item of batch) item.resolve();
+    } catch (error) {
+      for (const item of batch) {
+        if (item.changes.length && !retainedRaw.some(raw => raw.changes.some(change => item.changes.some(value => value.id === change.id)))) retainedRaw.push({ note: item.note, changes: item.changes });
+        item.reject(error);
+      }
+    }
+  }
 }
 async function persistNote(input: Note, uploads: QuickUpload[] = [], changes: NoteChange[] = []) {
   const started = performance.now();
@@ -416,7 +445,10 @@ export async function clearLocalData() {
 }
 
 export async function prepareHistory(id: string) {
-  await initStore(); await writing; await sync(false);
+  await initStore();
+  while (writerRunning || localWrites.length) await writing;
+  if (retainedRaw.length) throw new Error("Не удалось сохранить изменения на устройстве. Повтори сохранение.");
+  await sync(false);
   if ((await database!.read([id]))[0]?.dirty) throw new Error("Сначала нужно отправить изменения этой заметки. Они сохранены на устройстве.");
 }
 export async function receiveNotes(notes: Note[]) {

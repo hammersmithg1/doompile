@@ -36,3 +36,22 @@ test("an older editor pauses on an unknown shared node without deleting it or ec
   const result = await page.evaluate(() => ({ errors: (window as any).syncErrors, events: (window as any).replicaEvents.length }));
   expect(result.errors).toHaveLength(1); expect(result.events).toBe(0);
 });
+
+test("deleting a media block removes its active attachment and undo restores the same file metadata", async ({ page }) => {
+  const file = { id: "813e83a9-92e2-4cd7-8477-9b9395b503c0", name: "Photo.svg", mimeType: "image/svg+xml", size: 400, url: "/api/attachments/813e83a9-92e2-4cd7-8477-9b9395b503c0" };
+  const base = prepare(createNote({ plainText: "File", attachments: [file] }));
+  await page.route(`**${file.url}`, route => route.fulfill({ contentType: file.mimeType, body: '<svg xmlns="http://www.w3.org/2000/svg" width="80" height="50"/>' }));
+  await page.goto("/");
+  const deleted = await page.evaluate(note => {
+    const w = window as any; w.controller.setNote(note);
+    let position = -1; w.testEditor.state.doc.descendants((node: any, pos: number) => { if (node.type.name === "image") position = pos; });
+    if (position < 0) throw Error("Missing image");
+    w.testEditor.commands.setNodeSelection(position); w.testEditor.commands.deleteSelection();
+    const after = w.controller.getNote();
+    w.controller.setNote(w.sync.prepare(after)); // Persisted metadata cleanup is a remote-origin update.
+    return after.attachments.length;
+  }, base);
+  expect(deleted).toBe(0);
+  const restored = await page.evaluate(() => { const w = window as any; w.testEditor.commands.undo(); return w.controller.getNote().attachments; });
+  expect(restored).toEqual([file]);
+});

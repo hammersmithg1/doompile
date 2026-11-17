@@ -13,6 +13,7 @@ async function queued(page: Page, id: string) {
 }
 test("two browser devices keep offline edits across restart and restore history in the same note", async ({ page, browser }, info) => {
   test.setTimeout(90_000);
+  await page.emulateMedia({ reducedMotion: "no-preference" });
   if (info.project.name === "web-webkit") {
     await page.setViewportSize({ width: 390, height: 844 });
     await page.emulateMedia({ colorScheme: "dark" });
@@ -40,11 +41,28 @@ test("two browser devices keep offline edits across restart and restore history 
     const mergedRevision = server.versions.get(note.id)!.revision;
     await mkdir(captures, { recursive: true });
     await page.screenshot({ path: `${captures}/merged-${info.project.name}.png` });
+    await page.evaluate(() => {
+      const observer = new MutationObserver(() => {
+        const animations = document.getAnimations().filter(animation => (animation.effect as KeyframeEffect)?.target instanceof HTMLElement && ((animation.effect as KeyframeEffect).target as HTMLElement).matches(".note-history, .modal-backdrop"));
+        if (animations.length) { (window as any).historyAnimations = animations; observer.disconnect(); }
+      });
+      observer.observe(document.body, { childList: true, subtree: true });
+    });
     await page.getByRole("button", { name: "История версий", exact: true }).click();
     const dialog = page.getByRole("dialog", { name: "История версий" });
     await expect(dialog).toBeVisible();
+    await expect.poll(() => page.evaluate(() => (window as any).historyAnimations?.length ?? 0)).toBeGreaterThan(0);
     await dialog.locator('[data-history-version="1"]').click();
     await expect(dialog.getByRole("textbox", { name: "Текст заметки" })).toHaveText("Общий текст");
+    for (const fraction of [0.2, 0.6]) {
+      await page.evaluate(fraction => {
+        const animations: Animation[] = (window as any).historyAnimations;
+        const time = Math.max(...animations.map(animation => Number(animation.effect!.getTiming().duration))) * fraction;
+        for (const animation of animations) { animation.pause(); animation.currentTime = Math.min(Number(animation.effect!.getTiming().duration), time); }
+      }, fraction);
+      await page.screenshot({ path: `${captures}/history-frame-${fraction}-${info.project.name}.png` });
+    }
+    await page.evaluate(() => { for (const animation of (window as any).historyAnimations) animation.finish(); });
     await page.screenshot({ path: `${captures}/history-${info.project.name}.png` });
     await dialog.getByRole("checkbox", { name: "Сохранённый вариант устройства" }).check();
     await expect(dialog.getByRole("textbox", { name: "Текст заметки" })).toHaveText("Общий текст");

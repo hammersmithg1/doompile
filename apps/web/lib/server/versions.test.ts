@@ -227,3 +227,22 @@ test("three offline writers converge with reordered duplicate delivery of text, 
     } finally { f.close(); }
   }
 });
+
+test("rolling back only the application image cannot hide an older writer's new projection", () => {
+  const f = fixture();
+  try {
+    const initial = prepare(createNote({ plainText: "Base" }));
+    const saved = f.versions.sync(initial.id, [change(initial)]).note;
+    const cursor = f.versions.cursor();
+    const { replica: _replica, ...legacy } = { ...saved, body: textToDocument("Rollback edit"), plainText: "Rollback edit", revision: 2 };
+    f.db.prepare("UPDATE notes SET payload=? WHERE id=?").run(JSON.stringify(legacy), saved.id);
+    const page = f.versions.changes(cursor);
+    assert.equal(page.notes.length, 1);
+    assert.equal(page.notes[0].id, saved.id);
+    assert.equal(page.notes[0].plainText, "Rollback edit");
+    assert.equal(page.notes[0].revision, 3);
+    assert.equal(f.versions.version(saved.id, 1)!.plainText, "Base");
+    assert.equal(f.versions.authoredVersion(saved.id, 3)!.plainText, "Rollback edit");
+    assert.equal(f.versions.changes(page.cursor).notes.length, 0);
+  } finally { f.close(); }
+});

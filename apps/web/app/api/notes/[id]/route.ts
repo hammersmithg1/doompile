@@ -40,7 +40,7 @@ export async function PUT(
 ) {
   return api(request, async (user) => {
     const { id } = await context.params;
-    const parsed = mutationSchema.safeParse(await readJSON(request));
+    const parsed = mutationSchema.safeParse(await readJSON(request, 24 * 1024 * 1024));
     if (!parsed.success)
       throw new RequestError(
         parsed.error.issues
