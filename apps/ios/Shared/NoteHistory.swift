@@ -122,6 +122,7 @@ struct NoteHistoryView: View {
                             Text("\(version.label) · \(version.revision)").font(.system(size: 12)).foregroundStyle(DesignTokens.muted)
                         }.frame(maxWidth: .infinity, alignment: .leading).padding(12)
                             .background(selected == version.revision ? DesignTokens.limeSoft : .clear, in: RoundedRectangle(cornerRadius: 10))
+                            .contentShape(Rectangle())
                     }.buttonStyle(.plain).disabled(restoring).accessibilityIdentifier("history-version-\(version.revision)")
                         .accessibilityAddTraits(selected == version.revision ? .isSelected : [])
                 }
