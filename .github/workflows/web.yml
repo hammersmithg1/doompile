@@ -1,6 +1,7 @@
 name: Web and clipper
 on:
   push:
+    branches-ignore: [review/history-preview-theme]
   pull_request:
   workflow_dispatch:
 permissions:
