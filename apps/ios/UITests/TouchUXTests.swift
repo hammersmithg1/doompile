@@ -116,12 +116,14 @@ final class TouchUXTests: XCTestCase {
         XCTAssertTrue(version.waitForExistence(timeout: 10))
         let versions = app.scrollViews["Сохранённые версии"]
         for _ in 0..<12 {
-            if versions.frame.insetBy(dx: 10, dy: 0).contains(version.frame) { break }
-            versions.swipeLeft()
+            let center = CGPoint(x: version.frame.midX, y: version.frame.midY)
+            if versions.frame.insetBy(dx: 10, dy: 0).contains(center) { break }
+            if center.x < versions.frame.minX { versions.swipeRight() } else { versions.swipeLeft() }
         }
         version.tap()
+        let preview = app.descendants(matching: .any)["history-preview"].firstMatch
         let previewReady = XCTNSPredicateExpectation(predicate: NSPredicate { _, _ in
-            self.app.webViews.textViews.allElementsBoundByIndex.contains { ($0.value as? String)?.trimmingCharacters(in: .whitespacesAndNewlines) == merged }
+            preview.descendants(matching: .textView).allElementsBoundByIndex.contains { ($0.value as? String)?.trimmingCharacters(in: .whitespacesAndNewlines) == merged }
         }, object: nil)
         XCTAssertEqual(XCTWaiter.wait(for: [previewReady], timeout: 10), .completed)
         screenshot("sync-history-preview")
@@ -131,7 +133,19 @@ final class TouchUXTests: XCTestCase {
             return notes.count == 1 && notes.first?["id"] as? String == originalID && notes.first?["plainText"] as? String == merged
         }
         XCTAssertEqual(try syncFixture()["conflicts"] as? Int, 0)
+        XCTAssertTrue(app.buttons["Готово"].waitForNonExistence(timeout: 5))
         screenshot("sync-history-restored-one-note")
+        app.terminate()
+        app.launchEnvironment["DOOMPILE_TEST_APPEARANCE"] = "dark"
+        app.launch()
+        if !app.buttons["close-editor"].exists { let cached = noteRow(merged); XCTAssertTrue(cached.waitForExistence(timeout: 10)); cached.tap() }
+        XCTAssertTrue(editor.waitForExistence(timeout: 15))
+        app.buttons["История версий"].tap()
+        XCTAssertTrue(app.buttons["Восстановить версию"].waitForExistence(timeout: 10))
+        XCTAssertEqual(XCTWaiter.wait(for: [XCTNSPredicateExpectation(predicate: NSPredicate { _, _ in
+            preview.descendants(matching: .textView).allElementsBoundByIndex.contains { ($0.value as? String)?.trimmingCharacters(in: .whitespacesAndNewlines) == merged }
+        }, object: nil)], timeout: 15), .completed)
+        screenshot("sync-history-dark")
     }
     private func screenshot(_ name: String) {
         let image = XCTAttachment(screenshot: app.screenshot())

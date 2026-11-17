@@ -83,12 +83,14 @@ import XCTest
         XCTAssertTrue(version.waitForExistence(timeout: 10))
         let versions = app.scrollViews["Сохранённые версии"]
         for _ in 0..<12 {
-            if versions.frame.contains(version.frame) { break }
-            versions.scroll(byDeltaX: 0, deltaY: -300)
+            let center = CGPoint(x: version.frame.midX, y: version.frame.midY)
+            if versions.frame.contains(center) { break }
+            versions.scroll(byDeltaX: 0, deltaY: center.y < versions.frame.minY ? 180 : -180)
         }
         version.click()
+        let preview = app.descendants(matching: .any)["history-preview"].firstMatch
         let previewReady = XCTNSPredicateExpectation(predicate: NSPredicate { _, _ in
-            app.webViews.textViews.allElementsBoundByIndex.contains { ($0.value as? String)?.trimmingCharacters(in: .whitespacesAndNewlines) == merged }
+            preview.descendants(matching: .textView).allElementsBoundByIndex.contains { ($0.value as? String)?.trimmingCharacters(in: .whitespacesAndNewlines) == merged }
         }, object: nil)
         XCTAssertEqual(XCTWaiter.wait(for: [previewReady], timeout: 10), .completed)
         capture("mac-sync-history-preview", in: window)
@@ -98,7 +100,18 @@ import XCTest
             return notes.count == 1 && notes.first?["id"] as? String == originalID && notes.first?["plainText"] as? String == merged
         }
         XCTAssertEqual(try syncFixture()["conflicts"] as? Int, 0)
+        XCTAssertTrue(app.buttons["Готово"].waitForNonExistence(timeout: 5))
         capture("mac-sync-history-restored-one-note", in: window)
+        app.terminate()
+        app.launchEnvironment["DOOMPILE_TEST_APPEARANCE"] = "dark"
+        app.launch()
+        let restored = app.scrollViews["Лента заметок"].staticTexts[merged]
+        XCTAssertTrue(restored.waitForExistence(timeout: 10)); restored.click()
+        XCTAssertTrue(editor.waitForExistence(timeout: 10))
+        app.buttons["История версий"].click()
+        XCTAssertTrue(app.buttons["Восстановить версию"].waitForExistence(timeout: 10))
+        waitForLayout { preview.descendants(matching: .textView).allElementsBoundByIndex.contains { ($0.value as? String)?.trimmingCharacters(in: .whitespacesAndNewlines) == merged } }
+        capture("mac-sync-history-dark", in: app.windows.firstMatch)
     }
     private func launch(dark: Bool = false, global: Bool = false, attachment: Bool = false) -> XCUIApplication {
         continueAfterFailure = false

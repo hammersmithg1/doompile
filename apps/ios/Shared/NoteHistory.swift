@@ -171,6 +171,13 @@ private final class HistoryPreviewCoordinator: NSObject, WKScriptMessageHandler,
         media.note = note
         config.setURLSchemeHandler(media, forURLScheme: "doompile-media")
         let view = WKWebView(frame: .zero, configuration: config); webView = view; view.navigationDelegate = self
+        #if os(iOS)
+        view.accessibilityIdentifier = "history-preview"
+        view.accessibilityLabel = "Версия заметки"
+        #else
+        view.setAccessibilityIdentifier("history-preview")
+        view.setAccessibilityLabel("Версия заметки")
+        #endif
         if let folder = Bundle.main.resourceURL?.appendingPathComponent("EditorResources") { view.loadFileURL(folder.appendingPathComponent("editor.html"), allowingReadAccessTo: folder) }
         return view
     }
