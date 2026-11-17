@@ -55,7 +55,7 @@ permissions:
   id-token: write
 
 concurrency:
-  group: ios-${{ github.ref }}-${{ inputs.test_filter || 'full' }}
+  group: ios-${{ github.ref }}-${{ inputs.test_filter || 'full' }}-intel-review
   cancel-in-progress: ${{ github.event_name == 'pull_request' || (github.event_name == 'push' && vars.DOOMPILE_TESTFLIGHT_AUTO_UPLOAD != 'true') }}
 
 jobs:
@@ -63,7 +63,7 @@ jobs:
     env:
       DOOMPILE_PUBLIC_URL: ${{ vars.DOOMPILE_PUBLIC_URL }}
       DOOMPILE_PREVIOUS_PUBLIC_URL: ${{ vars.DOOMPILE_PREVIOUS_PUBLIC_URL }}
-    runs-on: macos-15
+    runs-on: macos-15-intel
     timeout-minutes: ${{ inputs.upload_testflight && 60 || 45 }}
     steps:
       - name: Require a trusted release run
