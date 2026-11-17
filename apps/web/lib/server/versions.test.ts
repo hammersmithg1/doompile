@@ -246,3 +246,25 @@ test("rolling back only the application image cannot hide an older writer's new 
     assert.equal(f.versions.changes(page.cursor).notes.length, 0);
   } finally { f.close(); }
 });
+
+test("direct writes and restores reconcile a rollback snapshot before assigning the next revision", () => {
+  for (const operation of ["sync", "migrate", "restore"] as const) {
+    const f = fixture();
+    try {
+      const initial = prepare(createNote({ plainText: "Base" }));
+      const saved = f.versions.sync(initial.id, [change(initial)]).note;
+      const { replica: _replica, ...legacy } = { ...saved, body: textToDocument("Rollback edit"), plainText: "Rollback edit", revision: 2 };
+      f.db.prepare("UPDATE notes SET payload=? WHERE id=?").run(JSON.stringify(legacy), saved.id);
+      if (operation === "sync") {
+        const edited = prepare({ ...saved, pinned: true });
+        assert.equal(f.versions.sync(saved.id, [change(edited, saved)]).note.revision, 4);
+      } else if (operation === "migrate") {
+        assert.equal(f.versions.migrate(saved.id, [{ id: randomUUID(), note: { ...legacy, urgent: true }, baseline: legacy, baseRevision: 2, origin: "ios" }]).note.revision, 4);
+      } else {
+        assert.equal(f.versions.restore(saved.id, 1, "web").note.revision, 4);
+      }
+      assert.equal(f.versions.authoredVersion(saved.id, 3)!.plainText, "Rollback edit");
+      assert.equal(f.versions.versions(saved.id)[0].revision, 4);
+    } finally { f.close(); }
+  }
+});

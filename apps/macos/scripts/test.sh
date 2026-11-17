@@ -7,12 +7,13 @@ cd "$repository_root"
 python3 -m unittest discover -s apps/macos/Tests -p '*test.py'
 mkdir -p "$test_root/Sources/DoompileMacSupport" "$test_root/Tests/DoompileMacSupportTests"
 cp apps/ios/Shared/*.swift apps/macos/Support/*.swift "$test_root/Sources/DoompileMacSupport/"
+cp -R apps/ios/Shared/Resources "$test_root/Sources/DoompileMacSupport/Resources"
 cp apps/macos/Tests/*.swift "$test_root/Tests/DoompileMacSupportTests/"
 cat > "$test_root/Package.swift" <<'SWIFT'
 // swift-tools-version: 5.9
 import PackageDescription
 let package = Package(name: "DoompileMacSupport", platforms: [.macOS(.v14)], targets: [
-    .target(name: "DoompileMacSupport"),
+    .target(name: "DoompileMacSupport", resources: [.copy("Resources")], linkerSettings: [.linkedLibrary("sqlite3")]),
     .testTarget(name: "DoompileMacSupportTests", dependencies: ["DoompileMacSupport"])
 ])
 SWIFT

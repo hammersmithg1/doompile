@@ -38,10 +38,10 @@ export class VersionStore {
       CREATE TABLE IF NOT EXISTS note_legacy_writes (note_id TEXT PRIMARY KEY);
       CREATE TRIGGER IF NOT EXISTS note_legacy_insert AFTER INSERT ON notes
         WHEN NOT EXISTS(SELECT 1 FROM note_replicas WHERE note_id=NEW.id)
-        BEGIN INSERT OR IGNORE INTO note_legacy_writes VALUES (NEW.id); END;
+        BEGIN INSERT INTO note_legacy_writes SELECT NEW.id WHERE NOT EXISTS(SELECT 1 FROM note_legacy_writes WHERE note_id=NEW.id); END;
       CREATE TRIGGER IF NOT EXISTS note_legacy_update AFTER UPDATE ON notes
         WHEN json_extract(NEW.payload,'$.revision') != COALESCE((SELECT MAX(revision) FROM note_versions WHERE note_id=NEW.id),-1)
-        BEGIN INSERT OR IGNORE INTO note_legacy_writes VALUES (NEW.id); END;
+        BEGIN INSERT INTO note_legacy_writes SELECT NEW.id WHERE NOT EXISTS(SELECT 1 FROM note_legacy_writes WHERE note_id=NEW.id); END;
       INSERT OR IGNORE INTO note_legacy_writes
         SELECT n.id FROM notes n LEFT JOIN note_replicas r ON r.note_id=n.id
         WHERE r.note_id IS NULL OR json_extract(n.payload,'$.revision') != (SELECT MAX(revision) FROM note_versions WHERE note_id=n.id);
@@ -172,7 +172,7 @@ export class VersionStore {
   sync(id: string, changes: NoteChange[], clientVector?: string) {
     return this.transaction(() => {
       let current = this.latest(id);
-      if (current) this.seed(current);
+      if (current) { this.seed(current); current = this.latest(id); }
       const doc = open(this.replica(id));
       const acknowledged: string[] = [];
       try {
@@ -212,7 +212,7 @@ export class VersionStore {
   migrate(id: string, snapshots: { id: string; note: Note; baseline?: Note; baseRevision: number; origin: ChangeOrigin }[]) {
     return this.transaction(() => {
       let current = this.latest(id);
-      if (current) this.seed(current);
+      if (current) { this.seed(current); current = this.latest(id); }
       const acknowledged: string[] = [];
       for (const snapshot of snapshots) {
         if (snapshot.note.id !== id) throw new SyncWriteError("The snapshot belongs to another note");
@@ -321,9 +321,10 @@ export class VersionStore {
   }
   restore(id: string, revision: number, origin: ChangeOrigin, view: "merged" | "authored" = "merged") {
     return this.transaction(() => {
-      const current = this.latest(id);
+      let current = this.latest(id);
       if (!current) throw new SyncWriteError("Note not found", 404);
       this.seed(current);
+      current = this.latest(id)!;
       const target = view === "authored" ? this.authoredVersion(id, revision) : this.version(id, revision);
       if (!target) throw new SyncWriteError("Version not found", 404);
       const doc = open(this.replica(id));

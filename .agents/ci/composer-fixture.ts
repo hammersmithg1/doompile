@@ -62,4 +62,4 @@ createServer(async (req, res) => {
     }
     json({}, 404);
   } catch (error) { res.writeHead(Number((error as { status?: number }).status ?? 500), { "Content-Type": "application/json" }); res.end(JSON.stringify({ error: "Fixture synchronization failed" })); }
-}).listen(18743, "127.0.0.1");
+}).listen(Number(process.env.DOOMPILE_COMPOSER_FIXTURE_PORT ?? 18743), "127.0.0.1");
