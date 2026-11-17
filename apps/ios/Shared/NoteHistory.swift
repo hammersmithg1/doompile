@@ -164,6 +164,9 @@ private final class HistoryPreviewCoordinator: NSObject, WKScriptMessageHandler,
     init(note: Note, theme: String, openLink: @escaping (URL) -> Void) { self.note = note; self.theme = theme; self.openLink = openLink }
     func render() {
         media.note = note
+        #if os(macOS)
+        if let webView { applyNativeTheme(webView) }
+        #endif
         guard ready, let data = try? JSONEncoder().encode(note.body), let json = String(data: data, encoding: .utf8) else { return }
         webView?.evaluateJavaScript("window.doompileEditor.setDocument(\(json)); window.doompileEditor.setEditable(false); window.doompileEditor.setTheme('\(theme)')")
     }
@@ -172,11 +175,16 @@ private final class HistoryPreviewCoordinator: NSObject, WKScriptMessageHandler,
     }
     func makeView() -> WKWebView {
         let config = WKWebViewConfiguration(); config.userContentController.add(self, name: "doompile")
+        #if os(macOS)
+        let startupTheme = "window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light'"
+        #else
+        let startupTheme = "'\(theme)'"
+        #endif
         let startup = """
         (() => {
           const apply = () => {
             if (!document.documentElement) return false;
-            document.documentElement.dataset.theme = '\(theme)';
+            document.documentElement.dataset.theme = \(startupTheme);
             return true;
           };
           if (!apply()) {
@@ -195,12 +203,19 @@ private final class HistoryPreviewCoordinator: NSObject, WKScriptMessageHandler,
         view.accessibilityIdentifier = "history-preview"
         view.accessibilityLabel = "Версия заметки"
         #else
+        applyNativeTheme(view)
         view.setAccessibilityIdentifier("history-preview")
         view.setAccessibilityLabel("Версия заметки")
         #endif
         if let folder = Bundle.main.resourceURL?.appendingPathComponent("EditorResources") { view.loadFileURL(folder.appendingPathComponent("editor.html"), allowingReadAccessTo: folder) }
         return view
     }
+    #if os(macOS)
+    private func applyNativeTheme(_ view: WKWebView) {
+        view.appearance = NSAppearance(named: theme == "dark" ? .darkAqua : .aqua)
+        view.underPageBackgroundColor = NSColor(DesignTokens.background)
+    }
+    #endif
     func webView(_ webView: WKWebView, decidePolicyFor navigationAction: WKNavigationAction, decisionHandler: @escaping (WKNavigationActionPolicy) -> Void) {
         guard let url = navigationAction.request.url else { decisionHandler(.cancel); return }
         if url.isFileURL { decisionHandler(.allow); return }
