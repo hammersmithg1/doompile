@@ -54,10 +54,13 @@ import XCTest
         capture("mac-sync-own-autosaves-editor", in: window)
         _ = try syncFixture("POST", path: "/api/review/offline")
         editor.typeText(" local"); expected += " local"
+        // The feed is refreshed only after the local journal commits. Kill
+        // after that observable acknowledgement, without a cloud response.
+        XCTAssertTrue(feed.staticTexts[expected].waitForExistence(timeout: 10), app.debugDescription)
         capture("mac-sync-offline-editor", in: window)
         app.terminate(); app.launch()
         let cached = app.scrollViews["Лента заметок"].staticTexts[expected]
-        XCTAssertTrue(cached.waitForExistence(timeout: 10)); cached.click()
+        XCTAssertTrue(cached.waitForExistence(timeout: 10), app.debugDescription); cached.click()
         XCTAssertTrue(editor.waitForExistence(timeout: 8)); editor.click()
         app.typeKey(.downArrow, modifierFlags: .command)
         capture("mac-sync-offline-after-restart", in: app.windows.firstMatch)

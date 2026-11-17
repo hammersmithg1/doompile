@@ -63,10 +63,9 @@ final class TouchUXTests: XCTestCase {
         XCTAssertTrue(row.waitForExistence(timeout: 10), app.debugDescription)
         row.tap()
         XCTAssertTrue(app.buttons["close-editor"].waitForExistence(timeout: 5))
-        let web = app.webViews.firstMatch
-        web.coordinate(withNormalizedOffset: CGVector(dx: 0.55, dy: 0.82)).tap()
-        let editor = app.webViews.textViews.firstMatch
-        XCTAssertTrue(editor.waitForExistence(timeout: 5))
+        let editor = app.webViews.textViews["Текст заметки"].firstMatch
+        XCTAssertTrue(editor.waitForExistence(timeout: 15))
+        editor.tap()
         var expected = "Sync review"
         for suffix in [" one", " two", " three"] {
             editor.typeText(suffix); expected += suffix
@@ -89,7 +88,7 @@ final class TouchUXTests: XCTestCase {
         }
         XCTAssertTrue(app.buttons["close-editor"].waitForExistence(timeout: 5))
         XCTAssertTrue(editor.waitForExistence(timeout: 15))
-        app.webViews.firstMatch.coordinate(withNormalizedOffset: CGVector(dx: 0.55, dy: 0.82)).tap()
+        editor.tap()
         screenshot("sync-offline-after-restart")
         _ = try syncFixture("POST", path: "/api/review/remote")
         _ = try syncFixture("POST", path: "/api/review/online")
