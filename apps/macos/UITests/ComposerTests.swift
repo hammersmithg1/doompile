@@ -30,8 +30,12 @@ import XCTest
         throw URLError(.timedOut)
     }
     func testOfflineEditsMergeAndHistoryRestoresSameNote() throws {
+        XCUIApplication().terminate()
         _ = try syncFixture("POST", path: "/api/review/sync")
-        defer { _ = try? syncFixture("POST", path: "/api/review/reset") }
+        defer {
+            XCUIApplication().terminate()
+            _ = try? syncFixture("POST", path: "/api/review/reset")
+        }
         let originalID = try XCTUnwrap(try syncFixture()["originalID"] as? String)
         let app = launch()
         let window = app.windows.firstMatch

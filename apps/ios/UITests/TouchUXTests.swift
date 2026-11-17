@@ -6,6 +6,7 @@ final class TouchUXTests: XCTestCase {
     override func setUpWithError() throws {
         continueAfterFailure = false
         app = XCUIApplication()
+        app.terminate()
         app.launchEnvironment["DOOMPILE_UI_TESTING"] = "1"
         // Every test owns a fresh database and cursor. Relaunches within that
         // test retain the directory, including the offline journal.
@@ -28,6 +29,7 @@ final class TouchUXTests: XCTestCase {
         XCTAssertTrue(app.textFields["quick-input"].waitForExistence(timeout: 10))
     }
     override func tearDownWithError() throws {
+        app.terminate()
         if syncReview { _ = try syncFixture("POST", path: "/api/review/reset") }
     }
     private final class SyncResponse: @unchecked Sendable {
@@ -49,13 +51,26 @@ final class TouchUXTests: XCTestCase {
     }
     private func waitForSync(_ predicate: ([String: Any]) -> Bool) throws -> [String: Any] {
         let deadline = Date().addingTimeInterval(20)
+        var lastNotes: [[String: Any]] = []
         repeat {
             let state = try syncFixture()
             if predicate(state) { return state }
+            lastNotes = (state["notes"] as? [[String: Any]] ?? []).map {
+                ["id": $0["id"] ?? "", "text": String(($0["plainText"] as? String ?? "").prefix(180))]
+            }
             Thread.sleep(forTimeInterval: 0.15)
         } while Date() < deadline
-        XCTFail("The isolated sync fixture did not reach the expected state")
+        XCTFail("The isolated sync fixture did not reach the expected state: \(lastNotes)")
         throw URLError(.timedOut)
+    }
+    private func editAtEnd(_ editor: XCUIElement) {
+        XCTAssertTrue(editor.waitForExistence(timeout: 15))
+        // Tapping the text's accessibility frame places the caret within the
+        // first line. The blank page gesture deliberately focuses its end.
+        app.webViews.firstMatch.coordinate(withNormalizedOffset: CGVector(dx: 0.55, dy: 0.82)).tap()
+        let proceed = app.buttons.matching(NSPredicate(format: "label IN %@", ["Continue", "Продолжить"])).firstMatch
+        if proceed.waitForExistence(timeout: 1) { proceed.tap() }
+        XCTAssertTrue(app.keyboards.firstMatch.waitForExistence(timeout: 5))
     }
     func testOfflineEditsMergeAndHistoryRestoresSameNote() throws {
         let originalID = try XCTUnwrap(try syncFixture()["originalID"] as? String)
@@ -64,8 +79,7 @@ final class TouchUXTests: XCTestCase {
         row.tap()
         XCTAssertTrue(app.buttons["close-editor"].waitForExistence(timeout: 5))
         let editor = app.webViews.textViews["Текст заметки"].firstMatch
-        XCTAssertTrue(editor.waitForExistence(timeout: 15))
-        editor.tap()
+        editAtEnd(editor)
         var expected = "Sync review"
         for suffix in [" one", " two", " three"] {
             editor.typeText(suffix); expected += suffix
@@ -87,8 +101,7 @@ final class TouchUXTests: XCTestCase {
             XCTAssertTrue(cached.waitForExistence(timeout: 10)); cached.tap()
         }
         XCTAssertTrue(app.buttons["close-editor"].waitForExistence(timeout: 5))
-        XCTAssertTrue(editor.waitForExistence(timeout: 15))
-        editor.tap()
+        editAtEnd(editor)
         screenshot("sync-offline-after-restart")
         _ = try syncFixture("POST", path: "/api/review/remote")
         _ = try syncFixture("POST", path: "/api/review/online")
