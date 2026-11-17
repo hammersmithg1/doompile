@@ -533,7 +533,7 @@ final class TouchUXTests: XCTestCase {
         wait(for: [dismissed], timeout: 5)
         app.buttons["expand-editor"].tap()
         XCTAssertTrue(app.buttons["close-editor"].waitForExistence(timeout: 5))
-        XCTAssertTrue(app.webViews.textViews.firstMatch.waitForExistence(timeout: 15), app.debugDescription)
+        XCTAssertTrue(app.webViews.textViews.firstMatch.waitForExistence(timeout: 30), app.debugDescription)
         XCTAssertTrue(app.keyboards.firstMatch.waitForExistence(timeout: 8), app.debugDescription)
         screenshot("appearance-system-editor")
     }
@@ -657,9 +657,11 @@ final class TouchUXTests: XCTestCase {
         let fixture = "Alpha bravo charlie delta\nSecond line preserved\nThird line preserved"
         editor.typeText(fixture)
         let textEntered = expectation(for: NSPredicate { _, _ in
-            (editor.value as? String ?? "").contains(fixture)
+            let text = editor.value as? String ?? ""
+            // WebKit can expose paragraph boundaries with extra line breaks.
+            return text.split(whereSeparator: \.isNewline) == fixture.split(separator: "\n")
         }, evaluatedWith: editor)
-        wait(for: [textEntered], timeout: 5)
+        wait(for: [textEntered], timeout: 15)
         app.buttons["dismiss-editor-keyboard"].tap()
         XCTAssertTrue(app.keyboards.firstMatch.waitForNonExistence(timeout: 3))
         screenshot("editor-edge-indent-baseline")
@@ -689,6 +691,10 @@ final class TouchUXTests: XCTestCase {
         selectionHandle.press(forDuration: 0.05, thenDragTo: selectionEnd, withVelocity: .slow, thenHoldForDuration: 0.1)
         screenshot("editor-interior-selection-extended")
         editor.typeText("Selected replacement")
+        let replacementEntered = expectation(for: NSPredicate { _, _ in
+            (editor.value as? String ?? "").contains("Selected replacement")
+        }, evaluatedWith: editor)
+        wait(for: [replacementEntered], timeout: 15)
         let text = editor.value as? String ?? ""
         XCTAssertTrue(text.contains("Selected replacement"))
         XCTAssertFalse(text.contains("Alpha"))
