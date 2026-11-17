@@ -2,11 +2,17 @@ import XCTest
 
 final class TouchUXTests: XCTestCase {
     private var app: XCUIApplication!
+    private var syncReview = false
     override func setUpWithError() throws {
         continueAfterFailure = false
         app = XCUIApplication()
         app.launchEnvironment["DOOMPILE_UI_TESTING"] = "1"
         if name.contains("testCompactComposerAttachmentAndVoiceStates") {
+            app.launchEnvironment["DOOMPILE_UI_COMPOSER_FIXTURE"] = "1"
+        }
+        syncReview = name.contains("testAutosavesContinueOnOneConflictBranch")
+        if syncReview {
+            _ = try syncFixture("POST", path: "/api/review/sync")
             app.launchEnvironment["DOOMPILE_UI_COMPOSER_FIXTURE"] = "1"
         }
         if name.contains("testQuickComposerGrowsToFifteenLinesThenScrolls") {
@@ -17,6 +23,89 @@ final class TouchUXTests: XCTestCase {
         }
         app.launch()
         XCTAssertTrue(app.textFields["quick-input"].waitForExistence(timeout: 10))
+    }
+    override func tearDownWithError() throws {
+        if syncReview { _ = try syncFixture("POST", path: "/api/review/reset") }
+    }
+    private final class SyncResponse: @unchecked Sendable {
+        let ready = DispatchSemaphore(value: 0)
+        var data: Data?
+        var status: Int?
+    }
+    private func syncFixture(_ method: String = "GET", path: String = "/api/review/sync") throws -> [String: Any] {
+        var request = URLRequest(url: URL(string: "http://127.0.0.1:18743" + path)!, timeoutInterval: 5)
+        request.httpMethod = method
+        let result = SyncResponse()
+        URLSession.shared.dataTask(with: request) { data, response, _ in
+            result.data = data; result.status = (response as? HTTPURLResponse)?.statusCode
+            result.ready.signal()
+        }.resume()
+        guard result.ready.wait(timeout: .now() + 6) == .success,
+              result.status == 200, let data = result.data else { throw URLError(.badServerResponse) }
+        return try XCTUnwrap(JSONSerialization.jsonObject(with: data) as? [String: Any])
+    }
+    private func waitForSync(_ predicate: ([String: Any]) -> Bool) throws -> [String: Any] {
+        let deadline = Date().addingTimeInterval(20)
+        repeat {
+            let state = try syncFixture()
+            if predicate(state) { return state }
+            Thread.sleep(forTimeInterval: 0.15)
+        } while Date() < deadline
+        XCTFail("The isolated sync fixture did not reach the expected state")
+        throw URLError(.timedOut)
+    }
+    func testAutosavesContinueOnOneConflictBranch() throws {
+        let originalID = try XCTUnwrap(try syncFixture()["originalID"] as? String)
+        let row = noteRow("Sync review")
+        XCTAssertTrue(row.waitForExistence(timeout: 10))
+        row.tap()
+        XCTAssertTrue(app.buttons["close-editor"].waitForExistence(timeout: 5))
+        let web = app.webViews.firstMatch
+        web.coordinate(withNormalizedOffset: CGVector(dx: 0.55, dy: 0.82)).tap()
+        let editor = app.webViews.textViews.firstMatch
+        XCTAssertTrue(editor.waitForExistence(timeout: 5))
+        var expected = "Sync review"
+        for suffix in [" one", " two", " three"] {
+            editor.typeText(suffix); expected += suffix
+            _ = try waitForSync { state in
+                let notes = state["notes"] as? [[String: Any]] ?? []
+                return notes.count == 1 && notes.first?["plainText"] as? String == expected
+            }
+        }
+        screenshot("sync-own-autosaves-editor")
+        XCTAssertEqual(try syncFixture()["conflicts"] as? Int, 0)
+        _ = try syncFixture("POST", path: "/api/review/remote")
+        editor.typeText(" local"); expected += " local"
+        _ = try waitForSync { $0["conflicts"] as? Int == 1 }
+        editor.typeText(" newer"); expected += " newer"
+        screenshot("sync-typing-during-conflict")
+        let state = try waitForSync { state in
+            let notes = state["notes"] as? [[String: Any]] ?? []
+            return notes.count == 2 && notes.contains { $0["id"] as? String != originalID && $0["plainText"] as? String == expected }
+        }
+        let notes = try XCTUnwrap(state["notes"] as? [[String: Any]])
+        let copyID = try XCTUnwrap(notes.first { $0["id"] as? String != originalID }?["id"] as? String)
+        XCTAssertEqual(notes.first { $0["id"] as? String == originalID }?["plainText"] as? String, "Remote branch preserved")
+        screenshot("sync-one-local-branch-editor")
+        editor.typeText(" final"); expected += " final"
+        _ = try waitForSync { state in
+            let notes = state["notes"] as? [[String: Any]] ?? []
+            return notes.count == 2 && notes.contains { $0["id"] as? String == copyID && $0["plainText"] as? String == expected }
+        }
+        XCTAssertEqual(try syncFixture()["conflicts"] as? Int, 1)
+        app.buttons["Скопировать ссылку на заметку"].tap()
+        app.buttons["close-editor"].tap()
+        XCTAssertTrue(noteRow(expected).waitForExistence(timeout: 5))
+        XCTAssertTrue(noteRow("Remote branch preserved").exists)
+        XCTAssertEqual(app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH 'note-'")).count, 2)
+        screenshot("sync-two-preserved-versions-feed")
+        noteRow("Remote branch preserved").tap()
+        XCTAssertTrue(app.buttons["close-editor"].waitForExistence(timeout: 5))
+        screenshot("sync-remote-branch-reopened")
+        app.buttons["close-editor"].tap()
+        noteRow(expected).tap()
+        XCTAssertTrue(app.buttons["close-editor"].waitForExistence(timeout: 5))
+        screenshot("sync-local-branch-reopened")
     }
     private func screenshot(_ name: String) {
         let image = XCTAttachment(screenshot: app.screenshot())
