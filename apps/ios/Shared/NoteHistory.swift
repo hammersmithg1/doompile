@@ -168,10 +168,19 @@ private final class HistoryPreviewCoordinator: NSObject, WKScriptMessageHandler,
         if let webView { applyNativeTheme(webView) }
         #endif
         guard ready, let data = try? JSONEncoder().encode(note.body), let json = String(data: data, encoding: .utf8) else { return }
-        webView?.evaluateJavaScript("window.doompileEditor.setDocument(\(json)); window.doompileEditor.setEditable(false); window.doompileEditor.setTheme('\(theme)')")
+        var script = "window.doompileEditor.setDocument(\(json)); window.doompileEditor.setEditable(false); window.doompileEditor.setTheme('\(theme)')"
+        #if os(macOS)
+        // Keep the native canvas visible until WebKit has painted the themed document.
+        script += "; requestAnimationFrame(() => requestAnimationFrame(() => window.webkit.messageHandlers.doompile.postMessage({ type: 'historyPainted' })))"
+        #endif
+        webView?.evaluateJavaScript(script)
     }
     func userContentController(_ userContentController: WKUserContentController, didReceive message: WKScriptMessage) {
-        if let payload = message.body as? [String: Any], payload["type"] as? String == "ready" { ready = true; render() }
+        guard let payload = message.body as? [String: Any], let type = payload["type"] as? String else { return }
+        if type == "ready" { ready = true; render() }
+        #if os(macOS)
+        if type == "historyPainted" { webView?.alphaValue = 1 }
+        #endif
     }
     func makeView() -> WKWebView {
         let config = WKWebViewConfiguration(); config.userContentController.add(self, name: "doompile")
@@ -203,6 +212,7 @@ private final class HistoryPreviewCoordinator: NSObject, WKScriptMessageHandler,
         view.accessibilityIdentifier = "history-preview"
         view.accessibilityLabel = "Версия заметки"
         #else
+        view.alphaValue = 0
         applyNativeTheme(view)
         view.setAccessibilityIdentifier("history-preview")
         view.setAccessibilityLabel("Версия заметки")
