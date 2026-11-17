@@ -60,22 +60,56 @@ def request(path, method='GET', data=None):
     if not path.startswith('/v1/'):
         raise RuntimeError('Only App Store Connect v1 endpoints are supported')
     body=json.dumps(data).encode() if data is not None else None
-    req=urllib.request.Request('https://api.appstoreconnect.apple.com'+path,data=body,method=method,
-        headers={'Authorization':'Bearer '+access_token(),'Content-Type':'application/json'})
-    try:
-        with urllib.request.urlopen(req,timeout=45) as response:
-            raw=response.read()
-        return json.loads(raw) if raw else {}
-    except urllib.error.HTTPError as error:
-        try:codes=[e.get('code','') for e in json.loads(error.read()).get('errors',[])]
-        except Exception:codes=[]
-        raise RuntimeError('App Store Connect HTTP '+str(error.code)+' '+','.join(codes)) from None
+    # Only reads are safe to repeat without an idempotency guarantee from Apple.
+    attempts=6 if method=='GET' else 1
+    for attempt in range(attempts):
+        req=urllib.request.Request('https://api.appstoreconnect.apple.com'+path,data=body,method=method,
+            headers={'Authorization':'Bearer '+access_token(),'Content-Type':'application/json'})
+        delay=min(2**(attempt+1),30)
+        try:
+            with urllib.request.urlopen(req,timeout=45) as response:
+                raw=response.read()
+            return json.loads(raw) if raw else {}
+        except urllib.error.HTTPError as error:
+            try:
+                with error:
+                    codes=[e.get('code','') for e in json.loads(error.read()).get('errors',[])]
+            except Exception:codes=[]
+            message='App Store Connect HTTP '+str(error.code)+' '+','.join(codes)
+            if error.code not in (429,500,502,503,504) or attempt+1==attempts:
+                raise RuntimeError(message) from None
+            retry_after=error.headers.get('Retry-After','') if error.headers else ''
+            if retry_after.isdecimal():
+                delay=min(60,max(delay,int(retry_after)))
+        except (urllib.error.URLError,TimeoutError):
+            message='App Store Connect network request failed'
+            if attempt+1==attempts:
+                raise RuntimeError(message) from None
+        print(message+'; retrying read in '+str(delay)+'s',file=sys.stderr,flush=True)
+        time.sleep(delay)
 
 
 def builds():
-    query=urllib.parse.urlencode({'filter[app]':APP_ID,'sort':'-uploadedDate','limit':100,
-        'fields[builds]':'version,uploadedDate,processingState','include':'preReleaseVersion'})
-    return request('/v1/builds?'+query)
+    # The app-scoped endpoint needs no relationship expansion or global filter.
+    # Follow every page: next_build must not reuse a number hidden on a later page.
+    query=urllib.parse.urlencode({'limit':200,'fields[builds]':'version,uploadedDate,processingState'})
+    path='/v1/apps/'+APP_ID+'/builds?'+query
+    records=[]
+    visited=set()
+    while path:
+        if path in visited:
+            raise RuntimeError('App Store Connect repeated a builds page')
+        visited.add(path)
+        page=request(path)
+        records.extend(page.get('data',[]))
+        next_url=page.get('links',{}).get('next')
+        path=None
+        if next_url:
+            link=urllib.parse.urlsplit(next_url)
+            if link.scheme!='https' or link.netloc!='api.appstoreconnect.apple.com' or not link.path.startswith('/v1/'):
+                raise RuntimeError('Unexpected App Store Connect pagination URL')
+            path=link.path+('?' + link.query if link.query else '')
+    return {'data':records}
 
 
 def next_build():
