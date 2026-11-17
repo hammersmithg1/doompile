@@ -60,7 +60,7 @@ final class TouchUXTests: XCTestCase {
     func testOfflineEditsMergeAndHistoryRestoresSameNote() throws {
         let originalID = try XCTUnwrap(try syncFixture()["originalID"] as? String)
         let row = noteRow("Sync review")
-        XCTAssertTrue(row.waitForExistence(timeout: 10))
+        XCTAssertTrue(row.waitForExistence(timeout: 10), app.debugDescription)
         row.tap()
         XCTAssertTrue(app.buttons["close-editor"].waitForExistence(timeout: 5))
         let web = app.webViews.firstMatch

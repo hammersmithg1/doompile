@@ -42,10 +42,12 @@ enum Connection {
         let environment = ProcessInfo.processInfo.environment
         #if os(macOS)
         guard environment["DOOMPILE_MAC_UI_TESTING"] == "1", let path = environment["DOOMPILE_MAC_UI_ROOT"], !path.isEmpty else { return nil }
+        return URL(fileURLWithPath: path, isDirectory: true)
         #else
         guard environment["DOOMPILE_UI_TESTING"] == "1", let path = environment["DOOMPILE_UI_ROOT"], !path.isEmpty else { return nil }
+        // The UI runner and the application have separate iOS sandboxes.
+        return FileManager.default.temporaryDirectory.appendingPathComponent("doompile-review-" + URL(fileURLWithPath: path).lastPathComponent, isDirectory: true)
         #endif
-        return URL(fileURLWithPath: path, isDirectory: true)
     }()
     #endif
     static var defaults: UserDefaults {
