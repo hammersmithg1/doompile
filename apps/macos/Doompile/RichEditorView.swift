@@ -116,9 +116,9 @@ struct MacRichEditorView: NSViewRepresentable {
               const report = (kind, extra = {}) => {
                 const selection = window.getSelection();
                 let state; try { state = api?.getState?.(); } catch {}
-                window.webkit.messageHandlers.doompile.postMessage({type:'reviewInput', kind, time:performance.now(),
+                window.webkit.messageHandlers.doompile.postMessage(JSON.parse(JSON.stringify({type:'reviewInput', kind, time:performance.now(),
                   dom: document.querySelector('.tiptap')?.textContent ?? '', model: state?.plainText ?? '', replica:state?.note?.replica,
-                  anchor:selection?.anchorOffset, focus:selection?.focusOffset, ...extra});
+                  anchor:selection?.anchorOffset, focus:selection?.focusOffset, ...extra})));
               };
               Object.defineProperty(window, 'doompileEditor', { configurable:true, get:() => api, set:value => {
                 api = value; const setNote = value.setNote;
