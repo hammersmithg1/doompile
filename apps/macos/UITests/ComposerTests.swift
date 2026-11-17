@@ -49,7 +49,7 @@ import XCTest
         app.typeKey(.downArrow, modifierFlags: .command)
         var expected = "Sync review"
         for suffix in [" one", " two", " three"] {
-            editor.typeText(suffix); expected += suffix
+            for key in suffix { app.typeKey(String(key), modifierFlags: []) }; expected += suffix
             _ = try waitForSync { state in
                 let notes = state["notes"] as? [[String: Any]] ?? []
                 return notes.count == 1 && notes.first?["plainText"] as? String == expected
@@ -57,7 +57,7 @@ import XCTest
         }
         capture("mac-sync-own-autosaves-editor", in: window)
         _ = try syncFixture("POST", path: "/api/review/offline")
-        editor.typeText(" local"); expected += " local"
+        for key in " local" { app.typeKey(String(key), modifierFlags: []) }; expected += " local"
         // The feed is refreshed only after the local journal commits. Kill
         // after that observable acknowledgement, without a cloud response.
         XCTAssertTrue(feed.staticTexts[expected].waitForExistence(timeout: 10), app.debugDescription)
@@ -70,7 +70,7 @@ import XCTest
         capture("mac-sync-offline-after-restart", in: app.windows.firstMatch)
         _ = try syncFixture("POST", path: "/api/review/remote")
         _ = try syncFixture("POST", path: "/api/review/online")
-        editor.typeText(" newer"); expected += " newer"
+        for key in " newer" { app.typeKey(String(key), modifierFlags: []) }; expected += " newer"
         let merged = "Remote " + expected
         _ = try waitForSync { state in
             let notes = state["notes"] as? [[String: Any]] ?? []
@@ -80,7 +80,7 @@ import XCTest
         capture("mac-sync-merged-one-note", in: window)
         let marker = try syncFixture("POST", path: "/api/review/marker")
         let markerRevision = try XCTUnwrap(marker["revision"] as? Int)
-        editor.typeText(" final")
+        for key in " final" { app.typeKey(String(key), modifierFlags: []) }
         _ = try waitForSync { state in
             let notes = state["notes"] as? [[String: Any]] ?? []
             return notes.count == 1 && (notes.first?["plainText"] as? String)?.contains(" final") == true
