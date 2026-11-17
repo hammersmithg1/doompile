@@ -144,6 +144,18 @@ import XCTest
         add(attachment)
     }
 
+    private func reviewExpandedDraft(_ name: String, in scope: XCUIElement, canSend: Bool = true) {
+        let expand = element(scope, "quick-composer-expand")
+        let collapse = element(scope, "quick-composer-collapse")
+        let send = element(scope, "quick-composer-send")
+        expand.click()
+        XCTAssertTrue(collapse.waitForExistence(timeout: 8))
+        wait(canSend ? "enabled == true" : "enabled == false", for: send)
+        capture(name, in: scope)
+        collapse.click()
+        XCTAssertTrue(expand.waitForExistence(timeout: 8))
+    }
+
     private func wait(_ format: String, for element: XCUIElement, timeout: TimeInterval = 8) {
         let condition = XCTNSPredicateExpectation(predicate: NSPredicate(format: format), object: element)
         XCTAssertEqual(XCTWaiter.wait(for: [condition], timeout: timeout), .completed, format)
@@ -276,6 +288,7 @@ import XCTest
         XCTAssertLessThan(input.frame.midX, expand.frame.midX)
         XCTAssertLessThan(expand.frame.midX, send.frame.midX)
         capture("mac-main-attachment-draft-light", in: app.windows.firstMatch)
+        reviewExpandedDraft("mac-main-attachment-expanded-light", in: app.windows.firstMatch)
         send.click()
 
         let transfer = element(app, "attachment-transfer-state")
@@ -292,38 +305,38 @@ import XCTest
     }
 
     func testGlobalComposerText() {
-        let app = launch(dark: true, global: true)
+        let app = launch(global: true)
         let panel = element(app, "quick-capture-panel")
         XCTAssertTrue(panel.waitForExistence(timeout: 8))
         let mic = element(panel, "quick-composer-mic")
         let send = element(panel, "quick-composer-send")
         XCTAssertTrue(mic.waitForExistence(timeout: 8))
-        capture("mac-global-idle-dark", in: panel)
+        capture("mac-global-idle-light", in: panel)
 
         mic.click()
         let stop = element(panel, "quick-composer-stop")
         XCTAssertTrue(stop.waitForExistence(timeout: 8))
-        capture("mac-global-recording-dark", in: panel)
+        capture("mac-global-recording-light", in: panel)
         let expand = element(panel, "quick-composer-expand")
         let collapse = element(panel, "quick-composer-collapse")
         expand.click()
         XCTAssertTrue(collapse.waitForExistence(timeout: 8))
         wait("enabled == true", for: send)
-        capture("mac-global-recording-expanded-dark", in: panel)
+        capture("mac-global-recording-expanded-light", in: panel)
         collapse.click()
         XCTAssertTrue(stop.waitForExistence(timeout: 8))
-        capture("mac-global-recording-collapsed-dark", in: panel)
+        capture("mac-global-recording-collapsed-light", in: panel)
         stop.click()
         wait("exists == false", for: stop)
         XCTAssertTrue(element(panel, "quick-composer-attachment").exists)
-        capture("mac-global-recorded-draft-dark", in: panel)
+        capture("mac-global-recorded-draft-light", in: panel)
 
         let input = element(panel, "quick-composer-input")
         input.click()
         input.typeText("Quick review draft")
         XCTAssertTrue(send.waitForExistence(timeout: 8))
         XCTAssertFalse(mic.exists)
-        capture("mac-global-typed-dark", in: panel)
+        capture("mac-global-typed-light", in: panel)
         send.click()
         wait("exists == false", for: panel)
         XCTAssertTrue(app.staticTexts["Quick review draft"].waitForExistence(timeout: 8))
@@ -335,6 +348,7 @@ import XCTest
         let mic = element(app, "quick-composer-mic")
         XCTAssertTrue(mic.waitForExistence(timeout: 8))
         capture("mac-main-idle-dark", in: window)
+        reviewExpandedDraft("mac-main-empty-expanded-dark", in: window, canSend: false)
         let send = element(app, "quick-composer-send")
         let stop = element(app, "quick-composer-stop")
 
@@ -342,6 +356,8 @@ import XCTest
         XCTAssertTrue(stop.waitForExistence(timeout: 8))
         XCTAssertTrue(send.exists)
         capture("mac-main-recording-dark", in: window)
+        reviewExpandedDraft("mac-main-recording-expanded-dark", in: window)
+        XCTAssertTrue(stop.waitForExistence(timeout: 8))
         stop.click()
         wait("exists == false", for: stop)
         XCTAssertTrue(send.exists)

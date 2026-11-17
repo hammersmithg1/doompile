@@ -3,7 +3,7 @@ import path from 'node:path';
 const config: NextConfig = {
   // Personal agent resources live under .agents; keep generated instructions out of the app.
   agentRules: false,
-  devIndicators: process.env.DOOMPILE_MOBILE_TEST ? false : undefined,
+  devIndicators: process.env.DOOMPILE_MOBILE_TEST || process.env.DOOMPILE_EDITOR_TEST ? false : undefined,
   output: 'standalone',
   // Keep native clients on the origin API while exposing the web entry at /doompile.
   async rewrites() { return [{ source: '/doompile', destination: '/' }]; },
